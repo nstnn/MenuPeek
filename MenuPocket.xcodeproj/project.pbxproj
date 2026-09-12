@@ -29,6 +29,24 @@
 			"path" = "MenuPocketPanel.swift";
 			"sourceTree" = "<group>";
 		};
+		"000000000000000000000028" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "AppDelegate.swift";
+			"sourceTree" = "<group>";
+		};
+		"000000000000000000000029" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "SettingsView.swift";
+			"sourceTree" = "<group>";
+		};
+		"00000000000000000000002A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "SettingsWindowController.swift";
+			"sourceTree" = "<group>";
+		};
 		"000000000000000000000007" = {
 			"isa" = "PBXFileReference";
 			"explicitFileType" = "wrapper.application";
@@ -45,7 +63,7 @@
 		};
 		"000000000000000000000009" = {
 			"isa" = "PBXGroup";
-			"children" = ("000000000000000000000004", "000000000000000000000005",);
+			"children" = ("000000000000000000000004", "000000000000000000000005", "000000000000000000000028",);
 			"path" = "App";
 			"sourceTree" = "<group>";
 		};
@@ -57,7 +75,7 @@
 		};
 		"00000000000000000000000B" = {
 			"isa" = "PBXGroup";
-			"children" = ();
+			"children" = ("000000000000000000000029", "00000000000000000000002A",);
 			"path" = "Settings";
 			"sourceTree" = "<group>";
 		};
@@ -122,10 +140,22 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "000000000000000000000026";
 		};
+		"00000000000000000000002B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000028";
+		};
+		"00000000000000000000002C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000029";
+		};
+		"00000000000000000000002D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000002A";
+		};
 		"000000000000000000000016" = {
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
-			"files" = ("000000000000000000000015", "000000000000000000000027",);
+			"files" = ("000000000000000000000015", "000000000000000000000027", "00000000000000000000002B", "00000000000000000000002C", "00000000000000000000002D",);
 			"runOnlyForDeploymentPostprocessing" = 0;
 		};
 		"000000000000000000000017" = {

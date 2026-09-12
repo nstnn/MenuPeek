@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct MenuPocketPanel: View {
+    let onOpenSettings: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("MenuPocket")
@@ -9,10 +11,15 @@ struct MenuPocketPanel: View {
 
             Divider()
 
-            Button("Quit", role: .destructive) {
-                NSApplication.shared.terminate(nil)
+            HStack {
+                Button("Cài đặt…", action: onOpenSettings)
+
+                Spacer()
+
+                Button("Thoát", role: .destructive) {
+                    NSApplication.shared.terminate(nil)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(16)
         .frame(width: 240)
