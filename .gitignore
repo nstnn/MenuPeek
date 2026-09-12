@@ -1,0 +1,19 @@
+# Build products and local Xcode state
+/build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+.DS_Store
+
+# Personal signing material and local overrides
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.local.xcconfig
+
+plan/
+
+.kiro/
