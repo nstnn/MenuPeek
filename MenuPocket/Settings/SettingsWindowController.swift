@@ -6,8 +6,8 @@ final class SettingsWindowController: NSWindowController {
     static let initialContentSize = NSSize(width: 560, height: 440)
     static let minimumWindowSize = NSSize(width: 500, height: 380)
 
-    init() {
-        let hostingController = NSHostingController(rootView: SettingsView())
+    init(model: AppModel) {
+        let hostingController = NSHostingController(rootView: SettingsView(model: model))
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.initialContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],

@@ -7,7 +7,7 @@ struct MenuPocketApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuPocketPanel {
+            MenuPocketPanel(model: appDelegate.model) {
                 appDelegate.showSettings()
             }
         } label: {

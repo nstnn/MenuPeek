@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import MenuPocket
 
@@ -15,13 +16,23 @@ final class AppConfigurationTests: XCTestCase {
 
     @MainActor
     func testAppDelegateReusesItsSettingsWindow() throws {
-        let delegate = AppDelegate()
+        let suiteName = "local.menupocket.tests.AppConfigurationTests.\(UUID().uuidString)"
+        let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(store: PreferencesStore(userDefaults: userDefaults))
+        let delegate = AppDelegate(model: model)
 
         XCTAssertNil(delegate.settingsWindowController)
         delegate.showSettings()
 
         let controller = try XCTUnwrap(delegate.settingsWindowController)
         let window = try XCTUnwrap(controller.window)
+        let hostingController = try XCTUnwrap(
+            window.contentViewController as? NSHostingController<SettingsView>
+        )
+
+        XCTAssertTrue(delegate.model === model)
+        XCTAssertTrue(hostingController.rootView.model === model)
 
         XCTAssertEqual(window.contentView?.frame.size, SettingsWindowController.initialContentSize)
         XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
