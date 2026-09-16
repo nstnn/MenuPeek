@@ -2,7 +2,17 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model: AppModel
     private(set) var settingsWindowController: SettingsWindowController?
+
+    init(model: AppModel) {
+        self.model = model
+        super.init()
+    }
+
+    override convenience init() {
+        self.init(model: AppModel())
+    }
 
     func showSettings() {
         let controller = settingsWindowController ?? makeSettingsWindowController()
@@ -22,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeSettingsWindowController() -> SettingsWindowController {
-        let controller = SettingsWindowController()
+        let controller = SettingsWindowController(model: model)
         settingsWindowController = controller
         return controller
     }

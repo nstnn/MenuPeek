@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct MenuPocketPanel: View {
+    let model: AppModel
     let onOpenSettings: () -> Void
 
     var body: some View {
