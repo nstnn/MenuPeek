@@ -10,6 +10,24 @@ struct MenuPocketPanel: View {
             Text("MenuPocket")
                 .font(.headline)
 
+            if model.enabledModulesInOrder.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Chưa bật nội dung nào.")
+                        .fontWeight(.medium)
+                    Text("Mở Cài đặt để chọn nội dung hiển thị.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(model.enabledModulesInOrder) { module in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(module.displayName, systemImage: module.systemImageName)
+                            .fontWeight(.medium)
+                        Text("Dữ liệu demo sẽ xuất hiện ở đây.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Divider()
 
             HStack {
@@ -23,6 +41,6 @@ struct MenuPocketPanel: View {
             }
         }
         .padding(16)
-        .frame(width: 240)
+        .frame(width: 360)
     }
 }

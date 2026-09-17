@@ -55,17 +55,24 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
-    func testDisablingEveryModuleLeavesNoVisibleIDs() {
+    func testDisablingAndReenablingModulesChangesOrderedPanelMembership() {
         let store = FakePreferencesStore()
         let model = AppModel(store: store)
 
+        XCTAssertEqual(model.modulesInOrder.map(\.id), [ModuleCatalog.tasksID, ModuleCatalog.statusID])
+        XCTAssertEqual(model.enabledModulesInOrder.map(\.id), [ModuleCatalog.tasksID, ModuleCatalog.statusID])
         XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
+        XCTAssertEqual(model.enabledModulesInOrder.map(\.id), [ModuleCatalog.statusID])
         XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.statusID, enabled: false))
 
         XCTAssertTrue(model.preferences.enabledModuleIDs.isEmpty)
         XCTAssertTrue(model.enabledModuleIDsInOrder.isEmpty)
+        XCTAssertTrue(model.enabledModulesInOrder.isEmpty)
         XCTAssertNil(model.preferences.pinnedModuleID)
-        XCTAssertEqual(store.savedPreferences.count, 2)
+
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.statusID, enabled: true))
+        XCTAssertEqual(model.enabledModulesInOrder.map(\.id), [ModuleCatalog.statusID])
+        XCTAssertEqual(store.savedPreferences.count, 3)
     }
 
     @MainActor
