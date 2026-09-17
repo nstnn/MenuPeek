@@ -4,9 +4,14 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel
     private(set) var settingsWindowController: SettingsWindowController?
+    private let onboardingStore: any OnboardingStoring
 
-    init(model: AppModel) {
+    init(
+        model: AppModel,
+        onboardingStore: any OnboardingStoring = UserDefaultsOnboardingStore()
+    ) {
         self.model = model
+        self.onboardingStore = onboardingStore
         super.init()
     }
 
@@ -14,8 +19,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.init(model: AppModel())
     }
 
-    func showSettings() {
-        let controller = settingsWindowController ?? makeSettingsWindowController()
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        openSettingsOnFirstLaunchIfNeeded { tab in
+            showSettings(initialTab: tab)
+        }
+    }
+
+    // The decision is independent of preference recovery and of window visibility.
+    func openSettingsOnFirstLaunchIfNeeded(present: (SettingsTab) -> Void) {
+        guard !onboardingStore.hasCompletedOnboarding else { return }
+        present(.general)
+        onboardingStore.markOnboardingCompleted()
+    }
+
+    func showSettings(initialTab: SettingsTab = .content) {
+        let controller = settingsWindowController ?? makeSettingsWindowController(initialTab: initialTab)
         controller.showSettings()
     }
 
@@ -31,8 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    private func makeSettingsWindowController() -> SettingsWindowController {
-        let controller = SettingsWindowController(model: model)
+    private func makeSettingsWindowController(initialTab: SettingsTab) -> SettingsWindowController {
+        let controller = SettingsWindowController(model: model, initialTab: initialTab)
         settingsWindowController = controller
         return controller
     }

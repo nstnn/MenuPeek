@@ -190,6 +190,29 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.setPinnedModule(nil))
         XCTAssertEqual(store.savedPreferences.count, 1)
     }
+
+    @MainActor
+    func testIsolatedCorruptAndNewerSchemaWarningsKeepTheirOwnWritePolicies() throws {
+        let suiteName = "local.menupocket.tests.SettingsWarnings.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(Data("corrupt".utf8), forKey: PreferencesStore.storageKey)
+        let recovered = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertEqual(recovered.preferenceWarning, .corruptData)
+        XCTAssertTrue(recovered.isPreferenceEditingAllowed)
+        XCTAssertTrue(recovered.preferenceWarning?.message.contains("cài đặt mặc định") == true)
+
+        let futureData = Data("{\"schemaVersion\":2,\"futureOnly\":true}".utf8)
+        defaults.set(futureData, forKey: PreferencesStore.storageKey)
+        let protected = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertEqual(protected.preferenceWarning,
+                       .newerSchema(storedVersion: 2, supportedVersion: 1))
+        XCTAssertFalse(protected.isPreferenceEditingAllowed)
+        XCTAssertTrue(protected.preferenceWarning?.message.contains("tạm khóa trong phiên này") == true)
+        XCTAssertFalse(protected.setPinnedModule(nil))
+        XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), futureData)
+    }
 }
 
 private final class FakePreferencesStore: PreferencesStoring {

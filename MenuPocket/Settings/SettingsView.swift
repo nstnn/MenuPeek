@@ -1,31 +1,60 @@
 import SwiftUI
 
+enum SettingsTab: Hashable {
+    case content
+    case general
+    case demo
+}
+
 struct SettingsView: View {
+    static let demoExplanation =
+        "Ứng dụng đang dùng dữ liệu demo. Bạn có thể chọn nội dung thật ở phiên bản sau."
+
     let model: AppModel
+    let appVersion: String
+    @State private var selectedTab: SettingsTab
+
+    init(model: AppModel, initialTab: SettingsTab = .content, bundle: Bundle = .main) {
+        self.model = model
+        appVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
-        TabView {
-            ContentSettingsView(model: model)
-            .tabItem {
-                Label("Nội dung", systemImage: "square.grid.2x2")
+        VStack(spacing: 12) {
+            if let warning = model.preferenceWarning {
+                Label(warning.message, systemImage: "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("preferencesWarning")
             }
 
-            SettingsPlaceholder(
-                systemImage: "gearshape",
-                title: "Chung",
-                message: "Các tùy chọn chung sẽ xuất hiện ở đây."
-            )
-            .tabItem {
-                Label("Chung", systemImage: "gearshape")
+            if let saveError = model.preferenceSaveError {
+                Label(saveError, systemImage: "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            SettingsPlaceholder(
-                systemImage: "testtube.2",
-                title: "Demo",
-                message: "Các kịch bản dữ liệu demo sẽ xuất hiện ở đây."
-            )
-            .tabItem {
-                Label("Demo", systemImage: "testtube.2")
+            TabView(selection: $selectedTab) {
+                ContentSettingsView(model: model)
+                    .tabItem {
+                        Label("Nội dung", systemImage: "square.grid.2x2")
+                    }
+                    .tag(SettingsTab.content)
+
+                GeneralSettingsView(version: appVersion)
+                    .tabItem {
+                        Label("Chung", systemImage: "gearshape")
+                    }
+                    .tag(SettingsTab.general)
+
+                SettingsPlaceholder(
+                    systemImage: "testtube.2",
+                    title: "Demo",
+                    message: "Các kịch bản dữ liệu demo sẽ xuất hiện ở đây."
+                )
+                .tabItem {
+                    Label("Demo", systemImage: "testtube.2")
+                }
+                .tag(SettingsTab.demo)
             }
         }
         .padding(20)
@@ -81,14 +110,23 @@ private struct ContentSettingsView: View {
                 }
             }
             .disabled(!model.isPreferenceEditingAllowed)
+        }
+    }
+}
 
-            if let warning = model.preferenceWarning {
-                Text(warning.message)
-                    .foregroundStyle(.secondary)
+private struct GeneralSettingsView: View {
+    let version: String
+
+    var body: some View {
+        Form {
+            Section("Ứng dụng") {
+                LabeledContent("Tên", value: "MenuPocket")
+                LabeledContent("Phiên bản", value: version)
             }
 
-            if let saveError = model.preferenceSaveError {
-                Text(saveError)
+            Section("Dữ liệu demo") {
+                Text(SettingsView.demoExplanation)
+                Text("Dữ liệu minh họa được xử lý cục bộ trên máy này; ứng dụng không kết nối dịch vụ bên ngoài.")
                     .foregroundStyle(.secondary)
             }
         }

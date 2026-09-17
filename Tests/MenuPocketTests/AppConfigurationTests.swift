@@ -33,6 +33,10 @@ final class AppConfigurationTests: XCTestCase {
 
         XCTAssertTrue(delegate.model === model)
         XCTAssertTrue(hostingController.rootView.model === model)
+        XCTAssertEqual(
+            hostingController.rootView.appVersion,
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        )
 
         XCTAssertEqual(window.contentView?.frame.size, SettingsWindowController.initialContentSize)
         XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
@@ -51,5 +55,58 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(window.isVisible)
 
         window.close()
+    }
+
+    @MainActor
+    func testFirstLaunchUsesSeparatePersistentMarkerAndOpensGeneralOnlyOnce() throws {
+        let suiteName = "local.menupocket.tests.Onboarding.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
+        let first = AppDelegate(
+            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
+            onboardingStore: onboarding
+        )
+        var shownTabs: [SettingsTab] = []
+
+        XCTAssertNotNil(defaults.data(forKey: PreferencesStore.storageKey))
+        XCTAssertFalse(onboarding.hasCompletedOnboarding)
+        first.openSettingsOnFirstLaunchIfNeeded { shownTabs.append($0) }
+        XCTAssertEqual(shownTabs, [.general])
+        XCTAssertTrue(onboarding.hasCompletedOnboarding)
+
+        let second = AppDelegate(
+            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
+            onboardingStore: UserDefaultsOnboardingStore(userDefaults: defaults)
+        )
+        second.openSettingsOnFirstLaunchIfNeeded { shownTabs.append($0) }
+        XCTAssertEqual(shownTabs, [.general])
+        XCTAssertNil(second.settingsWindowController)
+        XCTAssertEqual(SettingsView.demoExplanation,
+                       "Ứng dụng đang dùng dữ liệu demo. Bạn có thể chọn nội dung thật ở phiên bản sau.")
+    }
+
+    @MainActor
+    func testCorruptPreferencesDoNotResetCompletedOnboarding() throws {
+        let suiteName = "local.menupocket.tests.OnboardingRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
+        onboarding.markOnboardingCompleted()
+        let corruptData = Data("invalid".utf8)
+        defaults.set(corruptData, forKey: PreferencesStore.storageKey)
+
+        let delegate = AppDelegate(
+            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
+            onboardingStore: onboarding
+        )
+        var presentations = 0
+        delegate.openSettingsOnFirstLaunchIfNeeded { _ in presentations += 1 }
+
+        XCTAssertEqual(presentations, 0)
+        XCTAssertEqual(delegate.model.preferenceWarning, .corruptData)
+        XCTAssertTrue(delegate.model.isPreferenceEditingAllowed)
+        XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), corruptData)
     }
 }

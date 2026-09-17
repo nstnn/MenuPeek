@@ -10,7 +10,7 @@ enum PreferencesWarning: Equatable, Sendable {
         case .corruptData:
             "Không thể đọc cài đặt đã lưu. MenuPocket đang dùng cài đặt mặc định; các cài đặt khác không bị thay đổi."
         case let .newerSchema(storedVersion, supportedVersion):
-            "Định dạng cài đặt phiên bản \(storedVersion) mới hơn mức ứng dụng này hỗ trợ (\(supportedVersion)). Hãy dùng phiên bản MenuPocket tương thích để thay đổi cài đặt; dữ liệu đã lưu được giữ nguyên."
+            "Định dạng cài đặt phiên bản \(storedVersion) mới hơn mức ứng dụng này hỗ trợ (\(supportedVersion)). Các tùy chọn nội dung bị tạm khóa trong phiên này. Hãy dùng phiên bản MenuPocket tương thích để thay đổi cài đặt; dữ liệu đã lưu được giữ nguyên."
         }
     }
 }
