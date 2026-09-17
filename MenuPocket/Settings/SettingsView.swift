@@ -5,11 +5,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            SettingsPlaceholder(
-                systemImage: "square.grid.2x2",
-                title: "Nội dung",
-                message: "Các tùy chọn nội dung sẽ xuất hiện ở đây."
-            )
+            ContentSettingsView(model: model)
             .tabItem {
                 Label("Nội dung", systemImage: "square.grid.2x2")
             }
@@ -34,6 +30,37 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ContentSettingsView: View {
+    let model: AppModel
+
+    var body: some View {
+        Form {
+            Section("Nội dung hiển thị") {
+                ForEach(model.modulesInOrder) { module in
+                    Toggle(isOn: Binding(
+                        get: { model.preferences.enabledModuleIDs.contains(module.id) },
+                        set: { model.setModuleEnabled(module.id, enabled: $0) }
+                    )) {
+                        Label(module.displayName, systemImage: module.systemImageName)
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(!model.isPreferenceEditingAllowed)
+                }
+            }
+
+            if let warning = model.preferenceWarning {
+                Text(warning.message)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let saveError = model.preferenceSaveError {
+                Text(saveError)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

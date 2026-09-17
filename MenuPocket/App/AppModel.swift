@@ -12,8 +12,16 @@ final class AppModel {
     @ObservationIgnored private let store: any PreferencesStoring
     @ObservationIgnored private let descriptorsByID: [ModuleDescriptor.ID: ModuleDescriptor]
 
+    var modulesInOrder: [ModuleDescriptor] {
+        preferences.moduleOrder.compactMap { descriptorsByID[$0] }
+    }
+
+    var enabledModulesInOrder: [ModuleDescriptor] {
+        modulesInOrder.filter { preferences.enabledModuleIDs.contains($0.id) }
+    }
+
     var enabledModuleIDsInOrder: [ModuleDescriptor.ID] {
-        preferences.moduleOrder.filter { preferences.enabledModuleIDs.contains($0) }
+        enabledModulesInOrder.map(\.id)
     }
 
     init(
