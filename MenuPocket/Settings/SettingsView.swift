@@ -40,16 +40,47 @@ private struct ContentSettingsView: View {
         Form {
             Section("Nội dung hiển thị") {
                 ForEach(model.modulesInOrder) { module in
-                    Toggle(isOn: Binding(
-                        get: { model.preferences.enabledModuleIDs.contains(module.id) },
-                        set: { model.setModuleEnabled(module.id, enabled: $0) }
-                    )) {
-                        Label(module.displayName, systemImage: module.systemImageName)
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { model.preferences.enabledModuleIDs.contains(module.id) },
+                            set: { model.setModuleEnabled(module.id, enabled: $0) }
+                        )) {
+                            Label(module.displayName, systemImage: module.systemImageName)
+                        }
+                        .toggleStyle(.switch)
+
+                        Button("Lên") { model.moveModuleUp(module.id) }
+                            .disabled(model.modulesInOrder.first?.id == module.id)
+                            .accessibilityLabel("Lên \(module.displayName)")
+
+                        Button("Xuống") { model.moveModuleDown(module.id) }
+                            .disabled(model.modulesInOrder.last?.id == module.id)
+                            .accessibilityLabel("Xuống \(module.displayName)")
                     }
-                    .toggleStyle(.switch)
-                    .disabled(!model.isPreferenceEditingAllowed)
                 }
             }
+            .disabled(!model.isPreferenceEditingAllowed)
+
+            Section("Thanh menu") {
+                Picker("Mục ghim", selection: Binding<ModuleDescriptor.ID?>(
+                    get: { model.preferences.pinnedModuleID },
+                    set: { model.setPinnedModule($0) }
+                )) {
+                    Text("Không ghim").tag(nil as ModuleDescriptor.ID?)
+                    ForEach(model.enabledPinnableModulesInOrder) { module in
+                        Text(module.displayName).tag(module.id as ModuleDescriptor.ID?)
+                    }
+                }
+
+                Picker("Chế độ hiển thị", selection: Binding(
+                    get: { model.preferences.menuBarDisplayMode },
+                    set: { model.setMenuBarDisplayMode($0) }
+                )) {
+                    Text("Chỉ biểu tượng").tag(MenuBarDisplayMode.iconOnly)
+                    Text("Biểu tượng và thông tin").tag(MenuBarDisplayMode.iconAndInformation)
+                }
+            }
+            .disabled(!model.isPreferenceEditingAllowed)
 
             if let warning = model.preferenceWarning {
                 Text(warning.message)

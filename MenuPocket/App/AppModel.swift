@@ -20,8 +20,22 @@ final class AppModel {
         modulesInOrder.filter { preferences.enabledModuleIDs.contains($0.id) }
     }
 
+    var enabledPinnableModulesInOrder: [ModuleDescriptor] {
+        enabledModulesInOrder.filter(\.canBePinned)
+    }
+
     var enabledModuleIDsInOrder: [ModuleDescriptor.ID] {
         enabledModulesInOrder.map(\.id)
+    }
+
+    // TASK-016 will replace this placeholder with the pinned module's runtime value.
+    var menuBarDisplayText: String? {
+        guard preferences.menuBarDisplayMode == .iconAndInformation,
+              let pinnedID = preferences.pinnedModuleID,
+              enabledPinnableModulesInOrder.contains(where: { $0.id == pinnedID }) else {
+            return nil
+        }
+        return "Demo: …"
     }
 
     init(

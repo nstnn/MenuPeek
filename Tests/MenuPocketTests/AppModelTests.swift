@@ -88,6 +88,62 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testOrderingPinChoicesAndTemporaryMenuBarLabelFollowSavedIDs() {
+        let store = FakePreferencesStore()
+        let model = AppModel(store: store)
+
+        XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id),
+                       [ModuleCatalog.tasksID, ModuleCatalog.statusID])
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
+        XCTAssertFalse(model.moveModuleUp(ModuleCatalog.tasksID))
+        XCTAssertFalse(model.moveModuleDown(ModuleCatalog.statusID))
+
+        XCTAssertTrue(model.moveModuleUp(ModuleCatalog.statusID))
+        XCTAssertEqual(model.enabledModulesInOrder.map(\.id),
+                       [ModuleCatalog.statusID, ModuleCatalog.tasksID])
+        XCTAssertEqual(model.preferences.pinnedModuleID, ModuleCatalog.tasksID)
+
+        XCTAssertTrue(model.setPinnedModule(ModuleCatalog.statusID))
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.statusID, enabled: false))
+        XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id), [ModuleCatalog.tasksID])
+        XCTAssertNil(model.preferences.pinnedModuleID)
+        XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertFalse(model.setPinnedModule(ModuleCatalog.statusID))
+
+        XCTAssertTrue(model.setPinnedModule(ModuleCatalog.tasksID))
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
+        XCTAssertTrue(model.setMenuBarDisplayMode(.iconOnly))
+        XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertTrue(model.setMenuBarDisplayMode(.iconAndInformation))
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
+        XCTAssertTrue(model.setPinnedModule(nil))
+        XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertEqual(store.savedPreferences.count, 7)
+        XCTAssertEqual(store.savedPreferences.last, model.preferences)
+    }
+
+    @MainActor
+    func testPinChoicesExcludeUnpinnableModules() {
+        let unpinnable = ModuleDescriptor(
+            id: "demo.unpinnable",
+            displayName: "Không thể ghim",
+            systemImageName: "nosign",
+            canBePinned: false
+        )
+        var initial = AppPreferences.defaultValue
+        initial.moduleOrder.append(unpinnable.id)
+        initial.enabledModuleIDs.insert(unpinnable.id)
+        let model = AppModel(
+            store: FakePreferencesStore(outcome: .loaded(initial)),
+            catalog: ModuleCatalog.defaultModules + [unpinnable]
+        )
+
+        XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id),
+                       [ModuleCatalog.tasksID, ModuleCatalog.statusID])
+        XCTAssertFalse(model.setPinnedModule(unpinnable.id))
+    }
+
+    @MainActor
     func testChangesRestoreFromASecondPreferencesStore() throws {
         let suiteName = "local.menupocket.tests.AppModelTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
