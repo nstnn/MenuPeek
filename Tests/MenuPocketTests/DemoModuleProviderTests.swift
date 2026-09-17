@@ -93,9 +93,10 @@ final class DemoModuleProviderTests: XCTestCase {
             // Simulate a delay implementation that returns even after cancellation.
         }
         let provider = DemoTasksProvider(delay: delay)
+        let loadTask = Task { try await provider.load(scenario: .slowResponse) }
 
         do {
-            _ = try await provider.load(scenario: .slowResponse)
+            _ = try await loadTask.value
             XCTFail("A canceled slow response must not return a snapshot")
         } catch is CancellationError {
             // Cancellation remains distinct from the controlled demo error.
