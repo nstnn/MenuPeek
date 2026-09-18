@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        model.cancelLoadsForTermination()
+    }
+
     // The decision is independent of preference recovery and of window visibility.
     func openSettingsOnFirstLaunchIfNeeded(present: (SettingsTab) -> Void) {
         guard !onboardingStore.hasCompletedOnboarding else { return }
