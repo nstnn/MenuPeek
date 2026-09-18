@@ -4,6 +4,11 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    private struct ActiveLoad {
+        let requestID: UUID
+        let task: Task<Void, Never>
+    }
+
     private(set) var preferences: AppPreferences
     private(set) var preferenceWarning: PreferencesWarning?
     private(set) var isPreferenceEditingAllowed: Bool
@@ -14,8 +19,10 @@ final class AppModel {
     @ObservationIgnored private let store: any PreferencesStoring
     @ObservationIgnored private let descriptorsByID: [ModuleDescriptor.ID: ModuleDescriptor]
     @ObservationIgnored private let providersByID: [ModuleDescriptor.ID: any ModuleProvider]
-    @ObservationIgnored private var activeLoads: [ModuleDescriptor.ID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var pendingReloads: Set<ModuleDescriptor.ID> = []
+    @ObservationIgnored private var activeLoads: [ModuleDescriptor.ID: ActiveLoad] = [:]
+    @ObservationIgnored private var isTerminating = false
+
+    var currentLoadCount: Int { activeLoads.count }
 
     var modulesInOrder: [ModuleDescriptor] {
         preferences.moduleOrder.compactMap { descriptorsByID[$0] }
@@ -91,8 +98,12 @@ final class AppModel {
                 }
             }
         }
-        if changed && enabled {
-            _ = requestLoad(id)
+        if changed {
+            if enabled {
+                _ = requestLoad(id)
+            } else {
+                cancelLoad(of: id)
+            }
         }
         return changed
     }
@@ -135,8 +146,25 @@ final class AppModel {
 
     /// Lets deterministic checks await a triggered request without a timer or polling.
     func waitForCurrentLoad(of id: ModuleDescriptor.ID) async {
-        if let task = activeLoads[id] {
+        if let task = activeLoads[id]?.task {
             await task.value
+        }
+    }
+
+    /// Captures a specific request so race checks can await it after supersession.
+    func currentLoadTask(of id: ModuleDescriptor.ID) -> Task<Void, Never>? {
+        activeLoads[id]?.task
+    }
+
+    func cancelLoadsForTermination() {
+        isTerminating = true
+        let loads = activeLoads
+        activeLoads.removeAll()
+        for (id, load) in loads {
+            var state = runtimeStates[id] ?? ModuleRuntimeState()
+            state.isLoading = false
+            runtimeStates[id] = state
+            load.task.cancel()
         }
     }
 
@@ -181,16 +209,12 @@ final class AppModel {
 
     @discardableResult
     private func requestLoad(_ id: ModuleDescriptor.ID) -> Bool {
-        guard preferences.enabledModuleIDs.contains(id),
+        guard !isTerminating,
+              preferences.enabledModuleIDs.contains(id),
               let provider = providersByID[id],
               descriptorsByID[id] != nil else { return false }
 
-        if activeLoads[id] != nil {
-            // A later explicit trigger is not lost while this module is loading.
-            // TASK-014 will cancel/supersede the old request and reject late results.
-            pendingReloads.insert(id)
-            return true
-        }
+        activeLoads[id]?.task.cancel()
 
         var state = runtimeStates[id] ?? ModuleRuntimeState()
         state.isLoading = true
@@ -198,23 +222,39 @@ final class AppModel {
         runtimeStates[id] = state
 
         let scenario = demoScenarios[id] ?? .normal
-        activeLoads[id] = Task { [weak self] in
+        let requestID = UUID()
+        let task = Task { [weak self] in
             do {
                 let snapshot = try await provider.load(scenario: scenario)
-                self?.finishLoad(of: id, result: .success(snapshot))
+                self?.finishLoad(
+                    of: id, requestID: requestID,
+                    result: .success(snapshot), wasCancelled: Task.isCancelled
+                )
             } catch is CancellationError {
-                self?.finishCancelledLoad(of: id)
+                self?.finishCancelledLoad(of: id, requestID: requestID)
             } catch {
-                self?.finishLoad(of: id, result: .failure(error))
+                self?.finishLoad(
+                    of: id, requestID: requestID,
+                    result: .failure(error), wasCancelled: Task.isCancelled
+                )
             }
         }
+        activeLoads[id] = ActiveLoad(requestID: requestID, task: task)
         return true
     }
 
     private func finishLoad(
         of id: ModuleDescriptor.ID,
-        result: Result<ModuleSnapshot?, any Error>
+        requestID: UUID,
+        result: Result<ModuleSnapshot?, any Error>,
+        wasCancelled: Bool
     ) {
+        guard isCurrentLoad(of: id, requestID: requestID) else { return }
+        if wasCancelled {
+            finishCancelledLoad(of: id, requestID: requestID)
+            return
+        }
+
         var state = runtimeStates[id] ?? ModuleRuntimeState()
         state.isLoading = false
         state.hasCompletedAttempt = true
@@ -228,22 +268,29 @@ final class AppModel {
             state.lastError = error.localizedDescription
         }
         runtimeStates[id] = state
-        finishTaskBookkeeping(for: id)
+        activeLoads[id] = nil
     }
 
-    private func finishCancelledLoad(of id: ModuleDescriptor.ID) {
+    private func finishCancelledLoad(of id: ModuleDescriptor.ID, requestID: UUID) {
+        guard isCurrentLoad(of: id, requestID: requestID) else { return }
         var state = runtimeStates[id] ?? ModuleRuntimeState()
         state.isLoading = false
         runtimeStates[id] = state
-        finishTaskBookkeeping(for: id)
+        activeLoads[id] = nil
     }
 
-    private func finishTaskBookkeeping(for id: ModuleDescriptor.ID) {
+    private func isCurrentLoad(of id: ModuleDescriptor.ID, requestID: UUID) -> Bool {
+        !isTerminating && preferences.enabledModuleIDs.contains(id) &&
+            activeLoads[id]?.requestID == requestID
+    }
+
+    private func cancelLoad(of id: ModuleDescriptor.ID) {
+        let task = activeLoads[id]?.task
         activeLoads[id] = nil
-        if pendingReloads.remove(id) != nil,
-           preferences.enabledModuleIDs.contains(id) {
-            _ = requestLoad(id)
-        }
+        var state = runtimeStates[id] ?? ModuleRuntimeState()
+        state.isLoading = false
+        runtimeStates[id] = state
+        task?.cancel()
     }
 
     private func commit(_ change: (inout AppPreferences) -> Void) -> Bool {

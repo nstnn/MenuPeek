@@ -171,22 +171,182 @@ final class AppModelLoadingTests: XCTestCase {
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot, statusSnapshot)
     }
 
-    func testExplicitTriggerDuringLoadRunsTheLatestScenarioAfterCompletion() async {
+    func testNewRequestFinishesBeforeOldNoncooperativeResult() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(tasks: tasks)
+        let oldSnapshot = makeSnapshot("Old", at: 1_700_000_000)
+        let newSnapshot = makeSnapshot("New", at: 1_700_000_100)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        let oldTask = model.currentLoadTask(of: ModuleCatalog.tasksID)
+        XCTAssertTrue(model.setDemoScenario(.error, for: ModuleCatalog.tasksID))
+        await tasks.waitForRequestCount(2)
+        await assertRequests(tasks, [.normal, .error])
+        XCTAssertEqual(model.currentLoadCount, 1)
+
+        await tasks.complete(1, with: newSnapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, newSnapshot)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
+
+        await tasks.complete(0, with: oldSnapshot)
+        await oldTask?.value
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, newSnapshot)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.currentLoadCount, 0)
+        let cancelled = await tasks.cancelledRequestIndices()
+        XCTAssertTrue(cancelled.contains(0))
+    }
+
+    func testOldFailureCannotClearNewRequestLoadingState() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(tasks: tasks)
+        let newSnapshot = makeSnapshot("New", at: 1_700_000_100)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        let oldTask = model.currentLoadTask(of: ModuleCatalog.tasksID)
+        XCTAssertTrue(model.refreshModule(ModuleCatalog.tasksID))
+        await tasks.waitForRequestCount(2)
+
+        await tasks.fail(0)
+        await oldTask?.value
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, false)
+        XCTAssertEqual(model.currentLoadCount, 1)
+
+        await tasks.complete(1, with: newSnapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, newSnapshot)
+        XCTAssertEqual(model.currentLoadCount, 0)
+    }
+
+    func testDisablingSlowPinnedModuleRejectsLateResult() async {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(preferences: preferences, tasks: tasks)
+
+        XCTAssertTrue(model.setDemoScenario(.slowResponse, for: ModuleCatalog.tasksID))
+        await tasks.waitForRequestCount(1)
+        let oldTask = model.currentLoadTask(of: ModuleCatalog.tasksID)
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
+        XCTAssertNil(model.preferences.pinnedModuleID)
+        XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertTrue(model.enabledModulesInOrder.isEmpty)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
+        XCTAssertEqual(model.currentLoadCount, 0)
+
+        await tasks.complete(0, with: makeSnapshot("Late", at: 1_700_000_000))
+        await oldTask?.value
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, false)
+        let cancelled = await tasks.cancelledRequestIndices()
+        XCTAssertTrue(cancelled.contains(0))
+    }
+
+    func testReenableRejectsResultFromBeforeDisable() async {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(preferences: preferences, tasks: tasks)
+        let newSnapshot = makeSnapshot("Reenabled", at: 1_700_000_100)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        let oldTask = model.currentLoadTask(of: ModuleCatalog.tasksID)
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: true))
+        await tasks.waitForRequestCount(2)
+
+        await tasks.complete(0, with: makeSnapshot("Old", at: 1_700_000_000))
+        await oldTask?.value
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot)
+        XCTAssertEqual(model.currentLoadCount, 1)
+
+        await tasks.complete(1, with: newSnapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, newSnapshot)
+    }
+
+    func testQuitCancelsCurrentLoadsAndSuppressesLateErrors() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = makeModel(tasks: tasks, status: status)
+        let delegate = AppDelegate(model: model, onboardingStore: CompletedOnboardingStore())
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        await status.waitForRequestCount(1)
+        let tasksLoad = model.currentLoadTask(of: ModuleCatalog.tasksID)
+        let statusLoad = model.currentLoadTask(of: ModuleCatalog.statusID)
+        delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        XCTAssertEqual(model.currentLoadCount, 0)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.isLoading, false)
+        XCTAssertFalse(model.refreshModule(ModuleCatalog.tasksID))
+
+        await tasks.fail(0)
+        await status.complete(0, with: makeSnapshot("Late", at: 1_700_000_000))
+        await tasksLoad?.value
+        await statusLoad?.value
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.statusID]?.snapshot)
+        XCTAssertEqual(model.currentLoadCount, 0)
+        let tasksCancelled = await tasks.cancelledRequestIndices()
+        let statusCancelled = await status.cancelledRequestIndices()
+        XCTAssertTrue(tasksCancelled.contains(0))
+        XCTAssertTrue(statusCancelled.contains(0))
+    }
+
+    func testRejectedDisableLeavesCurrentLoadAndPinIntact() async {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
+        let store = LoadingPreferencesStore(preferences: preferences)
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = AppModel(store: store, providers: [tasks])
+        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        store.saveOutcome = .writeProtected(
+            .newerSchema(storedVersion: 2, supportedVersion: 1)
+        )
+        XCTAssertFalse(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
+        XCTAssertEqual(model.preferences.pinnedModuleID, ModuleCatalog.tasksID)
+        XCTAssertTrue(model.preferences.enabledModuleIDs.contains(ModuleCatalog.tasksID))
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
+        XCTAssertEqual(model.currentLoadCount, 1)
+
+        await tasks.complete(0, with: snapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, snapshot)
+        let cancelled = await tasks.cancelledRequestIndices()
+        XCTAssertFalse(cancelled.contains(0))
+    }
+
+    func testCurrentCancellationIsNeitherErrorNorCompletedAttempt() async {
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let model = makeModel(tasks: tasks)
 
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
-        XCTAssertTrue(model.setDemoScenario(.error, for: ModuleCatalog.tasksID))
-        await assertRequests(tasks, [.normal])
-        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_000))
-        await tasks.waitForRequestCount(2)
-        await assertRequests(tasks, [.normal, .error])
-        await tasks.failNext()
+        await tasks.cancel(0)
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot?.primaryValue,
-                       "3 việc")
-        XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, false)
+        XCTAssertEqual(model.currentLoadCount, 0)
+
+        model.panelDidOpen()
+        await tasks.waitForRequestCount(2)
+        await tasks.complete(1, with: nil)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
     }
 
     private func makeModel(
@@ -247,7 +407,8 @@ private final class CompletedOnboardingStore: OnboardingStoring {
 private actor ControlledProvider: ModuleProvider {
     nonisolated let moduleID: ModuleDescriptor.ID
     private var scenarios: [DemoScenario] = []
-    private var pending: [CheckedContinuation<ModuleSnapshot?, any Error>] = []
+    private var pending: [Int: CheckedContinuation<ModuleSnapshot?, any Error>] = [:]
+    private var cancelledRequests: Set<Int> = []
     private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     init(id: ModuleDescriptor.ID) {
@@ -255,9 +416,13 @@ private actor ControlledProvider: ModuleProvider {
     }
 
     func load(scenario: DemoScenario) async throws -> ModuleSnapshot? {
-        try await withCheckedThrowingContinuation { continuation in
-            scenarios.append(scenario)
-            pending.append(continuation)
+        let index = scenarios.count
+        scenarios.append(scenario)
+        defer {
+            if Task.isCancelled { cancelledRequests.insert(index) }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            pending[index] = continuation
             let ready = waiters.filter { scenarios.count >= $0.0 }
             waiters.removeAll { scenarios.count >= $0.0 }
             for (_, waiter) in ready { waiter.resume() }
@@ -265,6 +430,7 @@ private actor ControlledProvider: ModuleProvider {
     }
 
     func requestedScenarios() -> [DemoScenario] { scenarios }
+    func cancelledRequestIndices() -> Set<Int> { cancelledRequests }
 
     func waitForRequestCount(_ count: Int) async {
         if scenarios.count >= count { return }
@@ -272,12 +438,31 @@ private actor ControlledProvider: ModuleProvider {
     }
 
     func completeNext(with snapshot: ModuleSnapshot?) {
-        precondition(!pending.isEmpty)
-        pending.removeFirst().resume(returning: snapshot)
+        complete(pending.keys.min()!, with: snapshot)
     }
 
     func failNext() {
-        precondition(!pending.isEmpty)
-        pending.removeFirst().resume(throwing: DemoProviderError.unavailable)
+        fail(pending.keys.min()!)
+    }
+
+    func complete(_ index: Int, with snapshot: ModuleSnapshot?) {
+        guard let continuation = pending.removeValue(forKey: index) else {
+            preconditionFailure("No pending request at index \(index)")
+        }
+        continuation.resume(returning: snapshot)
+    }
+
+    func fail(_ index: Int) {
+        guard let continuation = pending.removeValue(forKey: index) else {
+            preconditionFailure("No pending request at index \(index)")
+        }
+        continuation.resume(throwing: DemoProviderError.unavailable)
+    }
+
+    func cancel(_ index: Int) {
+        guard let continuation = pending.removeValue(forKey: index) else {
+            preconditionFailure("No pending request at index \(index)")
+        }
+        continuation.resume(throwing: CancellationError())
     }
 }
