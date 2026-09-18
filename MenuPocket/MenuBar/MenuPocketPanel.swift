@@ -42,5 +42,6 @@ struct MenuPocketPanel: View {
         }
         .padding(16)
         .frame(width: 360)
+        .onAppear { model.panelDidOpen() }
     }
 }

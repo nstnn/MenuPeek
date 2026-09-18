@@ -1,0 +1,283 @@
+import AppKit
+import Foundation
+import XCTest
+@testable import MenuPocket
+
+@MainActor
+final class AppModelLoadingTests: XCTestCase {
+    func testStartupLoadsOnlyEnabledModulesOnceAndStoresSuccessfulTime() async {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = makeModel(preferences: preferences, tasks: tasks, status: status)
+        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+
+        let delegate = AppDelegate(model: model, onboardingStore: CompletedOnboardingStore())
+        delegate.applicationDidFinishLaunching(
+            Notification(name: NSApplication.didFinishLaunchingNotification)
+        )
+        XCTAssertTrue(delegate.model === model)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.isLoading, false)
+        model.startInitialLoads()
+        model.panelDidOpen()
+        await tasks.waitForRequestCount(1)
+        await tasks.completeNext(with: snapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+
+        await assertRequests(tasks, [.normal])
+        await assertRequests(status, [])
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, snapshot)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot?.updatedAt,
+                       Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
+
+        model.panelDidOpen()
+        await assertRequests(tasks, [.normal])
+
+        model.refreshEnabledModules()
+        await tasks.waitForRequestCount(2)
+        await tasks.completeNext(with: snapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await assertRequests(tasks, [.normal, .normal])
+        await assertRequests(status, [])
+    }
+
+    func testEnableLoadsOnlyAfterSavedChangeAndUsesSessionScenario() async {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = []
+        preferences.pinnedModuleID = nil
+        let store = LoadingPreferencesStore(preferences: preferences)
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = AppModel(store: store, providers: [tasks, status])
+
+        model.startInitialLoads()
+        XCTAssertTrue(model.setDemoScenario(.noData, for: ModuleCatalog.statusID))
+        await assertRequests(status, [])
+        XCTAssertTrue(model.setModuleEnabled(ModuleCatalog.statusID, enabled: true))
+        await status.waitForRequestCount(1)
+        await assertRequests(status, [.noData])
+        await status.completeNext(with: nil)
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+        XCTAssertTrue(store.savedPreferences.last?.enabledModuleIDs.contains(ModuleCatalog.statusID) == true)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.hasCompletedAttempt, true)
+
+        XCTAssertFalse(model.setModuleEnabled(ModuleCatalog.statusID, enabled: true))
+        await assertRequests(status, [.noData])
+        await assertRequests(tasks, [])
+
+        store.saveOutcome = .writeProtected(
+            .newerSchema(storedVersion: 2, supportedVersion: 1)
+        )
+        XCTAssertFalse(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: true))
+        await assertRequests(tasks, [])
+        XCTAssertFalse(model.preferences.enabledModuleIDs.contains(ModuleCatalog.tasksID))
+    }
+
+    func testCompletedEmptyAndFailureAreNotReloadedByPanelOpen() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = makeModel(tasks: tasks, status: status)
+
+        model.panelDidOpen()
+        await tasks.waitForRequestCount(1)
+        await status.waitForRequestCount(1)
+        model.panelDidOpen()
+        await tasks.completeNext(with: nil)
+        await status.failNext()
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+
+        let empty = model.runtimeStates[ModuleCatalog.tasksID]
+        XCTAssertNil(empty?.snapshot)
+        XCTAssertNil(empty?.lastError)
+        XCTAssertEqual(empty?.hasCompletedAttempt, true)
+        let failed = model.runtimeStates[ModuleCatalog.statusID]
+        XCTAssertNil(failed?.snapshot)
+        XCTAssertNotNil(failed?.lastError)
+        XCTAssertEqual(failed?.hasCompletedAttempt, true)
+
+        model.panelDidOpen()
+        await assertRequests(tasks, [.normal])
+        await assertRequests(status, [.normal])
+        XCTAssertTrue(model.retryModule(ModuleCatalog.statusID))
+        await status.waitForRequestCount(2)
+        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_100))
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.statusID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot?.primaryValue,
+                       "Sẵn sàng")
+    }
+
+    func testRefreshKeepsOldDataDuringLoadingAndFailureThenEmptyClearsIt() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(tasks: tasks)
+        let original = makeSnapshot("3 việc", at: 1_700_000_000)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        await tasks.completeNext(with: original)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+
+        XCTAssertTrue(model.refreshModule(ModuleCatalog.tasksID))
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        await tasks.waitForRequestCount(2)
+        await tasks.failNext()
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
+        XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+
+        XCTAssertTrue(model.retryModule(ModuleCatalog.tasksID))
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        await tasks.waitForRequestCount(3)
+        await tasks.completeNext(with: nil)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+    }
+
+    func testModulesStayIndependentAndScenarioChangeReloadsOnlyItsModule() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = makeModel(tasks: tasks, status: status)
+        let statusSnapshot = makeSnapshot("Sẵn sàng", at: 1_700_000_100)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        await status.waitForRequestCount(1)
+        await tasks.failNext()
+        await status.completeNext(with: statusSnapshot)
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+        XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot, statusSnapshot)
+        XCTAssertNil(model.runtimeStates[ModuleCatalog.statusID]?.lastError)
+
+        XCTAssertFalse(model.setDemoScenario(.normal, for: ModuleCatalog.tasksID))
+        XCTAssertTrue(model.setDemoScenario(.error, for: ModuleCatalog.tasksID))
+        await tasks.waitForRequestCount(2)
+        await assertRequests(tasks, [.normal, .error])
+        await tasks.failNext()
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await assertRequests(status, [.normal])
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot, statusSnapshot)
+    }
+
+    func testExplicitTriggerDuringLoadRunsTheLatestScenarioAfterCompletion() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let model = makeModel(tasks: tasks)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        XCTAssertTrue(model.setDemoScenario(.error, for: ModuleCatalog.tasksID))
+        await assertRequests(tasks, [.normal])
+        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_000))
+        await tasks.waitForRequestCount(2)
+        await assertRequests(tasks, [.normal, .error])
+        await tasks.failNext()
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot?.primaryValue,
+                       "3 việc")
+        XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+    }
+
+    private func makeModel(
+        preferences: AppPreferences = .defaultValue,
+        tasks: ControlledProvider,
+        status: ControlledProvider? = nil
+    ) -> AppModel {
+        AppModel(
+            store: LoadingPreferencesStore(preferences: preferences),
+            providers: [tasks] + (status.map { [$0] } ?? [])
+        )
+    }
+
+    private func makeSnapshot(_ value: String, at time: TimeInterval) -> ModuleSnapshot {
+        ModuleSnapshot(
+            primaryValue: value,
+            description: "Dữ liệu minh họa",
+            pinnedLabel: "Demo: \(value)",
+            updatedAt: Date(timeIntervalSince1970: time)
+        )
+    }
+
+    private func assertRequests(
+        _ provider: ControlledProvider,
+        _ expected: [DemoScenario],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let actual = await provider.requestedScenarios()
+        XCTAssertEqual(actual, expected, file: file, line: line)
+    }
+}
+
+private final class LoadingPreferencesStore: PreferencesStoring {
+    var preferences: AppPreferences
+    var saveOutcome: PreferencesSaveOutcome = .saved
+    private(set) var savedPreferences: [AppPreferences] = []
+
+    init(preferences: AppPreferences) {
+        self.preferences = preferences
+    }
+
+    func load() throws -> PreferencesLoadOutcome { .loaded(preferences) }
+
+    func save(_ preferences: AppPreferences) throws -> PreferencesSaveOutcome {
+        savedPreferences.append(preferences)
+        if saveOutcome == .saved { self.preferences = preferences }
+        return saveOutcome
+    }
+}
+
+@MainActor
+private final class CompletedOnboardingStore: OnboardingStoring {
+    let hasCompletedOnboarding = true
+    func markOnboardingCompleted() {}
+}
+
+private actor ControlledProvider: ModuleProvider {
+    nonisolated let moduleID: ModuleDescriptor.ID
+    private var scenarios: [DemoScenario] = []
+    private var pending: [CheckedContinuation<ModuleSnapshot?, any Error>] = []
+    private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    init(id: ModuleDescriptor.ID) {
+        moduleID = id
+    }
+
+    func load(scenario: DemoScenario) async throws -> ModuleSnapshot? {
+        try await withCheckedThrowingContinuation { continuation in
+            scenarios.append(scenario)
+            pending.append(continuation)
+            let ready = waiters.filter { scenarios.count >= $0.0 }
+            waiters.removeAll { scenarios.count >= $0.0 }
+            for (_, waiter) in ready { waiter.resume() }
+        }
+    }
+
+    func requestedScenarios() -> [DemoScenario] { scenarios }
+
+    func waitForRequestCount(_ count: Int) async {
+        if scenarios.count >= count { return }
+        await withCheckedContinuation { waiters.append((count, $0)) }
+    }
+
+    func completeNext(with snapshot: ModuleSnapshot?) {
+        precondition(!pending.isEmpty)
+        pending.removeFirst().resume(returning: snapshot)
+    }
+
+    func failNext() {
+        precondition(!pending.isEmpty)
+        pending.removeFirst().resume(throwing: DemoProviderError.unavailable)
+    }
+}
