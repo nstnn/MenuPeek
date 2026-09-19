@@ -45,6 +45,7 @@ final class AppConfigurationTests: XCTestCase {
 
         delegate.showSettings()
         XCTAssertTrue(controller === delegate.settingsWindowController)
+        XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
 
         window.close()
         XCTAssertFalse(window.isVisible)
@@ -53,6 +54,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(controller === delegate.settingsWindowController)
         XCTAssertTrue(window === controller.window)
         XCTAssertTrue(window.isVisible)
+        XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
 
         window.close()
     }
