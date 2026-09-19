@@ -11,14 +11,15 @@ struct MenuPocketApp: App {
                 appDelegate.showSettings()
             }
         } label: {
-            if let text = appDelegate.model.menuBarDisplayText {
+            let presentation = appDelegate.model.menuBarPresentation
+            if let text = presentation.displayText {
                 Label(text, systemImage: "square.grid.2x2")
                     .labelStyle(.titleAndIcon)
-                    .accessibilityLabel("MenuPocket, \(text)")
+                    .accessibilityLabel(presentation.accessibilityLabel)
             } else {
                 Label("MenuPocket", systemImage: "square.grid.2x2")
                     .labelStyle(.iconOnly)
-                    .accessibilityLabel("MenuPocket")
+                    .accessibilityLabel(presentation.accessibilityLabel)
             }
         }
         .menuBarExtraStyle(.window)
