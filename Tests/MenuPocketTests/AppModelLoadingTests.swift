@@ -5,6 +5,50 @@ import XCTest
 
 @MainActor
 final class AppModelLoadingTests: XCTestCase {
+    func testPanelPhaseDistinguishesLoadingReadyEmptyAndFailureStates() {
+        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+
+        XCTAssertEqual(ModulePanelPhase(state: ModuleRuntimeState()), .loading)
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(isLoading: true)),
+            .loading
+        )
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(
+                snapshot: snapshot,
+                hasCompletedAttempt: true
+            )),
+            .ready(snapshot)
+        )
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(
+                snapshot: snapshot,
+                isLoading: true,
+                hasCompletedAttempt: true
+            )),
+            .refreshing(snapshot)
+        )
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(hasCompletedAttempt: true)),
+            .empty
+        )
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(
+                lastError: "Provider implementation detail",
+                hasCompletedAttempt: true
+            )),
+            .initialFailure
+        )
+        XCTAssertEqual(
+            ModulePanelPhase(state: ModuleRuntimeState(
+                snapshot: snapshot,
+                lastError: "Provider implementation detail",
+                hasCompletedAttempt: true
+            )),
+            .stale(snapshot)
+        )
+    }
+
     func testStartupLoadsOnlyEnabledModulesOnceAndStoresSuccessfulTime() async {
         var preferences = AppPreferences.defaultValue
         preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
