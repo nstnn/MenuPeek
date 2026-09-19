@@ -1,6 +1,49 @@
 import Foundation
 import Observation
 
+struct MenuBarPresentation: Equatable {
+    let displayText: String?
+    let accessibilityLabel: String
+
+    static let iconOnly = MenuBarPresentation(
+        displayText: nil,
+        accessibilityLabel: "MenuPocket"
+    )
+
+    init(pinnedState state: ModuleRuntimeState) {
+        if let snapshot = state.snapshot {
+            if state.lastError != nil {
+                displayText = "\(snapshot.pinnedLabel) ⚠︎"
+                accessibilityLabel =
+                    "MenuPocket, \(snapshot.pinnedLabel). Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+            } else if state.isLoading {
+                displayText = snapshot.pinnedLabel
+                accessibilityLabel =
+                    "MenuPocket, \(snapshot.pinnedLabel). Đang cập nhật dữ liệu demo."
+            } else {
+                displayText = snapshot.pinnedLabel
+                accessibilityLabel = "MenuPocket, \(snapshot.pinnedLabel)."
+            }
+        } else if state.isLoading || !state.hasCompletedAttempt {
+            displayText = "Demo: …"
+            accessibilityLabel = "MenuPocket, đang tải dữ liệu demo."
+        } else if state.lastError != nil {
+            displayText = "Demo: !"
+            accessibilityLabel = "MenuPocket, không tải được dữ liệu demo."
+        } else {
+            // The source requires clearing stale data but does not prescribe the
+            // compact empty label. An em dash keeps the result short and distinct.
+            displayText = "Demo: —"
+            accessibilityLabel = "MenuPocket, không có dữ liệu demo."
+        }
+    }
+
+    private init(displayText: String?, accessibilityLabel: String) {
+        self.displayText = displayText
+        self.accessibilityLabel = accessibilityLabel
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -40,15 +83,20 @@ final class AppModel {
         enabledModulesInOrder.map(\.id)
     }
 
-    // TASK-016 will replace this placeholder with the pinned module's runtime value.
-    var menuBarDisplayText: String? {
+    var menuBarPresentation: MenuBarPresentation {
         guard preferences.menuBarDisplayMode == .iconAndInformation,
               let pinnedID = preferences.pinnedModuleID,
               enabledPinnableModulesInOrder.contains(where: { $0.id == pinnedID }) else {
-            return nil
+            return .iconOnly
         }
-        return "Demo: …"
+        return MenuBarPresentation(
+            pinnedState: runtimeStates[pinnedID] ?? ModuleRuntimeState()
+        )
     }
+
+    var menuBarDisplayText: String? { menuBarPresentation.displayText }
+
+    var menuBarAccessibilityLabel: String { menuBarPresentation.accessibilityLabel }
 
     init(
         store: any PreferencesStoring = PreferencesStore(),

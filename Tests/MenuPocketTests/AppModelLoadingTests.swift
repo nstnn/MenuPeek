@@ -161,31 +161,47 @@ final class AppModelLoadingTests: XCTestCase {
         let model = makeModel(tasks: tasks)
         let original = makeSnapshot("3 việc", at: 1_700_000_000)
 
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
         await tasks.completeNext(with: original)
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, Demo: 3 việc.")
 
         XCTAssertTrue(model.refreshModule(ModuleCatalog.tasksID))
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
+        XCTAssertEqual(
+            model.menuBarAccessibilityLabel,
+            "MenuPocket, Demo: 3 việc. Đang cập nhật dữ liệu demo."
+        )
         await tasks.waitForRequestCount(2)
         await tasks.failNext()
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc ⚠︎")
+        XCTAssertEqual(
+            model.menuBarAccessibilityLabel,
+            "MenuPocket, Demo: 3 việc. Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+        )
 
         XCTAssertTrue(model.retryModule(ModuleCatalog.tasksID))
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
         await tasks.waitForRequestCount(3)
         await tasks.completeNext(with: nil)
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: —")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, không có dữ liệu demo.")
     }
 
     func testModulesStayIndependentAndScenarioChangeReloadsOnlyItsModule() async {

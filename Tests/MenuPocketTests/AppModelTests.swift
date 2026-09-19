@@ -88,13 +88,14 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
-    func testOrderingPinChoicesAndTemporaryMenuBarLabelFollowSavedIDs() {
+    func testOrderingPinChoicesAndMenuBarPresentationFollowSavedIDs() {
         let store = FakePreferencesStore()
         let model = AppModel(store: store)
 
         XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id),
                        [ModuleCatalog.tasksID, ModuleCatalog.statusID])
         XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, đang tải dữ liệu demo.")
         XCTAssertFalse(model.moveModuleUp(ModuleCatalog.tasksID))
         XCTAssertFalse(model.moveModuleDown(ModuleCatalog.statusID))
 
@@ -108,18 +109,88 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id), [ModuleCatalog.tasksID])
         XCTAssertNil(model.preferences.pinnedModuleID)
         XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket")
         XCTAssertFalse(model.setPinnedModule(ModuleCatalog.statusID))
 
         XCTAssertTrue(model.setPinnedModule(ModuleCatalog.tasksID))
         XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
         XCTAssertTrue(model.setMenuBarDisplayMode(.iconOnly))
         XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket")
         XCTAssertTrue(model.setMenuBarDisplayMode(.iconAndInformation))
         XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
         XCTAssertTrue(model.setPinnedModule(nil))
         XCTAssertNil(model.menuBarDisplayText)
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket")
         XCTAssertEqual(store.savedPreferences.count, 7)
         XCTAssertEqual(store.savedPreferences.last, model.preferences)
+    }
+
+    @MainActor
+    func testMenuBarPresentationStateTable() {
+        let tasks = ModuleSnapshot(
+            primaryValue: "3 việc",
+            description: "Dữ liệu minh họa",
+            pinnedLabel: "Demo: 3 việc",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let status = ModuleSnapshot(
+            primaryValue: "Sẵn sàng",
+            description: "Dữ liệu minh họa",
+            pinnedLabel: "Demo: OK",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let cases: [(String, ModuleRuntimeState, String, String)] = [
+            (
+                "before first load", ModuleRuntimeState(), "Demo: …",
+                "MenuPocket, đang tải dữ liệu demo."
+            ),
+            (
+                "initial loading", ModuleRuntimeState(isLoading: true), "Demo: …",
+                "MenuPocket, đang tải dữ liệu demo."
+            ),
+            (
+                "tasks ready",
+                ModuleRuntimeState(snapshot: tasks, hasCompletedAttempt: true),
+                "Demo: 3 việc", "MenuPocket, Demo: 3 việc."
+            ),
+            (
+                "status ready",
+                ModuleRuntimeState(snapshot: status, hasCompletedAttempt: true),
+                "Demo: OK", "MenuPocket, Demo: OK."
+            ),
+            (
+                "refreshing after success",
+                ModuleRuntimeState(snapshot: tasks, isLoading: true, hasCompletedAttempt: true),
+                "Demo: 3 việc", "MenuPocket, Demo: 3 việc. Đang cập nhật dữ liệu demo."
+            ),
+            (
+                "initial failure",
+                ModuleRuntimeState(lastError: "Provider detail", hasCompletedAttempt: true),
+                "Demo: !", "MenuPocket, không tải được dữ liệu demo."
+            ),
+            (
+                "stale data after failure",
+                ModuleRuntimeState(
+                    snapshot: tasks,
+                    lastError: "Provider detail",
+                    hasCompletedAttempt: true
+                ),
+                "Demo: 3 việc ⚠︎",
+                "MenuPocket, Demo: 3 việc. Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+            ),
+            (
+                "completed empty result",
+                ModuleRuntimeState(hasCompletedAttempt: true),
+                "Demo: —", "MenuPocket, không có dữ liệu demo."
+            ),
+        ]
+
+        for (name, state, displayText, accessibilityLabel) in cases {
+            let presentation = MenuBarPresentation(pinnedState: state)
+            XCTAssertEqual(presentation.displayText, displayText, name)
+            XCTAssertEqual(presentation.accessibilityLabel, accessibilityLabel, name)
+        }
     }
 
     @MainActor
