@@ -2,32 +2,79 @@ import AppKit
 import SwiftUI
 
 struct MenuPocketPanel: View {
+    static let width: CGFloat = 360
+    static let maximumHeight: CGFloat = 480
+    static let outerPadding: CGFloat = 16
+    static let blockSpacing: CGFloat = 12
+
     let model: AppModel
     let onOpenSettings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("MenuPocket")
-                    .font(.headline)
-
-                Spacer()
-
-                Text("DEMO")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Dữ liệu demo")
+        ViewThatFits(in: .vertical) {
+            panelLayout {
+                moduleContent
             }
+            // Do not compress the compact candidate just to make it appear to
+            // fit; overflow should select the scrolling candidate below.
+            .fixedSize(horizontal: false, vertical: true)
 
-            if model.enabledModulesInOrder.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Chưa bật nội dung nào.")
-                        .fontWeight(.medium)
-                    Text("Mở Cài đặt để chọn nội dung hiển thị.")
-                        .foregroundStyle(.secondary)
+            panelLayout {
+                ScrollView {
+                    moduleContent
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else {
+                .scrollBounceBehavior(.basedOnSize)
+                .accessibilityIdentifier("panelModuleScrollView")
+            }
+        }
+        .padding(Self.outerPadding)
+        .frame(width: Self.width)
+        .frame(maxHeight: Self.maximumHeight)
+        // ViewThatFits otherwise reports the full proposed height even when its
+        // compact child is shorter. Preserve the 480 pt ceiling while adopting
+        // the selected child's natural height.
+        .fixedSize(horizontal: false, vertical: true)
+        .onAppear { model.panelDidOpen() }
+    }
+
+    private func panelLayout<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Self.blockSpacing) {
+            header
+            content()
+            Divider()
+            footer
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("MenuPocket")
+                .font(.headline)
+
+            Spacer()
+
+            Text("DEMO")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Dữ liệu demo")
+        }
+    }
+
+    @ViewBuilder
+    private var moduleContent: some View {
+        if model.enabledModulesInOrder.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Chưa bật nội dung nào.")
+                    .fontWeight(.medium)
+                Text("Mở Cài đặt để chọn nội dung hiển thị.")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Self.blockSpacing) {
                 ForEach(model.enabledModulesInOrder) { module in
                     ModulePanelRow(
                         module: module,
@@ -37,30 +84,27 @@ struct MenuPocketPanel: View {
                     }
                 }
             }
-
-            Divider()
-
-            HStack {
-                Button("Cài đặt…", action: onOpenSettings)
-                    .accessibilityLabel("Mở Cài đặt MenuPocket")
-
-                Spacer()
-
-                Button("Làm mới") {
-                    model.refreshEnabledModules()
-                }
-                .disabled(model.enabledModulesInOrder.isEmpty)
-                .accessibilityLabel("Làm mới dữ liệu demo")
-
-                Button("Thoát", role: .destructive) {
-                    NSApplication.shared.terminate(nil)
-                }
-                .accessibilityLabel("Thoát MenuPocket")
-            }
         }
-        .padding(16)
-        .frame(width: 360)
-        .onAppear { model.panelDidOpen() }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Cài đặt…", action: onOpenSettings)
+                .accessibilityLabel("Mở Cài đặt MenuPocket")
+
+            Spacer()
+
+            Button("Làm mới") {
+                model.refreshEnabledModules()
+            }
+            .disabled(model.enabledModulesInOrder.isEmpty)
+            .accessibilityLabel("Làm mới dữ liệu demo")
+
+            Button("Thoát", role: .destructive) {
+                NSApplication.shared.terminate(nil)
+            }
+            .accessibilityLabel("Thoát MenuPocket")
+        }
     }
 }
 
