@@ -144,7 +144,13 @@ private struct GeneralSettingsView: View {
 
             Section("Ứng dụng") {
                 LabeledContent("Tên", value: "MenuPocket")
+                    .accessibilityRepresentation {
+                        Text("Tên ứng dụng: MenuPocket")
+                    }
                 LabeledContent("Phiên bản", value: version)
+                    .accessibilityRepresentation {
+                        Text("Phiên bản: \(version)")
+                    }
             }
 
             Section("Dữ liệu demo") {
