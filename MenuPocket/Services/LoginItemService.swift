@@ -22,6 +22,19 @@ enum LoginItemStatus: Equatable, Sendable {
             self = .unavailable
         }
     }
+
+    var message: String {
+        switch self {
+        case .disabled:
+            "MenuPocket sẽ không tự động mở khi bạn đăng nhập."
+        case .enabled:
+            "MenuPocket sẽ tự động mở sau khi bạn đăng nhập."
+        case .requiresApproval:
+            "macOS cần bạn cho phép MenuPocket trong Mục đăng nhập của Cài đặt hệ thống."
+        case .unavailable:
+            "Không thể xác định trạng thái Mở khi đăng nhập trên máy Mac này."
+        }
+    }
 }
 
 enum LoginItemOperationFailure: Equatable, Sendable {
@@ -47,6 +60,7 @@ protocol LoginItemService {
     func readStatus() -> LoginItemStatus
     func register() -> LoginItemOperationResult
     func unregister() -> LoginItemOperationResult
+    func openSystemSettingsLoginItems()
 }
 
 // This narrow boundary lets tests exercise the service without accessing the host's login items.
@@ -106,5 +120,9 @@ final class SystemLoginItemService: LoginItemService {
             Self.logger.error("Login-item unregistration failed: \(error.localizedDescription, privacy: .public)")
             return LoginItemOperationResult(status: readStatus(), failure: .unregistrationFailed)
         }
+    }
+
+    func openSystemSettingsLoginItems() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }

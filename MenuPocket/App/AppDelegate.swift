@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.cancelLoadsForTermination()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        model.refreshLoginItemStatus()
+    }
+
     // The decision is independent of preference recovery and of window visibility.
     func openSettingsOnFirstLaunchIfNeeded(present: (SettingsTab) -> Void) {
         guard !onboardingStore.hasCompletedOnboarding else { return }

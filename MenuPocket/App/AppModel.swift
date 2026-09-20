@@ -58,8 +58,11 @@ final class AppModel {
     private(set) var preferenceSaveError: String?
     private(set) var runtimeStates: [ModuleDescriptor.ID: ModuleRuntimeState]
     private(set) var demoScenarios: [ModuleDescriptor.ID: DemoScenario]
+    private(set) var loginItemStatus: LoginItemStatus
+    private(set) var loginItemOperationFailure: LoginItemOperationFailure?
 
     @ObservationIgnored private let store: any PreferencesStoring
+    @ObservationIgnored private let loginItemService: any LoginItemService
     @ObservationIgnored private let descriptorsByID: [ModuleDescriptor.ID: ModuleDescriptor]
     @ObservationIgnored private let providersByID: [ModuleDescriptor.ID: any ModuleProvider]
     @ObservationIgnored private var activeLoads: [ModuleDescriptor.ID: ActiveLoad] = [:]
@@ -98,12 +101,22 @@ final class AppModel {
 
     var menuBarAccessibilityLabel: String { menuBarPresentation.accessibilityLabel }
 
+    var isLoginItemEnabled: Bool { loginItemStatus == .enabled }
+
+    var canChangeLoginItemRegistration: Bool {
+        loginItemStatus == .disabled || loginItemStatus == .enabled
+    }
+
     init(
         store: any PreferencesStoring = PreferencesStore(),
         catalog: [ModuleDescriptor] = ModuleCatalog.defaultModules,
-        providers: [any ModuleProvider] = [DemoTasksProvider(), DemoStatusProvider()]
+        providers: [any ModuleProvider] = [DemoTasksProvider(), DemoStatusProvider()],
+        loginItemService: any LoginItemService = SystemLoginItemService()
     ) {
         self.store = store
+        self.loginItemService = loginItemService
+        loginItemStatus = loginItemService.readStatus()
+        loginItemOperationFailure = nil
         descriptorsByID = Dictionary(
             catalog.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -180,6 +193,25 @@ final class AppModel {
         for id in enabledModuleIDsInOrder {
             _ = requestLoad(id)
         }
+    }
+
+    func refreshLoginItemStatus() {
+        loginItemStatus = loginItemService.readStatus()
+        loginItemOperationFailure = nil
+    }
+
+    func setLoginItemEnabled(_ enabled: Bool) {
+        guard canChangeLoginItemRegistration,
+              enabled != isLoginItemEnabled else { return }
+
+        let result = enabled ? loginItemService.register() : loginItemService.unregister()
+        loginItemStatus = result.status
+        loginItemOperationFailure = result.failure
+    }
+
+    func openSystemSettingsLoginItems() {
+        guard loginItemStatus == .requiresApproval else { return }
+        loginItemService.openSystemSettingsLoginItems()
     }
 
     @discardableResult
