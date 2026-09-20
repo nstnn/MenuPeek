@@ -5,8 +5,10 @@ import SwiftUI
 final class SettingsWindowController: NSWindowController {
     static let initialContentSize = NSSize(width: 560, height: 440)
     static let minimumWindowSize = NSSize(width: 500, height: 380)
+    private let model: AppModel
 
     init(model: AppModel, initialTab: SettingsTab = .content) {
+        self.model = model
         let hostingController = NSHostingController(
             rootView: SettingsView(model: model, initialTab: initialTab)
         )
@@ -39,6 +41,7 @@ final class SettingsWindowController: NSWindowController {
     func showSettings() {
         guard let window else { return }
 
+        model.refreshLoginItemStatus()
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // Showing an NSHostingController-backed window lets SwiftUI refresh the

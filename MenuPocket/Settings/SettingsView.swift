@@ -40,7 +40,7 @@ struct SettingsView: View {
                     }
                     .tag(SettingsTab.content)
 
-                GeneralSettingsView(version: appVersion)
+                GeneralSettingsView(model: model, version: appVersion)
                     .tabItem {
                         Label("Chung", systemImage: "gearshape")
                     }
@@ -111,10 +111,37 @@ private struct ContentSettingsView: View {
 }
 
 private struct GeneralSettingsView: View {
+    let model: AppModel
     let version: String
 
     var body: some View {
         Form {
+            Section("Khởi động") {
+                Toggle("Mở khi đăng nhập", isOn: Binding(
+                    get: { model.isLoginItemEnabled },
+                    set: { model.setLoginItemEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+                .disabled(!model.canChangeLoginItemRegistration)
+                .accessibilityIdentifier("openAtLoginToggle")
+
+                Text(model.loginItemStatus.message)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("openAtLoginStatus")
+
+                if let failure = model.loginItemOperationFailure {
+                    Label(failure.message, systemImage: "exclamationmark.triangle")
+                        .accessibilityIdentifier("openAtLoginError")
+                }
+
+                if model.loginItemStatus == .requiresApproval {
+                    Button("Mở Mục đăng nhập…") {
+                        model.openSystemSettingsLoginItems()
+                    }
+                    .accessibilityIdentifier("openLoginItemsSettings")
+                }
+            }
+
             Section("Ứng dụng") {
                 LabeledContent("Tên", value: "MenuPocket")
                 LabeledContent("Phiên bản", value: version)
@@ -162,3 +189,75 @@ private struct DemoSettingsView: View {
         }
     }
 }
+
+#if DEBUG
+@MainActor
+private func makeLoginItemPreview(
+    status: LoginItemStatus,
+    operationResult: LoginItemOperationResult? = nil
+) -> SettingsView {
+    let service = PreviewLoginItemService(status: status, operationResult: operationResult)
+    let model = AppModel(
+        store: PreviewPreferencesStore(),
+        providers: [],
+        loginItemService: service
+    )
+    if operationResult != nil {
+        model.setLoginItemEnabled(true)
+    }
+    return SettingsView(model: model, initialTab: .general)
+}
+
+#Preview("Mở khi đăng nhập — Tắt") {
+    makeLoginItemPreview(status: .disabled)
+}
+
+#Preview("Mở khi đăng nhập — Bật") {
+    makeLoginItemPreview(status: .enabled)
+}
+
+#Preview("Mở khi đăng nhập — Cần phê duyệt") {
+    makeLoginItemPreview(status: .requiresApproval)
+}
+
+#Preview("Mở khi đăng nhập — Không khả dụng") {
+    makeLoginItemPreview(status: .unavailable)
+}
+
+#Preview("Mở khi đăng nhập — Lỗi") {
+    makeLoginItemPreview(
+        status: .disabled,
+        operationResult: .init(status: .disabled, failure: .registrationFailed)
+    )
+}
+
+private final class PreviewLoginItemService: LoginItemService {
+    private(set) var status: LoginItemStatus
+    private let operationResult: LoginItemOperationResult?
+
+    init(status: LoginItemStatus, operationResult: LoginItemOperationResult?) {
+        self.status = status
+        self.operationResult = operationResult
+    }
+
+    func readStatus() -> LoginItemStatus { status }
+
+    func register() -> LoginItemOperationResult {
+        let result = operationResult ?? .init(status: status, failure: nil)
+        status = result.status
+        return result
+    }
+
+    func unregister() -> LoginItemOperationResult {
+        .init(status: status, failure: nil)
+    }
+
+    func openSystemSettingsLoginItems() {}
+}
+
+private final class PreviewPreferencesStore: PreferencesStoring {
+    func load() throws -> PreferencesLoadOutcome { .loaded(.defaultValue) }
+
+    func save(_ preferences: AppPreferences) throws -> PreferencesSaveOutcome { .saved }
+}
+#endif
