@@ -42,6 +42,7 @@ struct MenuPocketPanel: View {
 
             HStack {
                 Button("Cài đặt…", action: onOpenSettings)
+                    .accessibilityLabel("Mở Cài đặt MenuPocket")
 
                 Spacer()
 
@@ -49,10 +50,12 @@ struct MenuPocketPanel: View {
                     model.refreshEnabledModules()
                 }
                 .disabled(model.enabledModulesInOrder.isEmpty)
+                .accessibilityLabel("Làm mới dữ liệu demo")
 
                 Button("Thoát", role: .destructive) {
                     NSApplication.shared.terminate(nil)
                 }
+                .accessibilityLabel("Thoát MenuPocket")
             }
         }
         .padding(16)
@@ -152,6 +155,7 @@ private struct ModulePanelRow: View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
+                .accessibilityHidden(true)
             Text(text)
                 .foregroundStyle(.secondary)
         }
