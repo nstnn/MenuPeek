@@ -46,15 +46,11 @@ struct SettingsView: View {
                     }
                     .tag(SettingsTab.general)
 
-                SettingsPlaceholder(
-                    systemImage: "testtube.2",
-                    title: "Demo",
-                    message: "Các kịch bản dữ liệu demo sẽ xuất hiện ở đây."
-                )
-                .tabItem {
-                    Label("Demo", systemImage: "testtube.2")
-                }
-                .tag(SettingsTab.demo)
+                DemoSettingsView(model: model)
+                    .tabItem {
+                        Label("Demo", systemImage: "testtube.2")
+                    }
+                    .tag(SettingsTab.demo)
             }
         }
         .padding(20)
@@ -133,26 +129,36 @@ private struct GeneralSettingsView: View {
     }
 }
 
-private struct SettingsPlaceholder: View {
-    let systemImage: String
-    let title: String
-    let message: String
+private struct DemoSettingsView: View {
+    let model: AppModel
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 32))
-                .foregroundStyle(.secondary)
+        Form {
+            Section("Kịch bản mô phỏng") {
+                Text("Chọn cách từng mô-đun phản hồi để xem trước các trạng thái của ứng dụng.")
+                    .foregroundStyle(.secondary)
 
-            Text(title)
-                .font(.title2)
-                .fontWeight(.semibold)
+                ForEach(model.modulesInOrder) { module in
+                    Picker(module.displayName, selection: Binding(
+                        get: { model.demoScenarios[module.id] ?? .normal },
+                        set: { model.setDemoScenario($0, for: module.id) }
+                    )) {
+                        ForEach(DemoScenario.allCases, id: \.self) { scenario in
+                            Text(scenario.displayName).tag(scenario)
+                        }
+                    }
+                    .accessibilityLabel("Kịch bản cho \(module.displayName)")
+                }
+            }
 
-            Text(message)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Section {
+                Button("Tải lại dữ liệu demo") {
+                    model.refreshEnabledModules()
+                }
+                .disabled(model.enabledModulesInOrder.isEmpty)
+            } footer: {
+                Text("Kịch bản chỉ được giữ trong phiên hiện tại và sẽ trở về Bình thường khi mở lại ứng dụng.")
+            }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

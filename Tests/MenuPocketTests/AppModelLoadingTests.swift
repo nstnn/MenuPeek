@@ -231,6 +231,62 @@ final class AppModelLoadingTests: XCTestCase {
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot, statusSnapshot)
     }
 
+    func testGlobalRefreshTargetsEnabledModulesAndRetryTargetsOnlyItsModule() async {
+        let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
+        let status = ControlledProvider(id: ModuleCatalog.statusID)
+        let model = makeModel(tasks: tasks, status: status)
+
+        model.startInitialLoads()
+        await tasks.waitForRequestCount(1)
+        await status.waitForRequestCount(1)
+        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_000))
+        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_100))
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+
+        model.refreshEnabledModules()
+        await tasks.waitForRequestCount(2)
+        await status.waitForRequestCount(2)
+        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_200))
+        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_300))
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
+        await assertRequests(tasks, [.normal, .normal])
+        await assertRequests(status, [.normal, .normal])
+
+        XCTAssertTrue(model.retryModule(ModuleCatalog.tasksID))
+        await tasks.waitForRequestCount(3)
+        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_400))
+        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
+        await assertRequests(tasks, [.normal, .normal, .normal])
+        await assertRequests(status, [.normal, .normal])
+    }
+
+    func testNewSessionResetsScenariosWhileRestoringProductPreferences() {
+        var preferences = AppPreferences.defaultValue
+        preferences.enabledModuleIDs = []
+        preferences.pinnedModuleID = nil
+        let store = LoadingPreferencesStore(preferences: preferences)
+        let firstSession = AppModel(store: store, providers: [])
+
+        XCTAssertTrue(firstSession.setDemoScenario(.error, for: ModuleCatalog.tasksID))
+        XCTAssertTrue(firstSession.setDemoScenario(.slowResponse, for: ModuleCatalog.statusID))
+        XCTAssertTrue(firstSession.moveModuleDown(ModuleCatalog.tasksID))
+        XCTAssertTrue(firstSession.setMenuBarDisplayMode(.iconOnly))
+        XCTAssertEqual(firstSession.demoScenarios[ModuleCatalog.tasksID], .error)
+        XCTAssertEqual(firstSession.demoScenarios[ModuleCatalog.statusID], .slowResponse)
+
+        let secondSession = AppModel(store: store, providers: [])
+
+        XCTAssertEqual(secondSession.demoScenarios[ModuleCatalog.tasksID], .normal)
+        XCTAssertEqual(secondSession.demoScenarios[ModuleCatalog.statusID], .normal)
+        XCTAssertEqual(secondSession.preferences.moduleOrder,
+                       [ModuleCatalog.statusID, ModuleCatalog.tasksID])
+        XCTAssertEqual(secondSession.preferences.menuBarDisplayMode, .iconOnly)
+        XCTAssertTrue(secondSession.preferences.enabledModuleIDs.isEmpty)
+        XCTAssertNil(secondSession.preferences.pinnedModuleID)
+    }
+
     func testNewRequestFinishesBeforeOldNoncooperativeResult() async {
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let model = makeModel(tasks: tasks)
