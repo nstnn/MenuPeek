@@ -45,6 +45,11 @@ struct MenuPocketPanel: View {
 
                 Spacer()
 
+                Button("Làm mới") {
+                    model.refreshEnabledModules()
+                }
+                .disabled(model.enabledModulesInOrder.isEmpty)
+
                 Button("Thoát", role: .destructive) {
                     NSApplication.shared.terminate(nil)
                 }
