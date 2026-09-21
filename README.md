@@ -145,3 +145,5 @@ notarization.
 The point-in-time implementation handoff is recorded in
 `plan/task-030/report.md`. Build products, Xcode user state, and personal
 signing material are intentionally excluded from source control.
+
+For the full project guide, start with [`docs/index.md`](docs/index.md).
