@@ -359,10 +359,6 @@ and should arrive with the source-specific requirements.
 
 ## Verification and handoff
 
-The point-in-time handoff report is [`plan/task-030/report.md`](../plan/task-030/report.md).
-It records the Release artifact path and hash, the accepted assumption that
-TASK-026 through TASK-029 are complete, and the fact that those checks were not
-rerun during the documentation handoff.
 
 The evidence rules are deliberately strict:
 
@@ -456,9 +452,7 @@ macOS asks for approval, then return to Settings to reread the state.
 ## Project documents
 
 - [`README.md`](../README.md) — concise repository and quick-start guide.
-- [`plan/task-030/report.md`](../plan/task-030/report.md) — point-in-time Task 30
-  handoff and evidence boundaries, when the local planning artifacts are
-  present.
+
 
 The implementation plan and master roadmap are planning artifacts rather than
 runtime dependencies. They may be absent from a fresh product checkout; this
