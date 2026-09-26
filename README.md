@@ -140,10 +140,9 @@ plugins, user scripts, global shortcuts, notifications, multiple menu bar
 items, automatic updates, telemetry, App Store/Developer ID distribution, or
 notarization.
 
-## Handoff evidence
+## Build artifacts
 
-The point-in-time implementation handoff is recorded in
-`plan/task-030/report.md`. Build products, Xcode user state, and personal
-signing material are intentionally excluded from source control.
+Build products, Xcode user state, and personal signing material are
+intentionally excluded from source control.
 
 For the full project guide, start with [`docs/index.md`](docs/index.md).
