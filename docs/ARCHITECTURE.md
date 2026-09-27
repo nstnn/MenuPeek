@@ -4,7 +4,7 @@ MenuPocket is a Swift 6 macOS application using SwiftUI for its menu bar scene a
 
 ## App composition
 
-`MenuPocketApp` creates a `.window` style `MenuBarExtra`. `AppDelegate` owns a `DailyNotesState`, the older demo-oriented `AppModel`, and one `SettingsWindowController`. The current menu bar panel receives `DailyNotesState`; the Settings window still receives `AppModel`. The app creates the Settings window on first launch through a separate onboarding marker, and reuses that window afterward.
+`MenuPocketApp` creates a `.window` style `MenuBarExtra`. `AppDelegate` owns a `DailyNotesState`, the older demo-oriented `AppModel`, and one `SettingsWindowController`. The current menu bar panel receives `DailyNotesState`; the Settings window receives `AppModel` for launch-at-login status and preference warnings. It exposes Launch at Login, app information, and Quit. The app creates the Settings window on first launch through a separate onboarding marker, and reuses that window afterward.
 
 ## Notes flow
 
@@ -16,7 +16,7 @@ MenuPocket is a Swift 6 macOS application using SwiftUI for its menu bar scene a
 
 ## Remaining demo and system boundaries
 
-`AppModel`, `ModuleCatalog`, demo providers, `AppPreferences`, and `PreferencesStore` still support the older Settings surface. Product preferences use a namespaced `UserDefaults` value with reconciliation and newer-schema write protection; they are distinct from the SQLite notes database. Demo providers are no longer started on app launch.
+`AppModel`, `ModuleCatalog`, demo providers, `AppPreferences`, and `PreferencesStore` retain earlier demo behavior, but it is not exposed in Settings. Product preferences use a namespaced `UserDefaults` value with reconciliation and newer-schema write protection; they are distinct from the SQLite notes database. Demo providers are no longer started on app launch.
 
 `LoginItemService` wraps `SMAppService.mainApp`. Settings rereads system status and reports disabled, enabled, approval-required, and unavailable states. Tests inject a fake service so they do not register or unregister the host Mac's real login item. Release and login-item verification need an installed copy at a stable location; registration alone does not prove startup at the next login.
 

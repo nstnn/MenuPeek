@@ -8,9 +8,9 @@ enum PreferencesWarning: Equatable, Sendable {
     var message: String {
         switch self {
         case .corruptData:
-            "Không thể đọc cài đặt đã lưu. MenuPocket đang dùng cài đặt mặc định; các cài đặt khác không bị thay đổi."
+            "Could not read saved preferences. MenuPocket is using defaults for this session; other settings were not changed."
         case let .newerSchema(storedVersion, supportedVersion):
-            "Định dạng cài đặt phiên bản \(storedVersion) mới hơn mức ứng dụng này hỗ trợ (\(supportedVersion)). Các tùy chọn nội dung bị tạm khóa trong phiên này. Hãy dùng phiên bản MenuPocket tương thích để thay đổi cài đặt; dữ liệu đã lưu được giữ nguyên."
+            "Saved preferences use version \(storedVersion), newer than this app supports (\(supportedVersion)). They are protected from changes in this session. Use a compatible MenuPocket version to edit them; saved data was preserved."
         }
     }
 }

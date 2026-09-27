@@ -124,7 +124,7 @@ final class LoginItemSettingsTests: XCTestCase {
     func testShowingSettingsRefreshesWithoutRegistering() throws {
         let service = FakeLoginItemService(status: .disabled)
         let model = makeModel(service: service)
-        let controller = SettingsWindowController(model: model, initialTab: .general)
+        let controller = SettingsWindowController(model: model)
         defer { controller.close() }
 
         service.status = .enabled
@@ -153,17 +153,19 @@ final class LoginItemSettingsTests: XCTestCase {
         XCTAssertEqual(service.unregisterCount, 0)
     }
 
-    func testEverySystemStatusHasFriendlyVietnameseCopy() {
+    func testEverySystemStatusHasEnglishCopy() {
         XCTAssertEqual(
             LoginItemStatus.disabled.message,
-            "MenuPocket sẽ không tự động mở khi bạn đăng nhập."
+            "MenuPocket will not open automatically when you log in."
         )
         XCTAssertEqual(
             LoginItemStatus.enabled.message,
-            "MenuPocket sẽ tự động mở sau khi bạn đăng nhập."
+            "MenuPocket will open automatically when you log in."
         )
-        XCTAssertTrue(LoginItemStatus.requiresApproval.message.contains("Cài đặt hệ thống"))
-        XCTAssertTrue(LoginItemStatus.unavailable.message.contains("Không thể xác định"))
+        XCTAssertTrue(LoginItemStatus.requiresApproval.message.contains("System Settings"))
+        XCTAssertTrue(LoginItemStatus.unavailable.message.contains("unavailable"))
+        XCTAssertTrue(LoginItemOperationFailure.registrationFailed.message.contains("Could not turn on"))
+        XCTAssertTrue(LoginItemOperationFailure.unregistrationFailed.message.contains("Could not turn off"))
     }
 
     @MainActor

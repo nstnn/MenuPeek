@@ -26,13 +26,13 @@ enum LoginItemStatus: Equatable, Sendable {
     var message: String {
         switch self {
         case .disabled:
-            "MenuPocket sẽ không tự động mở khi bạn đăng nhập."
+            "MenuPocket will not open automatically when you log in."
         case .enabled:
-            "MenuPocket sẽ tự động mở sau khi bạn đăng nhập."
+            "MenuPocket will open automatically when you log in."
         case .requiresApproval:
-            "macOS cần bạn cho phép MenuPocket trong Mục đăng nhập của Cài đặt hệ thống."
+            "Approve MenuPocket in Login Items in System Settings."
         case .unavailable:
-            "Không thể xác định trạng thái Mở khi đăng nhập trên máy Mac này."
+            "Open at Login status is unavailable on this Mac."
         }
     }
 }
@@ -44,9 +44,9 @@ enum LoginItemOperationFailure: Equatable, Sendable {
     var message: String {
         switch self {
         case .registrationFailed:
-            "Không thể bật Mở khi đăng nhập. Hãy kiểm tra cài đặt Đăng nhập trong Cài đặt hệ thống rồi thử lại."
+            "Could not turn on Open at Login. Check Login Items in System Settings and try again."
         case .unregistrationFailed:
-            "Không thể tắt Mở khi đăng nhập. Hãy kiểm tra cài đặt Đăng nhập trong Cài đặt hệ thống rồi thử lại."
+            "Could not turn off Open at Login. Check Login Items in System Settings and try again."
         }
     }
 }

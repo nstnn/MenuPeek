@@ -7,13 +7,13 @@ final class SettingsWindowController: NSWindowController {
     static let minimumWindowSize = NSSize(width: 500, height: 380)
     private let model: AppModel
 
-    init(model: AppModel, initialTab: SettingsTab = .content) {
+    init(model: AppModel, onQuit: @escaping () -> Void = { NSApplication.shared.terminate(nil) }) {
         self.model = model
         let hostingController = NSHostingController(
-            rootView: SettingsView(model: model, initialTab: initialTab)
+            rootView: SettingsView(model: model, onQuit: onQuit)
         )
         // The window owns its resize limits. Letting NSHostingController derive a
-        // minimum from the current SwiftUI tab can silently replace the product's
+        // minimum from the SwiftUI content can silently replace the product's
         // 500 × 380 pt minimum after the window is shown.
         hostingController.sizingOptions = []
         let window = NSWindow(
@@ -23,7 +23,7 @@ final class SettingsWindowController: NSWindowController {
             defer: false
         )
 
-        window.title = "Cài đặt MenuPocket"
+        window.title = "MenuPocket Settings"
         window.contentViewController = hostingController
         window.setContentSize(Self.initialContentSize)
         Self.applyMinimumWindowSize(to: window)

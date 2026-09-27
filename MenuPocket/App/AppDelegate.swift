@@ -23,8 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        openSettingsOnFirstLaunchIfNeeded { tab in
-            showSettings(initialTab: tab)
+        openSettingsOnFirstLaunchIfNeeded {
+            showSettings()
         }
     }
 
@@ -37,14 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // The decision is independent of preference recovery and of window visibility.
-    func openSettingsOnFirstLaunchIfNeeded(present: (SettingsTab) -> Void) {
+    func openSettingsOnFirstLaunchIfNeeded(present: () -> Void) {
         guard !onboardingStore.hasCompletedOnboarding else { return }
-        present(.general)
+        present()
         onboardingStore.markOnboardingCompleted()
     }
 
-    func showSettings(initialTab: SettingsTab = .content) {
-        let controller = settingsWindowController ?? makeSettingsWindowController(initialTab: initialTab)
+    func showSettings() {
+        let controller = settingsWindowController ?? makeSettingsWindowController()
         controller.showSettings()
     }
 
@@ -60,8 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    private func makeSettingsWindowController(initialTab: SettingsTab) -> SettingsWindowController {
-        let controller = SettingsWindowController(model: model, initialTab: initialTab)
+    private func makeSettingsWindowController() -> SettingsWindowController {
+        let controller = SettingsWindowController(model: model)
         settingsWindowController = controller
         return controller
     }

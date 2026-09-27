@@ -1,123 +1,29 @@
 import SwiftUI
 
-enum SettingsTab: Hashable {
-    case content
-    case general
-    case demo
-}
-
 struct SettingsView: View {
-    static let demoExplanation =
-        "Ứng dụng đang dùng dữ liệu demo. Bạn có thể chọn nội dung thật ở phiên bản sau."
-
     let model: AppModel
     let appVersion: String
-    @State private var selectedTab: SettingsTab
+    let onQuit: () -> Void
 
-    init(model: AppModel, initialTab: SettingsTab = .content, bundle: Bundle = .main) {
+    init(model: AppModel, bundle: Bundle = .main, onQuit: @escaping () -> Void) {
         self.model = model
         appVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-        _selectedTab = State(initialValue: initialTab)
+        self.onQuit = onQuit
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        Form {
             if let warning = model.preferenceWarning {
                 Label(warning.message, systemImage: "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("preferencesWarning")
             }
 
             if let saveError = model.preferenceSaveError {
                 Label(saveError, systemImage: "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            TabView(selection: $selectedTab) {
-                ContentSettingsView(model: model)
-                    .tabItem {
-                        Label("Nội dung", systemImage: "square.grid.2x2")
-                    }
-                    .tag(SettingsTab.content)
-
-                GeneralSettingsView(model: model, version: appVersion)
-                    .tabItem {
-                        Label("Chung", systemImage: "gearshape")
-                    }
-                    .tag(SettingsTab.general)
-
-                DemoSettingsView(model: model)
-                    .tabItem {
-                        Label("Demo", systemImage: "testtube.2")
-                    }
-                    .tag(SettingsTab.demo)
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct ContentSettingsView: View {
-    let model: AppModel
-
-    var body: some View {
-        Form {
-            Section("Nội dung hiển thị") {
-                ForEach(model.modulesInOrder) { module in
-                    HStack {
-                        Toggle(isOn: Binding(
-                            get: { model.preferences.enabledModuleIDs.contains(module.id) },
-                            set: { model.setModuleEnabled(module.id, enabled: $0) }
-                        )) {
-                            Label(module.displayName, systemImage: module.systemImageName)
-                        }
-                        .toggleStyle(.switch)
-
-                        Button("Lên") { model.moveModuleUp(module.id) }
-                            .disabled(model.modulesInOrder.first?.id == module.id)
-                            .accessibilityLabel("Lên \(module.displayName)")
-
-                        Button("Xuống") { model.moveModuleDown(module.id) }
-                            .disabled(model.modulesInOrder.last?.id == module.id)
-                            .accessibilityLabel("Xuống \(module.displayName)")
-                    }
-                }
-            }
-            .disabled(!model.isPreferenceEditingAllowed)
-
-            Section("Thanh menu") {
-                Picker("Mục ghim", selection: Binding<ModuleDescriptor.ID?>(
-                    get: { model.preferences.pinnedModuleID },
-                    set: { model.setPinnedModule($0) }
-                )) {
-                    Text("Không ghim").tag(nil as ModuleDescriptor.ID?)
-                    ForEach(model.enabledPinnableModulesInOrder) { module in
-                        Text(module.displayName).tag(module.id as ModuleDescriptor.ID?)
-                    }
-                }
-
-                Picker("Chế độ hiển thị", selection: Binding(
-                    get: { model.preferences.menuBarDisplayMode },
-                    set: { model.setMenuBarDisplayMode($0) }
-                )) {
-                    Text("Chỉ biểu tượng").tag(MenuBarDisplayMode.iconOnly)
-                    Text("Biểu tượng và thông tin").tag(MenuBarDisplayMode.iconAndInformation)
-                }
-            }
-            .disabled(!model.isPreferenceEditingAllowed)
-        }
-    }
-}
-
-private struct GeneralSettingsView: View {
-    let model: AppModel
-    let version: String
-
-    var body: some View {
-        Form {
-            Section("Khởi động") {
-                Toggle("Mở khi đăng nhập", isOn: Binding(
+            Section("Startup") {
+                Toggle("Open at Login", isOn: Binding(
                     get: { model.isLoginItemEnabled },
                     set: { model.setLoginItemEnabled($0) }
                 ))
@@ -135,64 +41,29 @@ private struct GeneralSettingsView: View {
                 }
 
                 if model.loginItemStatus == .requiresApproval {
-                    Button("Mở Mục đăng nhập…") {
+                    Button("Open Login Items Settings…") {
                         model.openSystemSettingsLoginItems()
                     }
                     .accessibilityIdentifier("openLoginItemsSettings")
                 }
             }
 
-            Section("Ứng dụng") {
-                LabeledContent("Tên", value: "MenuPocket")
+            Section("App") {
+                LabeledContent("Name", value: "MenuPocket")
                     .accessibilityRepresentation {
-                        Text("Tên ứng dụng: MenuPocket")
+                        Text("App name: MenuPocket")
                     }
-                LabeledContent("Phiên bản", value: version)
+                LabeledContent("Version", value: appVersion)
                     .accessibilityRepresentation {
-                        Text("Phiên bản: \(version)")
+                        Text("Version: \(appVersion)")
                     }
-            }
 
-            Section("Dữ liệu demo") {
-                Text(SettingsView.demoExplanation)
-                Text("Dữ liệu minh họa được xử lý cục bộ trên máy này; ứng dụng không kết nối dịch vụ bên ngoài.")
-                    .foregroundStyle(.secondary)
+                Button("Quit MenuPocket", action: onQuit)
+                    .accessibilityIdentifier("quitMenuPocket")
             }
         }
-    }
-}
-
-private struct DemoSettingsView: View {
-    let model: AppModel
-
-    var body: some View {
-        Form {
-            Section("Kịch bản mô phỏng") {
-                Text("Chọn cách từng mô-đun phản hồi để xem trước các trạng thái của ứng dụng.")
-                    .foregroundStyle(.secondary)
-
-                ForEach(model.modulesInOrder) { module in
-                    Picker(module.displayName, selection: Binding(
-                        get: { model.demoScenarios[module.id] ?? .normal },
-                        set: { model.setDemoScenario($0, for: module.id) }
-                    )) {
-                        ForEach(DemoScenario.allCases, id: \.self) { scenario in
-                            Text(scenario.displayName).tag(scenario)
-                        }
-                    }
-                    .accessibilityLabel("Kịch bản cho \(module.displayName)")
-                }
-            }
-
-            Section {
-                Button("Tải lại dữ liệu demo") {
-                    model.refreshEnabledModules()
-                }
-                .disabled(model.enabledModulesInOrder.isEmpty)
-            } footer: {
-                Text("Kịch bản chỉ được giữ trong phiên hiện tại và sẽ trở về Bình thường khi mở lại ứng dụng.")
-            }
-        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -211,26 +82,26 @@ private func makeLoginItemPreview(
     if operationResult != nil {
         model.setLoginItemEnabled(true)
     }
-    return SettingsView(model: model, initialTab: .general)
+    return SettingsView(model: model, onQuit: {})
 }
 
-#Preview("Mở khi đăng nhập — Tắt") {
+#Preview("Open at Login — Off") {
     makeLoginItemPreview(status: .disabled)
 }
 
-#Preview("Mở khi đăng nhập — Bật") {
+#Preview("Open at Login — On") {
     makeLoginItemPreview(status: .enabled)
 }
 
-#Preview("Mở khi đăng nhập — Cần phê duyệt") {
+#Preview("Open at Login — Approval Required") {
     makeLoginItemPreview(status: .requiresApproval)
 }
 
-#Preview("Mở khi đăng nhập — Không khả dụng") {
+#Preview("Open at Login — Unavailable") {
     makeLoginItemPreview(status: .unavailable)
 }
 
-#Preview("Mở khi đăng nhập — Lỗi") {
+#Preview("Open at Login — Error") {
     makeLoginItemPreview(
         status: .disabled,
         operationResult: .init(status: .disabled, failure: .registrationFailed)

@@ -18,6 +18,6 @@ History browsing, automatic carryover, reminders, recurring items, accounts, and
 
 The menu bar opens `DailyNotesPanel` with an icon-only label. The panel shows today's notes, progress, yesterday's unfinished count, a single-line composer, completion toggles, and secondary edit/delete actions with deletion confirmation. `DailyNotesState` reads on panel open and calendar-day change; note writes are published to the UI only after the repository succeeds. The SQLite store supports add, read, completion, edit, and delete operations and refuses a newer schema version.
 
-The Settings window still shows the demo Content and Demo tabs, Vietnamese copy, and the earlier module preferences. The notes panel has no Quit control, while the approved Notes MVP requires a normal Quit route. The demo loading and preference code remains in the project, though the current app launch does not start demo loads. These are transition gaps, not completed Notes MVP behavior.
+Settings now shows Launch at Login, app information, and Quit in English. The notes panel has no Quit control by design. The demo loading and preference code remains in the project, though the current app launch does not start demo loads.
 
 Code and tests establish these implementation facts. Running-app visual, accessibility, and Release acceptance remain separate checks; see [Workflow](WORKFLOW.md).

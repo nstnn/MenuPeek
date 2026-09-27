@@ -60,7 +60,7 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testFirstLaunchUsesSeparatePersistentMarkerAndOpensGeneralOnlyOnce() throws {
+    func testFirstLaunchUsesSeparatePersistentMarkerAndOpensSettingsOnlyOnce() throws {
         let suiteName = "local.menupocket.tests.Onboarding.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -70,23 +70,21 @@ final class AppConfigurationTests: XCTestCase {
             model: AppModel(store: PreferencesStore(userDefaults: defaults)),
             onboardingStore: onboarding
         )
-        var shownTabs: [SettingsTab] = []
+        var presentations = 0
 
         XCTAssertNotNil(defaults.data(forKey: PreferencesStore.storageKey))
         XCTAssertFalse(onboarding.hasCompletedOnboarding)
-        first.openSettingsOnFirstLaunchIfNeeded { shownTabs.append($0) }
-        XCTAssertEqual(shownTabs, [.general])
+        first.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
+        XCTAssertEqual(presentations, 1)
         XCTAssertTrue(onboarding.hasCompletedOnboarding)
 
         let second = AppDelegate(
             model: AppModel(store: PreferencesStore(userDefaults: defaults)),
             onboardingStore: UserDefaultsOnboardingStore(userDefaults: defaults)
         )
-        second.openSettingsOnFirstLaunchIfNeeded { shownTabs.append($0) }
-        XCTAssertEqual(shownTabs, [.general])
+        second.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
+        XCTAssertEqual(presentations, 1)
         XCTAssertNil(second.settingsWindowController)
-        XCTAssertEqual(SettingsView.demoExplanation,
-                       "Ứng dụng đang dùng dữ liệu demo. Bạn có thể chọn nội dung thật ở phiên bản sau.")
     }
 
     @MainActor
@@ -104,7 +102,7 @@ final class AppConfigurationTests: XCTestCase {
             onboardingStore: onboarding
         )
         var presentations = 0
-        delegate.openSettingsOnFirstLaunchIfNeeded { _ in presentations += 1 }
+        delegate.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
 
         XCTAssertEqual(presentations, 0)
         XCTAssertEqual(delegate.model.preferenceWarning, .corruptData)

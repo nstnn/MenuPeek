@@ -272,7 +272,7 @@ final class AppModelTests: XCTestCase {
         let recovered = AppModel(store: PreferencesStore(userDefaults: defaults))
         XCTAssertEqual(recovered.preferenceWarning, .corruptData)
         XCTAssertTrue(recovered.isPreferenceEditingAllowed)
-        XCTAssertTrue(recovered.preferenceWarning?.message.contains("cài đặt mặc định") == true)
+        XCTAssertTrue(recovered.preferenceWarning?.message.contains("using defaults") == true)
 
         let futureData = Data("{\"schemaVersion\":2,\"futureOnly\":true}".utf8)
         defaults.set(futureData, forKey: PreferencesStore.storageKey)
@@ -280,7 +280,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(protected.preferenceWarning,
                        .newerSchema(storedVersion: 2, supportedVersion: 1))
         XCTAssertFalse(protected.isPreferenceEditingAllowed)
-        XCTAssertTrue(protected.preferenceWarning?.message.contains("tạm khóa trong phiên này") == true)
+        XCTAssertTrue(protected.preferenceWarning?.message.contains("protected from changes") == true)
         XCTAssertFalse(protected.setPinnedModule(nil))
         XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), futureData)
     }

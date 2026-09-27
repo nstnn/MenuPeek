@@ -399,5 +399,5 @@ final class AppModel {
     }
 
     private static let saveErrorMessage =
-        "Không thể lưu cài đặt. Thay đổi chưa được áp dụng; hãy thử lại."
+        "Could not save preferences. The change was not applied; try again."
 }

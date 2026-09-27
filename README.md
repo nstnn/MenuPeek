@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a local macOS menu bar app for a daily notes checklist. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. The current notes panel stores data in SQLite. Some Settings controls still belong to the earlier demo shell; see [current behavior and remaining MVP work](docs/REQUIREMENTS.md).
+MenuPocket is a local macOS menu bar app for a daily notes checklist. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. The current notes panel stores data in SQLite. See [current behavior and remaining MVP work](docs/REQUIREMENTS.md).
 
 ## Requirements
 
@@ -31,7 +31,7 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 
 Click the menu bar icon to see today's notes, completed/total progress, and the count of unfinished notes from yesterday. `Add note` opens a single-line composer. Press Return or `Save` to store a nonempty note; Escape cancels. Check a note to complete it, or use its row menu to edit or delete it. Deletion asks for confirmation. The Settings gear opens the retained Settings window.
 
-Notes are local to this Mac and stay assigned to their creation day. They are stored in the app's Application Support directory. The current Settings window still exposes demo module controls and Vietnamese text; the Notes MVP calls for replacing those controls and copy.
+Notes are local to this Mac and stay assigned to their creation day. They are stored in the app's Application Support directory. Settings provides Launch at Login, app information, and Quit.
 
 ## Project documentation
 
