@@ -173,6 +173,43 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(store.saved.isEmpty)
     }
 
+    func testAddAndCompletionPersistAcrossFreshStateWithSQLite() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DailyNotesStateTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("notes.sqlite")
+        let makeState = {
+            DailyNotesState(
+                repositoryFactory: { try SQLiteNoteRepository(databaseURL: databaseURL) },
+                day: self.makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                notificationCenter: NotificationCenter()
+            )
+        }
+
+        let firstSession = makeState()
+        firstSession.panelDidOpen()
+        firstSession.draft = "  First note  "
+        XCTAssertTrue(firstSession.addDraft())
+        firstSession.draft = "Second note"
+        XCTAssertTrue(firstSession.addDraft())
+        let firstID = try XCTUnwrap(firstSession.notes.first(where: { $0.text == "First note" })?.id)
+        XCTAssertTrue(firstSession.setCompleted(id: firstID, completed: true))
+        XCTAssertEqual(firstSession.progress, NoteProgress(completed: 1, total: 2))
+        XCTAssertEqual(firstSession.notes.last?.id, firstID)
+
+        let secondSession = makeState()
+        secondSession.panelDidOpen()
+        XCTAssertEqual(secondSession.notes.map(\.text), ["Second note", "First note"])
+        XCTAssertEqual(secondSession.progress, NoteProgress(completed: 1, total: 2))
+        XCTAssertTrue(secondSession.notes.last?.isCompleted == true)
+        XCTAssertTrue(secondSession.setCompleted(id: firstID, completed: false))
+
+        let thirdSession = makeState()
+        thirdSession.panelDidOpen()
+        XCTAssertEqual(thirdSession.progress, NoteProgress(completed: 0, total: 2))
+        XCTAssertFalse(try XCTUnwrap(thirdSession.notes.first(where: { $0.id == firstID })).isCompleted)
+    }
+
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date) -> DailyNotesState {
         DailyNotesState(repositoryFactory: { store }, day: makeDay(now: now),
                         notificationCenter: NotificationCenter())

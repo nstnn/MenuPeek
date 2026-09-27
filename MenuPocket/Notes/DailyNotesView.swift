@@ -1,5 +1,42 @@
 import SwiftUI
 
+/// Keeps composer visibility alongside the app-owned notes state while the
+/// menu bar panel is open.
+struct DailyNotesPanel: View {
+    @Bindable var state: DailyNotesState
+    @State private var isComposerVisible = false
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        DailyNotesView(
+            dateLabel: Self.dateLabel(for: state.todayKey),
+            notes: state.notes,
+            progress: state.progress,
+            yesterdayIncompleteCount: state.yesterdayIncompleteCount,
+            errorMessage: state.errorMessage,
+            draft: $state.draft,
+            isComposerVisible: $isComposerVisible,
+            onOpenSettings: onOpenSettings,
+            onSave: { state.addDraft() },
+            onToggleCompletion: { id, completed in
+                state.setCompleted(id: id, completed: completed)
+            }
+        )
+        .onAppear { state.panelDidOpen() }
+    }
+
+    private static func dateLabel(for dayKey: String?) -> String {
+        let key = dayKey ?? NoteDay().keys().today
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(secondsFromGMT: 0)
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: key) else { return key }
+        parser.dateFormat = "d MMM"
+        return parser.string(from: date)
+    }
+}
+
 /// The Notes panel's presentation boundary. Callers supply saved values and
 /// actions; the view does not open storage or assume that a save succeeded.
 struct DailyNotesView: View {

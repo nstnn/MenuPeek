@@ -3,14 +3,17 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel
+    let dailyNotesState: DailyNotesState
     private(set) var settingsWindowController: SettingsWindowController?
     private let onboardingStore: any OnboardingStoring
 
     init(
         model: AppModel,
+        dailyNotesState: DailyNotesState = DailyNotesState(),
         onboardingStore: any OnboardingStoring = UserDefaultsOnboardingStore()
     ) {
         self.model = model
+        self.dailyNotesState = dailyNotesState
         self.onboardingStore = onboardingStore
         super.init()
     }
