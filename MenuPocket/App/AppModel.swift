@@ -110,7 +110,7 @@ final class AppModel {
     init(
         store: any PreferencesStoring = PreferencesStore(),
         catalog: [ModuleDescriptor] = ModuleCatalog.defaultModules,
-        providers: [any ModuleProvider] = [DemoTasksProvider(), DemoStatusProvider()],
+        providers: [any ModuleProvider] = [],
         loginItemService: any LoginItemService = SystemLoginItemService()
     ) {
         self.store = store

@@ -49,43 +49,26 @@ final class AppModelLoadingTests: XCTestCase {
         )
     }
 
-    func testStartupLoadsOnlyEnabledModulesOnceAndStoresSuccessfulTime() async {
+    func testAppLaunchPreservesPreferencesWithoutStartingDemoLoads() async {
         var preferences = AppPreferences.defaultValue
         preferences.enabledModuleIDs = [ModuleCatalog.tasksID]
+        preferences.menuBarDisplayMode = .iconAndInformation
+        let store = LoadingPreferencesStore(preferences: preferences)
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let status = ControlledProvider(id: ModuleCatalog.statusID)
-        let model = makeModel(preferences: preferences, tasks: tasks, status: status)
-        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+        let model = AppModel(store: store, providers: [tasks, status])
 
         let delegate = AppDelegate(model: model, onboardingStore: CompletedOnboardingStore())
         delegate.applicationDidFinishLaunching(
             Notification(name: NSApplication.didFinishLaunchingNotification)
         )
         XCTAssertTrue(delegate.model === model)
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.isLoading, false)
-        model.startInitialLoads()
-        model.panelDidOpen()
-        await tasks.waitForRequestCount(1)
-        await tasks.completeNext(with: snapshot)
-        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
-
-        await assertRequests(tasks, [.normal])
-        await assertRequests(status, [])
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, snapshot)
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot?.updatedAt,
-                       Date(timeIntervalSince1970: 1_700_000_000))
-        XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
+        XCTAssertEqual(model.preferences, preferences)
+        XCTAssertTrue(store.savedPreferences.isEmpty)
+        XCTAssertEqual(model.currentLoadCount, 0)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, false)
-
-        model.panelDidOpen()
-        await assertRequests(tasks, [.normal])
-
-        model.refreshEnabledModules()
-        await tasks.waitForRequestCount(2)
-        await tasks.completeNext(with: snapshot)
-        await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
-        await assertRequests(tasks, [.normal, .normal])
+        XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.isLoading, false)
+        await assertRequests(tasks, [])
         await assertRequests(status, [])
     }
 

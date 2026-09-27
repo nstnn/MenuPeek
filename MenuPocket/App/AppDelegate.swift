@@ -23,7 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        model.startInitialLoads()
         openSettingsOnFirstLaunchIfNeeded { tab in
             showSettings(initialTab: tab)
         }
