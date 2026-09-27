@@ -1,0 +1,238 @@
+import SwiftUI
+
+/// The Notes panel's presentation boundary. Callers supply saved values and
+/// actions; the view does not open storage or assume that a save succeeded.
+struct DailyNotesView: View {
+    let dateLabel: String
+    let notes: [Note]
+    let progress: NoteProgress
+    let yesterdayIncompleteCount: Int
+    let errorMessage: String?
+    @Binding var draft: String
+    @Binding var isComposerVisible: Bool
+    let onOpenSettings: () -> Void
+    let onSave: () -> Bool
+    let onToggleCompletion: (UUID, Bool) -> Void
+
+    @FocusState private var isDraftFocused: Bool
+
+    private let rowHeight: CGFloat = 43
+    private let maximumListHeight: CGFloat = 258
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            Divider()
+            dateAndProgress
+            noteList
+            addArea
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("dailyNotesError")
+            }
+
+            if yesterdayIncompleteCount > 0 {
+                Text("\(yesterdayIncompleteCount) unfinished \(yesterdayIncompleteCount == 1 ? "item" : "items") from yesterday")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 360)
+        .frame(maxHeight: 480)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("MenuPocket")
+                .font(.headline)
+            Spacer()
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Settings")
+        }
+    }
+
+    private var dateAndProgress: some View {
+        HStack {
+            Text(dateLabel)
+                .fontWeight(.medium)
+            Spacer()
+            Text("\(progress.completed)/\(progress.total) complete")
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+    }
+
+    private var noteList: some View {
+        ScrollView {
+            if notes.isEmpty {
+                Text("No notes yet")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(notes) { note in
+                        Toggle(isOn: Binding(
+                            get: { note.isCompleted },
+                            set: { onToggleCompletion(note.id, $0) }
+                        )) {
+                            Text(note.text)
+                                .lineLimit(2)
+                                .foregroundStyle(note.isCompleted ? .secondary : .primary)
+                        }
+                        .toggleStyle(.checkbox)
+                        .tint(.primary)
+                        .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+
+                        if note.id != notes.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(
+            notes.isEmpty ? rowHeight : CGFloat(notes.count) * rowHeight + CGFloat(max(notes.count - 1, 0)),
+            maximumListHeight
+        ))
+        .accessibilityIdentifier("dailyNotesScrollView")
+    }
+
+    private var addArea: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isComposerVisible {
+                composer
+            } else {
+                Button {
+                    isComposerVisible = true
+                } label: {
+                    Label("Add note", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.medium))
+                .frame(height: 32)
+            }
+        }
+    }
+
+    private var composer: some View {
+        HStack(spacing: 8) {
+            TextField("Write a note", text: $draft)
+                .textFieldStyle(.plain)
+                .focused($isDraftFocused)
+                .onSubmit(saveDraft)
+                .onExitCommand { cancelDraft() }
+                .task { isDraftFocused = true }
+
+            Button("Save", action: saveDraft)
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                .padding(.horizontal, 14)
+                .frame(height: 32)
+                .background(Color.primary, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 42)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(isDraftFocused ? 0.65 : 0.18), lineWidth: 1)
+        }
+    }
+
+    private func saveDraft() {
+        if onSave() {
+            isComposerVisible = false
+        }
+    }
+
+    private func cancelDraft() {
+        draft = ""
+        isComposerVisible = false
+    }
+}
+
+#if DEBUG
+private struct DailyNotesPreview: View {
+    enum Scenario { case empty, five, long }
+
+    @State private var notes: [Note]
+    @State private var draft = ""
+    @State private var isComposerVisible: Bool
+
+    init(_ scenario: Scenario, composerOpen: Bool = false) {
+        let samples = [
+            "Send design draft to the team",
+            "Book a dentist appointment",
+            "Reply to Maya's email",
+            "Review September expenses",
+            "Pick up a package"
+        ]
+        let count = switch scenario {
+        case .empty: 0
+        case .five: 5
+        case .long: 20
+        }
+        _notes = State(initialValue: (0..<count).map { index in
+            Note(
+                id: UUID(),
+                text: samples[index % samples.count],
+                dayKey: "2026-09-26",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_790_000_000 - index)),
+                completedAt: nil
+            )
+        })
+        _isComposerVisible = State(initialValue: composerOpen)
+    }
+
+    var body: some View {
+        DailyNotesView(
+            dateLabel: "26 Sep",
+            notes: NoteOrder.sorted(notes),
+            progress: NoteProgress(notes: notes, for: "2026-09-26"),
+            yesterdayIncompleteCount: notes.isEmpty ? 0 : 3,
+            errorMessage: nil,
+            draft: $draft,
+            isComposerVisible: $isComposerVisible,
+            onOpenSettings: {},
+            onSave: {
+                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return false }
+                notes.append(Note(id: UUID(), text: text, dayKey: "2026-09-26",
+                                  createdAt: Date(), completedAt: nil))
+                draft = ""
+                return true
+            },
+            onToggleCompletion: { id, isCompleted in
+                guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+                let note = notes[index]
+                notes[index] = Note(id: note.id, text: note.text, dayKey: note.dayKey,
+                                    createdAt: note.createdAt,
+                                    completedAt: isCompleted ? Date() : nil)
+            }
+        )
+    }
+}
+
+#Preview("Empty · Light") { DailyNotesPreview(.empty).preferredColorScheme(.light) }
+#Preview("Five notes · Light") { DailyNotesPreview(.five).preferredColorScheme(.light) }
+#Preview("Narrow · Light") { DailyNotesPreview(.five).frame(width: 320).preferredColorScheme(.light) }
+#Preview("Composer · Light") { DailyNotesPreview(.five, composerOpen: true).preferredColorScheme(.light) }
+#Preview("Long list · Light") { DailyNotesPreview(.long).preferredColorScheme(.light) }
+#Preview("Empty · Dark") { DailyNotesPreview(.empty).preferredColorScheme(.dark) }
+#Preview("Five notes · Dark") { DailyNotesPreview(.five).preferredColorScheme(.dark) }
+#Preview("Composer · Dark") { DailyNotesPreview(.five, composerOpen: true).preferredColorScheme(.dark) }
+#Preview("Long list · Dark") { DailyNotesPreview(.long).preferredColorScheme(.dark) }
+#endif
