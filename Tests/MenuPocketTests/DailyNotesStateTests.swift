@@ -37,6 +37,7 @@ final class DailyNotesStateTests: XCTestCase {
         state.panelDidOpen()
         XCTAssertEqual(state.notes, [previous])
         state.draft = "Keep this draft"
+        state.beginEditing(id: previous.id)
         current = instant("2026-09-28T00:01:00-04:00")
         state.refreshIfDayChanged()
         XCTAssertEqual(state.todayKey, "2026-09-28")
@@ -44,6 +45,8 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.progress, NoteProgress(completed: 0, total: 0))
         XCTAssertEqual(state.yesterdayIncompleteCount, 1)
         XCTAssertEqual(state.draft, "Keep this draft")
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.editDraft, "")
     }
 
     func testCalendarNotificationRefreshesObservableDay() async {
@@ -173,7 +176,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(store.saved.isEmpty)
     }
 
-    func testAddAndCompletionPersistAcrossFreshStateWithSQLite() throws {
+    func testNoteChangesPersistAcrossFreshStateWithSQLite() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DailyNotesStateTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -208,6 +211,16 @@ final class DailyNotesStateTests: XCTestCase {
         thirdSession.panelDidOpen()
         XCTAssertEqual(thirdSession.progress, NoteProgress(completed: 0, total: 2))
         XCTAssertFalse(try XCTUnwrap(thirdSession.notes.first(where: { $0.id == firstID })).isCompleted)
+        thirdSession.beginEditing(id: firstID)
+        thirdSession.editDraft = "  Updated note  "
+        XCTAssertTrue(thirdSession.saveEdit())
+        let secondID = try XCTUnwrap(thirdSession.notes.first(where: { $0.text == "Second note" })?.id)
+        XCTAssertTrue(thirdSession.delete(id: secondID))
+
+        let fourthSession = makeState()
+        fourthSession.panelDidOpen()
+        XCTAssertEqual(fourthSession.notes.map(\.text), ["Updated note"])
+        XCTAssertEqual(fourthSession.notes.first?.id, firstID)
     }
 
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date) -> DailyNotesState {

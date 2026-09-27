@@ -16,8 +16,14 @@ struct DailyNotesPanel: View {
             errorMessage: state.errorMessage,
             draft: $state.draft,
             isComposerVisible: $isComposerVisible,
+            editingNoteID: state.editingNoteID,
+            editDraft: $state.editDraft,
             onOpenSettings: onOpenSettings,
             onSave: { state.addDraft() },
+            onBeginEditing: { state.beginEditing(id: $0) },
+            onSaveEdit: { state.saveEdit() },
+            onCancelEdit: { state.cancelEditing() },
+            onDelete: { state.delete(id: $0) },
             onToggleCompletion: { id, completed in
                 state.setCompleted(id: id, completed: completed)
             }
@@ -40,6 +46,13 @@ struct DailyNotesPanel: View {
 /// The Notes panel's presentation boundary. Callers supply saved values and
 /// actions; the view does not open storage or assume that a save succeeded.
 struct DailyNotesView: View {
+    private enum FocusControl: Hashable {
+        case settings
+        case add
+        case save
+        case rowActions(UUID)
+    }
+
     let dateLabel: String
     let notes: [Note]
     let progress: NoteProgress
@@ -47,11 +60,19 @@ struct DailyNotesView: View {
     let errorMessage: String?
     @Binding var draft: String
     @Binding var isComposerVisible: Bool
+    let editingNoteID: UUID?
+    @Binding var editDraft: String
     let onOpenSettings: () -> Void
     let onSave: () -> Bool
+    let onBeginEditing: (UUID) -> Void
+    let onSaveEdit: () -> Bool
+    let onCancelEdit: () -> Void
+    let onDelete: (UUID) -> Void
     let onToggleCompletion: (UUID, Bool) -> Void
 
     @FocusState private var isDraftFocused: Bool
+    @FocusState private var focusedControl: FocusControl?
+    @State private var noteToDelete: Note?
 
     private let rowHeight: CGFloat = 43
     private let maximumListHeight: CGFloat = 258
@@ -81,6 +102,18 @@ struct DailyNotesView: View {
         .frame(maxWidth: 360)
         .frame(maxHeight: 480)
         .fixedSize(horizontal: false, vertical: true)
+        .alert("Delete note?", isPresented: Binding(
+            get: { noteToDelete != nil },
+            set: { if !$0 { noteToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let noteToDelete { onDelete(noteToDelete.id) }
+                noteToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { noteToDelete = nil }
+        } message: {
+            if let noteToDelete { Text(noteToDelete.text) }
+        }
     }
 
     private var header: some View {
@@ -95,6 +128,9 @@ struct DailyNotesView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open Settings")
+            .focusable()
+            .focused($focusedControl, equals: .settings)
+            .overlay { focusOutline(focusedControl == .settings) }
         }
     }
 
@@ -118,16 +154,37 @@ struct DailyNotesView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(notes) { note in
-                        Toggle(isOn: Binding(
-                            get: { note.isCompleted },
-                            set: { onToggleCompletion(note.id, $0) }
-                        )) {
-                            Text(note.text)
-                                .lineLimit(2)
-                                .foregroundStyle(note.isCompleted ? .secondary : .primary)
+                        HStack(spacing: 8) {
+                            Toggle(isOn: Binding(
+                                get: { note.isCompleted },
+                                set: { onToggleCompletion(note.id, $0) }
+                            )) {
+                                Text(note.text)
+                                    .lineLimit(2)
+                                    .foregroundStyle(note.isCompleted ? .secondary : .primary)
+                            }
+                            .toggleStyle(.checkbox)
+                            .tint(.primary)
+                            .accessibilityLabel("\(note.text), \(note.isCompleted ? "completed" : "incomplete")")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Menu {
+                                Button("Edit") {
+                                    onBeginEditing(note.id)
+                                    isComposerVisible = false
+                                }
+                                Button("Delete", role: .destructive) { noteToDelete = note }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .frame(width: 24, height: 24)
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                            .accessibilityLabel("Actions for \(note.text)")
+                            .focusable()
+                            .focused($focusedControl, equals: .rowActions(note.id))
+                            .overlay { focusOutline(focusedControl == .rowActions(note.id)) }
                         }
-                        .toggleStyle(.checkbox)
-                        .tint(.primary)
                         .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
 
                         if note.id != notes.last?.id {
@@ -147,7 +204,7 @@ struct DailyNotesView: View {
 
     private var addArea: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isComposerVisible {
+            if isComposerVisible || editingNoteID != nil {
                 composer
             } else {
                 Button {
@@ -159,18 +216,24 @@ struct DailyNotesView: View {
                 .buttonStyle(.plain)
                 .font(.subheadline.weight(.medium))
                 .frame(height: 32)
+                .focusable()
+                .focused($focusedControl, equals: .add)
+                .overlay { focusOutline(focusedControl == .add) }
             }
         }
     }
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("Write a note", text: $draft)
+            TextField(editingNoteID == nil ? "Write a note" : "Edit note",
+                      text: editingNoteID == nil ? $draft : $editDraft)
+                .accessibilityLabel(editingNoteID == nil ? "New note" : "Edit note")
                 .textFieldStyle(.plain)
                 .focused($isDraftFocused)
                 .onSubmit(saveDraft)
                 .onExitCommand { cancelDraft() }
                 .task { isDraftFocused = true }
+                .onChange(of: editingNoteID) { _, _ in isDraftFocused = true }
 
             Button("Save", action: saveDraft)
                 .buttonStyle(.plain)
@@ -179,6 +242,9 @@ struct DailyNotesView: View {
                 .padding(.horizontal, 14)
                 .frame(height: 32)
                 .background(Color.primary, in: RoundedRectangle(cornerRadius: 6))
+                .focusable()
+                .focused($focusedControl, equals: .save)
+                .overlay { focusOutline(focusedControl == .save) }
         }
         .padding(.horizontal, 8)
         .frame(height: 42)
@@ -190,14 +256,24 @@ struct DailyNotesView: View {
     }
 
     private func saveDraft() {
-        if onSave() {
+        if editingNoteID != nil {
+            _ = onSaveEdit()
+        } else if onSave() { isComposerVisible = false }
+    }
+
+    private func cancelDraft() {
+        if editingNoteID != nil { onCancelEdit() }
+        else {
+            draft = ""
             isComposerVisible = false
         }
     }
 
-    private func cancelDraft() {
-        draft = ""
-        isComposerVisible = false
+    private func focusOutline(_ focused: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 6)
+            .strokeBorder(Color.accentColor, lineWidth: focused ? 2 : 0)
+            .padding(-2)
+            .allowsHitTesting(false)
     }
 }
 
@@ -207,6 +283,8 @@ private struct DailyNotesPreview: View {
 
     @State private var notes: [Note]
     @State private var draft = ""
+    @State private var editingNoteID: UUID?
+    @State private var editDraft = ""
     @State private var isComposerVisible: Bool
 
     init(_ scenario: Scenario, composerOpen: Bool = false) {
@@ -243,6 +321,8 @@ private struct DailyNotesPreview: View {
             errorMessage: nil,
             draft: $draft,
             isComposerVisible: $isComposerVisible,
+            editingNoteID: editingNoteID,
+            editDraft: $editDraft,
             onOpenSettings: {},
             onSave: {
                 let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -252,6 +332,27 @@ private struct DailyNotesPreview: View {
                 draft = ""
                 return true
             },
+            onBeginEditing: { id in
+                editingNoteID = id
+                editDraft = notes.first(where: { $0.id == id })?.text ?? ""
+            },
+            onSaveEdit: {
+                guard let id = editingNoteID,
+                      let index = notes.firstIndex(where: { $0.id == id }) else { return false }
+                let text = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return false }
+                let note = notes[index]
+                notes[index] = Note(id: note.id, text: text, dayKey: note.dayKey,
+                                    createdAt: note.createdAt, completedAt: note.completedAt)
+                editingNoteID = nil
+                editDraft = ""
+                return true
+            },
+            onCancelEdit: {
+                editingNoteID = nil
+                editDraft = ""
+            },
+            onDelete: { id in notes.removeAll { $0.id == id } },
             onToggleCompletion: { id, isCompleted in
                 guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
                 let note = notes[index]

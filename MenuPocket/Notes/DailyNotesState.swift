@@ -83,6 +83,9 @@ final class DailyNotesState {
             let previousCount = try store.incompleteCount(for: keys.yesterday)
             todayKey = keys.today
             notes = NoteOrder.sorted(savedNotes.filter { $0.dayKey == keys.today })
+            if let editingNoteID, !notes.contains(where: { $0.id == editingNoteID }) {
+                cancelEditing()
+            }
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
             issue = nil
@@ -91,6 +94,7 @@ final class DailyNotesState {
             if todayKey != keys.today {
                 todayKey = keys.today
                 notes = []
+                cancelEditing()
                 yesterdayIncompleteCount = 0
                 hasLoadedToday = false
             }
