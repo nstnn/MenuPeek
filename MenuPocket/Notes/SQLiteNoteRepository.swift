@@ -8,7 +8,7 @@ enum SQLiteNoteStoreError: Error {
     case unsupportedSchemaVersion(Int)
     case databaseError(operation: String, code: Int32, message: String)
     case invalidNoteRow
-    case operationNotImplemented
+    case noteNotFound(UUID)
 }
 
 /// One connection to the app's local notes database. SQLite stores dates as
@@ -144,17 +144,38 @@ final class SQLiteNoteRepository: NoteRepository {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    // TASK-003 supplies these writes. Explicit failures prevent false success.
     func setCompleted(id: UUID, completedAt: Date?) throws {
-        throw SQLiteNoteStoreError.operationNotImplemented
+        let statement = try prepare("UPDATE notes SET completed_at = ? WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        let timestampResult = completedAt.map {
+            sqlite3_bind_double(statement, 1, $0.timeIntervalSince1970)
+        } ?? sqlite3_bind_null(statement, 1)
+        try check(timestampResult, operation: "bind completed_at")
+        try bind(id.uuidString, at: 2, to: statement)
+        try executeWrite(statement, id: id, operation: "set completion")
     }
 
     func updateText(id: UUID, text: String) throws {
-        throw SQLiteNoteStoreError.operationNotImplemented
+        let statement = try prepare("UPDATE notes SET text = ? WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        try bind(text, at: 1, to: statement)
+        try bind(id.uuidString, at: 2, to: statement)
+        try executeWrite(statement, id: id, operation: "update note text")
     }
 
     func delete(id: UUID) throws {
-        throw SQLiteNoteStoreError.operationNotImplemented
+        let statement = try prepare("DELETE FROM notes WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, at: 1, to: statement)
+        try executeWrite(statement, id: id, operation: "delete note")
+    }
+
+    private func executeWrite(_ statement: OpaquePointer, id: UUID,
+                              operation: String) throws {
+        try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: operation)
+        guard sqlite3_changes(database) == 1 else {
+            throw SQLiteNoteStoreError.noteNotFound(id)
+        }
     }
 
     private static func bootstrap(_ database: OpaquePointer) throws {

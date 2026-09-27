@@ -103,6 +103,89 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try store.notes(for: original.dayKey), [original])
     }
 
+    func testCompletionEditAndDeletionSurviveReopening() throws {
+        let first = note("First", day: "2026-09-27", createdAt: 10)
+        let second = note("Second", day: "2026-09-27", createdAt: 20)
+        let completedAt = Date(timeIntervalSince1970: 30)
+
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.add(first)
+            try store.add(second)
+            try store.setCompleted(id: second.id, completedAt: completedAt)
+            XCTAssertEqual(try store.notes(for: first.dayKey).map(\.id), [first.id, second.id])
+            XCTAssertEqual(try store.incompleteCount(for: first.dayKey), 1)
+        }
+
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.notes(for: first.dayKey)[1].completedAt, completedAt)
+            try store.setCompleted(id: second.id, completedAt: nil)
+            try store.updateText(id: first.id, text: "Edited ' note 📝")
+            try store.delete(id: second.id)
+        }
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: first.dayKey), [
+            Note(id: first.id, text: "Edited ' note 📝", dayKey: first.dayKey,
+                 createdAt: first.createdAt, completedAt: nil)
+        ])
+        XCTAssertEqual(try reopened.incompleteCount(for: first.dayKey), 1)
+    }
+
+    func testMissingIDsThrowForEveryWriteAndPreserveExistingNote() throws {
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10)
+        let missing = UUID()
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(saved)
+
+        let writes: [() throws -> Void] = [
+            { try store.setCompleted(id: missing, completedAt: Date()) },
+            { try store.updateText(id: missing, text: "Missing") },
+            { try store.delete(id: missing) }
+        ]
+        for write in writes {
+            XCTAssertThrowsError(try write()) { error in
+                guard case SQLiteNoteStoreError.noteNotFound(missing) = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+        XCTAssertEqual(try store.notes(for: saved.dayKey), [saved])
+    }
+
+    func testSQLiteWriteFailuresThrowAndLeaveSavedNoteIntact() throws {
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10)
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(saved)
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_completion BEFORE UPDATE OF completed_at ON notes
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            CREATE TRIGGER reject_edit BEFORE UPDATE OF text ON notes
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            CREATE TRIGGER reject_delete BEFORE DELETE ON notes
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            """
+        )
+
+        let writes: [() throws -> Void] = [
+            { try store.setCompleted(id: saved.id, completedAt: Date()) },
+            { try store.updateText(id: saved.id, text: "Unsaved") },
+            { try store.delete(id: saved.id) }
+        ]
+        for write in writes {
+            XCTAssertThrowsError(try write()) { error in
+                guard case SQLiteNoteStoreError.databaseError = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+        XCTAssertEqual(try store.notes(for: saved.dayKey), [saved])
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: saved.dayKey), [saved])
+    }
+
     private func note(_ text: String, day: String, createdAt: TimeInterval) -> Note {
         Note(id: UUID(), text: text, dayKey: day,
              createdAt: Date(timeIntervalSince1970: createdAt), completedAt: nil)
