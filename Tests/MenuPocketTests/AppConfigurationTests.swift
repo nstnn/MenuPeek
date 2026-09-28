@@ -31,7 +31,7 @@ final class AppConfigurationTests: XCTestCase {
             window.close()
             delegate.settingsWindowController?.window?.close()
         }
-        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskWindowShell>)
+        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskWindowView>)
         XCTAssertTrue(host.rootView.state === state)
         XCTAssertTrue(controller.state === state)
         XCTAssertFalse(window.isReleasedWhenClosed)
@@ -65,6 +65,34 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(delegate.taskWindowController === controller)
         XCTAssertEqual(state.draft, "Retain this draft")
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
+
+    @MainActor
+    func testTaskWindowPresentationRefreshesSavedSnapshotAndRetriesFailedRead() throws {
+        let store = TaskWindowReadFixture()
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = NoteDay(now: { instant })
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter())
+        let controller = TaskWindowController(state: state, onSettings: {})
+        defer { controller.window?.close() }
+        controller.showTasks()
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+        let note = Note(id: UUID(), text: "Saved task", dayKey: day.keys().today,
+                        createdAt: instant, completedAt: nil)
+        store.saved = [note]
+        controller.window?.close()
+        controller.showTasks()
+        XCTAssertEqual(state.notes, [note])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+        store.failRead = true
+        controller.showTasks()
+        XCTAssertNil(state.availableProgress)
+        XCTAssertEqual(state.notes, [note])
+        store.failRead = false
+        controller.showTasks()
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
     }
 
     @MainActor
@@ -162,4 +190,23 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(delegate.model.isPreferenceEditingAllowed)
         XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), corruptData)
     }
+}
+
+private final class TaskWindowReadFixture: NoteRepository {
+    var saved: [Note] = []
+    var failRead = false
+
+    func notes(for dayKey: String) throws -> [Note] {
+        if failRead { throw CocoaError(.fileReadUnknown) }
+        return saved.filter { $0.dayKey == dayKey }
+    }
+
+    func incompleteCount(for dayKey: String) throws -> Int {
+        saved.filter { $0.dayKey == dayKey && !$0.isCompleted }.count
+    }
+
+    func add(_ note: Note) throws { throw CocoaError(.fileWriteNoPermission) }
+    func setCompleted(id: UUID, completedAt: Date?) throws { throw CocoaError(.fileWriteNoPermission) }
+    func updateText(id: UUID, text: String) throws { throw CocoaError(.fileWriteNoPermission) }
+    func delete(id: UUID) throws { throw CocoaError(.fileWriteNoPermission) }
 }
