@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+
+      # The test action builds the app and its hosted XCTest bundle first.
+      - name: Build and test Debug
+        run: |
+          xcodebuild \
+            -project MenuPocket.xcodeproj \
+            -scheme MenuPocket \
+            -configuration Debug \
+            -destination "platform=macOS,arch=$(uname -m)" \
+            -derivedDataPath build/DerivedData \
+            test
+
+      - name: Build Release
+        run: |
+          xcodebuild \
+            -project MenuPocket.xcodeproj \
+            -scheme MenuPocket \
+            -configuration Release \
+            -destination "platform=macOS,arch=$(uname -m)" \
+            -derivedDataPath build/DerivedData \
+            build
