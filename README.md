@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a local macOS menu bar app for a daily notes checklist. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. The desktop transition currently provides a reusable task-window shell; task layout and menu bar progress are pending. Existing notes remain stored in SQLite. See [current behavior and remaining MVP work](docs/REQUIREMENTS.md).
+MenuPocket is a local macOS desktop and menu bar app for daily tasks. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. The desktop transition provides a resizable Today task window; editing and menu bar progress remain pending. Existing notes remain stored in SQLite. See [current behavior and remaining MVP work](docs/REQUIREMENTS.md).
 
 ## Requirements
 
@@ -17,7 +17,7 @@ Open `MenuPocket.xcodeproj` in Xcode, or run the local Debug launcher from this 
 ./run.sh
 ```
 
-The launcher builds with the shared `MenuPocket` scheme into ignored `build/DerivedData`, stops this checkout's running Debug copy, and opens the rebuilt app. MenuPocket appears in the Dock. Its grid icon in the menu bar opens the task-window shell.
+The launcher builds with the shared `MenuPocket` scheme into ignored `build/DerivedData`, stops this checkout's running Debug copy, and opens the rebuilt app. MenuPocket appears in the Dock. Its grid icon in the menu bar opens the Today task window.
 
 To run the hosted XCTest target:
 
@@ -27,9 +27,9 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
   -derivedDataPath build/DerivedData test
 ```
 
-## Use the task-window shell
+## Use the Today window
 
-Click the menu bar grid icon or reopen MenuPocket from the Dock to show the same task window. Closing or minimizing it does not quit the app; another presentation restores it. The shell provides Settings access. Task layout, editing, and the menu bar count will arrive in later desktop-plan cards; the previous compact checklist is no longer exposed.
+Click the menu bar grid icon or reopen MenuPocket from the Dock to show the same task window. Closing or minimizing it does not quit the app; another presentation restores it. The Today view shows the local date, saved task progress, and ordered tasks in a scrollable list, with Settings access and Retry when tasks cannot load. Add task is visible but disabled until the next interaction card; completion, editing, and the menu bar count remain pending. The previous compact checklist is no longer exposed.
 
 Saved notes and preferences are preserved. Notes stay assigned to their creation day in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences remain separate in `UserDefaults`. Settings retains Open at Login, app information, and Quit. Startup policy remains unchanged until the dedicated lifecycle card.
 

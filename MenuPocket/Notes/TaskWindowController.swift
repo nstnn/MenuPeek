@@ -10,7 +10,7 @@ final class TaskWindowController: NSWindowController {
     init(state: DailyNotesState, onSettings: @escaping () -> Void) {
         self.state = state
         let hostingController = NSHostingController(
-            rootView: TaskWindowShell(state: state, onSettings: onSettings)
+            rootView: TaskWindowView(state: state, onSettings: onSettings)
         )
         hostingController.sizingOptions = []
         let window = NSWindow(
@@ -36,26 +36,10 @@ final class TaskWindowController: NSWindowController {
 
     func showTasks() {
         guard let window else { return }
+        state.windowWillOpen()
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.contentMinSize = Self.minimumContentSize
-    }
-}
-
-// TASK-003 replaces this lifecycle shell with the Today layout.
-struct TaskWindowShell: View {
-    let state: DailyNotesState
-    let onSettings: () -> Void
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Today").font(.largeTitle)
-            Text("Your task window is ready.")
-                .foregroundStyle(.secondary)
-            Button("Settings…", action: onSettings)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
     }
 }
