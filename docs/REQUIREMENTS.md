@@ -20,4 +20,4 @@ The menu bar opens `DailyNotesPanel` with an icon-only label. The panel shows to
 
 Settings now shows Launch at Login, app information, and Quit in English. The notes panel has no Quit control by design. The demo loading and preference code remains in the project, though the current app launch does not start demo loads.
 
-Code and tests establish these implementation facts. Running-app visual, accessibility, and Release acceptance remain separate checks; see [Workflow](WORKFLOW.md).
+The Debug build and all 86 hosted tests passed on 2026-09-27; see the [dated regression record](NOTES_MVP_REGRESSION.md). Running-app visual, accessibility, and Release acceptance remain separate checks; see [Workflow](WORKFLOW.md).

@@ -8,6 +8,8 @@ MenuPocket is a native macOS menu bar app built with SwiftUI and AppKit. The cur
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md): current and approved Notes MVP behavior, scope, and gaps.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): state, storage, and system boundaries.
 - [`docs/WORKFLOW.md`](docs/WORKFLOW.md): build, verification, and local Release steps.
+- [`docs/NOTES_MVP_REGRESSION.md`](docs/NOTES_MVP_REGRESSION.md): dated Debug build and hosted test evidence for the Notes MVP handoff.
+- [`docs/NOTES_MVP_ACCEPTANCE.md`](docs/NOTES_MVP_ACCEPTANCE.md): dated interface observations and remaining Notes MVP acceptance checks.
 - [`docs/index.md`](docs/index.md): documentation entry point, including links to the local Notes MVP plan and historical roadmap. `plan/` is ignored by Git and may be absent from other checkouts.
 
 ## Project rules

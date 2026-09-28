@@ -31,7 +31,7 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 
 Click the menu bar icon to see today's notes, completed/total progress, and the count of unfinished notes from yesterday. `Add note` opens a single-line composer. Press Return or `Save` to store a nonempty note; Escape cancels. Check a note to complete it, or use its row menu to edit or delete it. Deletion asks for confirmation. The Settings gear opens the retained Settings window.
 
-Notes are local to this Mac and stay assigned to their creation day. They are stored in the app's Application Support directory. Settings provides Launch at Login, app information, and Quit.
+Notes are local to this Mac and stay assigned to their creation day; unfinished notes do not move into today's list. The SQLite database is `MenuPocket/notes.sqlite` under the app's sandboxed Application Support directory. App preferences are stored separately in `UserDefaults`. If a note write fails, the panel shows an error and keeps the unsaved draft. Settings provides Open at Login, app information, and Quit.
 
 ## Project documentation
 
@@ -39,3 +39,4 @@ Notes are local to this Mac and stay assigned to their creation day. They are st
 - [Requirements](docs/REQUIREMENTS.md): current behavior, approved Notes MVP target, and gaps.
 - [Architecture](docs/ARCHITECTURE.md): state, storage, and system boundaries.
 - [Workflow](docs/WORKFLOW.md): development checks and local Release procedure.
+- [Notes MVP regression](docs/NOTES_MVP_REGRESSION.md): dated Debug build and hosted test results for the Task 11 handoff.
