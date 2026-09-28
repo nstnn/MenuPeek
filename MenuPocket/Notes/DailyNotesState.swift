@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 
 enum DailyNotesIssue: Equatable {
@@ -19,7 +19,7 @@ enum DailyNotesIssue: Equatable {
     }
 }
 
-/// The panel's single source of saved daily data. Drafts remain local until a
+/// The app's single source of saved daily data. Drafts remain local until a
 /// repository write succeeds; a failed read never publishes a partial snapshot.
 @MainActor
 @Observable
@@ -33,12 +33,17 @@ final class DailyNotesState {
     var draft = ""
     private(set) var editingNoteID: UUID?
     var editDraft = ""
+    private(set) var recoveredEditDraft: String?
+    private(set) var refreshNotice: String?
+
+    /// nil means unloaded or the latest read failed; successful empty is 0/0.
+    /// Write failures leave this last saved progress available.
+    var availableProgress: NoteProgress? { hasLoadedToday ? progress : nil }
 
     @ObservationIgnored private let repositoryFactory: () throws -> any NoteRepository
     @ObservationIgnored private var repository: (any NoteRepository)?
     @ObservationIgnored private let day: NoteDay
-    @ObservationIgnored private let notificationCenter: NotificationCenter
-    @ObservationIgnored nonisolated(unsafe) private var dayChangeObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
     var progress: NoteProgress {
         NoteProgress(notes: notes, for: todayKey ?? "")
@@ -49,27 +54,32 @@ final class DailyNotesState {
     init(
         repositoryFactory: @escaping () throws -> any NoteRepository = { try SQLiteNoteRepository() },
         day: NoteDay = NoteDay(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        workspaceNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
     ) {
         self.repositoryFactory = repositoryFactory
         self.day = day
-        self.notificationCenter = notificationCenter
-        dayChangeObserver = notificationCenter.addObserver(
-            forName: .NSCalendarDayChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.refreshIfDayChanged() }
+        for name in [Notification.Name.NSCalendarDayChanged,
+                     .NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
+            observe(name, on: notificationCenter)
         }
+        observe(NSWorkspace.didWakeNotification, on: workspaceNotificationCenter)
     }
 
     deinit {
-        if let dayChangeObserver {
-            notificationCenter.removeObserver(dayChangeObserver)
-        }
+        for (center, token) in observers { center.removeObserver(token) }
     }
 
-    func panelDidOpen() {
-        refresh()
+    private func observe(_ name: Notification.Name, on center: NotificationCenter) {
+        let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refresh() }
+        }
+        observers.append((center, token))
     }
+
+    // App lifecycle consumers can refresh without creating a view.
+    func startup() { refresh() }
+    func windowWillOpen() { refresh() }
 
     func refreshIfDayChanged() {
         if day.keys().today != todayKey { refresh() }
@@ -77,6 +87,18 @@ final class DailyNotesState {
 
     func refresh() {
         let keys = day.keys()
+        if todayKey != keys.today {
+            // Invalidate the old snapshot before asking storage for the new day.
+            let hadPreviousDay = todayKey != nil
+            todayKey = keys.today
+            notes = []
+            yesterdayIncompleteCount = 0
+            hasLoadedToday = false
+            invalidateEditing()
+            if hadPreviousDay {
+                refreshNotice = "The date changed. Previous task actions were cancelled; unsaved text is still available."
+            }
+        }
         do {
             let store = try openRepository()
             let savedNotes = try store.notes(for: keys.today)
@@ -84,20 +106,14 @@ final class DailyNotesState {
             todayKey = keys.today
             notes = NoteOrder.sorted(savedNotes.filter { $0.dayKey == keys.today })
             if let editingNoteID, !notes.contains(where: { $0.id == editingNoteID }) {
-                cancelEditing()
+                invalidateEditing()
+                refreshNotice = "The edited task is no longer available. Unsaved text was kept for recovery."
             }
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
             issue = nil
         } catch {
-            // Do not label a previous day's cached notes as today's after midnight.
-            if todayKey != keys.today {
-                todayKey = keys.today
-                notes = []
-                cancelEditing()
-                yesterdayIncompleteCount = 0
-                hasLoadedToday = false
-            }
+            hasLoadedToday = false
             issue = .load
         }
     }
@@ -126,7 +142,7 @@ final class DailyNotesState {
     @discardableResult
     func setCompleted(id: UUID, completed: Bool) -> Bool {
         let instant = day.now()
-        guard readyForWrite(on: day.key(for: instant)), let repository,
+        guard readyForExistingTask(on: day.key(for: instant)), let repository,
               let index = notes.firstIndex(where: { $0.id == id }) else { return false }
         let saved = notes[index]
         let completedAt = completed ? instant : nil
@@ -144,7 +160,8 @@ final class DailyNotesState {
     }
 
     func beginEditing(id: UUID) {
-        guard let note = notes.first(where: { $0.id == id }) else { return }
+        guard readyForExistingTask(on: day.keys().today),
+              let note = notes.first(where: { $0.id == id }) else { return }
         editingNoteID = id
         editDraft = note.text
     }
@@ -158,7 +175,7 @@ final class DailyNotesState {
     func saveEdit() -> Bool {
         let text = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let id = editingNoteID,
-              readyForWrite(on: day.keys().today), let repository,
+              readyForExistingTask(on: day.keys().today), let repository,
               let index = notes.firstIndex(where: { $0.id == id }) else { return false }
         let saved = notes[index]
         do {
@@ -176,7 +193,7 @@ final class DailyNotesState {
 
     @discardableResult
     func delete(id: UUID) -> Bool {
-        guard readyForWrite(on: day.keys().today), let repository,
+        guard readyForExistingTask(on: day.keys().today), let repository,
               notes.contains(where: { $0.id == id }) else { return false }
         do {
             try repository.delete(id: id)
@@ -188,6 +205,21 @@ final class DailyNotesState {
             issue = .delete
             return false
         }
+    }
+
+    private func invalidateEditing() {
+        if editingNoteID != nil { recoveredEditDraft = editDraft }
+        cancelEditing()
+    }
+
+    /// Existing-row actions belong to the displayed day. A rollover refresh
+    /// cancels that action even if a repository were to return the same ID.
+    private func readyForExistingTask(on key: String) -> Bool {
+        guard todayKey == key else {
+            refresh()
+            return false
+        }
+        return readyForWrite(on: key)
     }
 
     private func readyForWrite(on key: String) -> Bool {

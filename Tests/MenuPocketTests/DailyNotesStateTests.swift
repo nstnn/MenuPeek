@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 import XCTest
 @testable import MenuPocket
@@ -15,7 +15,7 @@ final class DailyNotesStateTests: XCTestCase {
         let store = FakeNoteRepository(notes: [today, finished, yesterday])
         let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
 
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertEqual(state.notes, [today, finished])
         XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 2))
         XCTAssertEqual(state.yesterdayIncompleteCount, 1)
@@ -23,7 +23,7 @@ final class DailyNotesStateTests: XCTestCase {
 
         let newest = note("New", day: "2026-09-27", createdAt: 5)
         store.saved.append(newest)
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertEqual(state.notes, [newest, today, finished])
         XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 3))
     }
@@ -34,7 +34,7 @@ final class DailyNotesStateTests: XCTestCase {
         var current = instant("2026-09-27T23:59:00-04:00")
         let state = makeState(store: store, now: { current })
 
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertEqual(state.notes, [previous])
         state.draft = "Keep this draft"
         state.beginEditing(id: previous.id)
@@ -55,7 +55,7 @@ final class DailyNotesStateTests: XCTestCase {
         var current = instant("2026-09-27T23:59:00-04:00")
         let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
                                     notificationCenter: center)
-        state.panelDidOpen()
+        state.windowWillOpen()
         let changed = expectation(description: "Observable day changed")
         withObservationTracking {
             _ = state.todayKey
@@ -74,7 +74,7 @@ final class DailyNotesStateTests: XCTestCase {
         let store = FakeNoteRepository(notes: [old])
         var current = instant("2026-09-27T23:59:00-04:00")
         let state = makeState(store: store, now: { current })
-        state.panelDidOpen()
+        state.windowWillOpen()
 
         store.failCount = true
         state.refresh()
@@ -91,7 +91,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.issue, .load)
 
         store.failCount = false
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertTrue(state.hasLoadedToday)
         XCTAssertEqual(state.yesterdayIncompleteCount, 1)
         XCTAssertNil(state.issue)
@@ -104,13 +104,13 @@ final class DailyNotesStateTests: XCTestCase {
             if shouldFail { throw FakeFailure.failed }
             return store
         }, day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
-        notificationCenter: NotificationCenter())
+        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter())
 
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertEqual(state.issue, .load)
         XCTAssertFalse(state.hasLoadedToday)
         shouldFail = false
-        state.panelDidOpen()
+        state.windowWillOpen()
         XCTAssertTrue(state.hasLoadedToday)
         XCTAssertNil(state.issue)
     }
@@ -118,7 +118,7 @@ final class DailyNotesStateTests: XCTestCase {
     func testFailedAddKeepsDraftAndSuccessfulRetryPublishesOnlySavedNote() {
         let store = FakeNoteRepository()
         let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
-        state.panelDidOpen()
+        state.windowWillOpen()
         state.draft = "  Book dentist  "
         store.failWrite = .add
 
@@ -143,7 +143,7 @@ final class DailyNotesStateTests: XCTestCase {
         let original = note("Original", day: "2026-09-27", createdAt: 1)
         let store = FakeNoteRepository(notes: [original])
         let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
-        state.panelDidOpen()
+        state.windowWillOpen()
 
         store.failWrite = .complete
         XCTAssertFalse(state.setCompleted(id: original.id, completed: true))
@@ -190,7 +190,7 @@ final class DailyNotesStateTests: XCTestCase {
         }
 
         let firstSession = makeState()
-        firstSession.panelDidOpen()
+        firstSession.windowWillOpen()
         firstSession.draft = "  First note  "
         XCTAssertTrue(firstSession.addDraft())
         firstSession.draft = "Second note"
@@ -201,14 +201,14 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(firstSession.notes.last?.id, firstID)
 
         let secondSession = makeState()
-        secondSession.panelDidOpen()
+        secondSession.windowWillOpen()
         XCTAssertEqual(secondSession.notes.map(\.text), ["Second note", "First note"])
         XCTAssertEqual(secondSession.progress, NoteProgress(completed: 1, total: 2))
         XCTAssertTrue(secondSession.notes.last?.isCompleted == true)
         XCTAssertTrue(secondSession.setCompleted(id: firstID, completed: false))
 
         let thirdSession = makeState()
-        thirdSession.panelDidOpen()
+        thirdSession.windowWillOpen()
         XCTAssertEqual(thirdSession.progress, NoteProgress(completed: 0, total: 2))
         XCTAssertFalse(try XCTUnwrap(thirdSession.notes.first(where: { $0.id == firstID })).isCompleted)
         thirdSession.beginEditing(id: firstID)
@@ -218,14 +218,159 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(thirdSession.delete(id: secondID))
 
         let fourthSession = makeState()
-        fourthSession.panelDidOpen()
+        fourthSession.windowWillOpen()
         XCTAssertEqual(fourthSession.notes.map(\.text), ["Updated note"])
         XCTAssertEqual(fourthSession.notes.first?.id, firstID)
     }
 
+    func testAvailabilityDistinguishesEmptyReadFailureAndRejectedWrite() {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        XCTAssertNil(state.availableProgress)
+        state.startup()
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+        state.draft = "Unsaved"
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+        store.failCount = true
+        state.refresh()
+        XCTAssertNil(state.availableProgress)
+        XCTAssertFalse(state.hasLoadedToday)
+        XCTAssertFalse(state.addDraft())
+        XCTAssertTrue(store.saved.isEmpty)
+        store.failCount = false
+        store.failWrite = nil
+        state.refresh()
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+    }
+
+    func testWakeAndClockNotificationsRefreshWithoutOpeningWindow() async {
+        let old = note("Yesterday", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [old])
+        let center = NotificationCenter()
+        let workspace = NotificationCenter()
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
+                                    notificationCenter: center, workspaceNotificationCenter: workspace)
+        state.startup()
+        for (eventCenter, name) in [(workspace, NSWorkspace.didWakeNotification),
+                                    (center, Notification.Name.NSSystemClockDidChange)] {
+            let changed = expectation(description: "Closed-window event refreshed day")
+            withObservationTracking { _ = state.todayKey } onChange: { changed.fulfill() }
+            current = current.addingTimeInterval(86400)
+            eventCenter.post(name: name, object: nil)
+            await fulfillment(of: [changed], timeout: 2)
+            XCTAssertEqual(state.todayKey, makeDay(now: { current }).keys().today)
+            XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+        }
+    }
+
+    func testTimeZoneNotificationRecalculatesDayWithoutReassigningSavedRows() async {
+        let saved = note("Assigned day", day: "2026-09-26", createdAt: 1)
+        let store = FakeNoteRepository(notes: [saved])
+        let center = NotificationCenter()
+        var zone = TimeZone(identifier: "America/Toronto")!
+        let day = NoteDay(now: { self.instant("2026-09-27T00:30:00Z") }, timeZone: { zone })
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter())
+        state.startup()
+        XCTAssertEqual(state.notes, [saved])
+        let changed = expectation(description: "Time-zone refresh")
+        withObservationTracking { _ = state.todayKey } onChange: { changed.fulfill() }
+        zone = TimeZone(secondsFromGMT: 0)!
+        center.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        await fulfillment(of: [changed], timeout: 2)
+        XCTAssertEqual(state.todayKey, "2026-09-27")
+        XCTAssertTrue(state.notes.isEmpty)
+        XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+        XCTAssertEqual(store.saved, [saved])
+    }
+
+    func testRolloverCancelsStaleActionsAndRecoversEditEvenWhenReadFails() {
+        let old = note("Original", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [old])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.beginEditing(id: old.id)
+        state.editDraft = "Recover my changes"
+        state.draft = "New draft"
+        current = instant("2026-09-28T00:01:00-04:00")
+        store.failCount = true
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEditDraft, "Recover my changes")
+        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertNil(state.availableProgress)
+        XCTAssertTrue(state.notes.isEmpty)
+        XCTAssertFalse(state.delete(id: old.id))
+        XCTAssertFalse(state.setCompleted(id: old.id, completed: true))
+        XCTAssertEqual(store.saved, [old])
+        store.failCount = false
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(store.saved.first(where: { $0.text == "New draft" })?.dayKey, "2026-09-28")
+        XCTAssertEqual(store.saved.first(where: { $0.id == old.id }), old)
+    }
+
+    func testSameDayRefreshKeepsEditOrRecoversRemovedTarget() {
+        let original = note("Original", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [original])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.beginEditing(id: original.id)
+        state.editDraft = "Recover me"
+        state.windowWillOpen()
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editDraft, "Recover me")
+        store.saved = []
+        state.refresh()
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEditDraft, "Recover me")
+        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertFalse(state.saveEdit())
+    }
+
+    func testRolloverClearsOldProgressBeforeRepositoryReadAndRejectsPendingDelete() {
+        let old = note("Yesterday", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [old])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        current = instant("2026-09-28T00:01:00-04:00")
+        store.onRead = { key in
+            XCTAssertEqual(key, "2026-09-28")
+            XCTAssertEqual(state.todayKey, key)
+            XCTAssertNil(state.availableProgress)
+            XCTAssertTrue(state.notes.isEmpty)
+        }
+        XCTAssertFalse(state.delete(id: old.id))
+        XCTAssertEqual(store.saved, [old])
+        XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+        store.onRead = nil
+    }
+
+    func testObserversDoNotRetainReleasedStateOrRefreshAfterRelease() async {
+        let store = FakeNoteRepository()
+        let center = NotificationCenter()
+        let workspace = NotificationCenter()
+        var state: DailyNotesState? = DailyNotesState(repositoryFactory: { store },
+            day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+            notificationCenter: center, workspaceNotificationCenter: workspace)
+        state?.startup()
+        weak var released = state
+        state = nil
+        XCTAssertNil(released)
+        store.onRead = { _ in XCTFail("Released state should not read") }
+        center.post(name: .NSCalendarDayChanged, object: nil)
+        workspace.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await Task.yield()
+    }
+
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date) -> DailyNotesState {
         DailyNotesState(repositoryFactory: { store }, day: makeDay(now: now),
-                        notificationCenter: NotificationCenter())
+                        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter())
     }
 
     private func makeDay(now: @escaping () -> Date) -> NoteDay {
@@ -249,13 +394,15 @@ private enum FakeFailure: Error { case failed }
 
 private final class FakeNoteRepository: NoteRepository {
     var saved: [Note]
+    var onRead: ((String) -> Void)?
     var failCount = false
     var failWrite: DailyNotesIssue?
 
     init(notes: [Note] = []) { saved = notes }
 
     func notes(for dayKey: String) throws -> [Note] {
-        NoteOrder.sorted(saved.filter { $0.dayKey == dayKey })
+        onRead?(dayKey)
+        return NoteOrder.sorted(saved.filter { $0.dayKey == dayKey })
     }
 
     func incompleteCount(for dayKey: String) throws -> Int {
