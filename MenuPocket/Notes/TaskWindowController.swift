@@ -20,6 +20,9 @@ final class TaskWindowController: NSWindowController {
         )
         window.title = "MenuPocket Tasks"
         window.contentViewController = hostingController
+        // Installing the hosting view can replace the frame with its fitting size.
+        // Restore the intended size before centering and presenting the window.
+        window.setContentSize(Self.initialContentSize)
         window.contentMinSize = Self.minimumContentSize
         window.isReleasedWhenClosed = false
         window.center()
