@@ -51,6 +51,8 @@ struct DailyNotesView: View {
         case add
         case save
         case rowActions(UUID)
+        case cancelDelete
+        case confirmDelete
     }
 
     let dateLabel: String
@@ -82,8 +84,12 @@ struct DailyNotesView: View {
             header
             Divider()
             dateAndProgress
-            noteList
-            addArea
+            if let noteToDelete {
+                deleteConfirmation(for: noteToDelete)
+            } else {
+                noteList
+                addArea
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -102,17 +108,13 @@ struct DailyNotesView: View {
         .frame(maxWidth: 360)
         .frame(maxHeight: 480)
         .fixedSize(horizontal: false, vertical: true)
-        .alert("Delete note?", isPresented: Binding(
-            get: { noteToDelete != nil },
-            set: { if !$0 { noteToDelete = nil } }
-        )) {
-            Button("Delete", role: .destructive) {
-                if let noteToDelete { onDelete(noteToDelete.id) }
-                noteToDelete = nil
+        // A separate alert can take focus from MenuBarExtra's transient window
+        // and dismiss its host before the confirmation action reaches this view.
+        .onDisappear { noteToDelete = nil }
+        .onChange(of: notes) { _, savedNotes in
+            if let noteToDelete, !savedNotes.contains(where: { $0.id == noteToDelete.id }) {
+                self.noteToDelete = nil
             }
-            Button("Cancel", role: .cancel) { noteToDelete = nil }
-        } message: {
-            if let noteToDelete { Text(noteToDelete.text) }
         }
     }
 
@@ -127,10 +129,54 @@ struct DailyNotesView: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .disabled(noteToDelete != nil)
             .accessibilityLabel("Open Settings")
             .focusable()
             .focused($focusedControl, equals: .settings)
             .overlay { focusOutline(focusedControl == .settings) }
+        }
+    }
+
+    private func deleteConfirmation(for note: Note) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Delete note?")
+                .font(.headline)
+            Text(note.text)
+                .lineLimit(3)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    noteToDelete = nil
+                    focusedControl = .rowActions(note.id)
+                }
+                .keyboardShortcut(.cancelAction)
+                .focusable()
+                .focused($focusedControl, equals: .cancelDelete)
+                .overlay { focusOutline(focusedControl == .cancelDelete) }
+                .accessibilityIdentifier("cancelNoteDeletion")
+
+                Button("Delete", role: .destructive) {
+                    // Clear the pending confirmation before the saved list changes.
+                    noteToDelete = nil
+                    focusedControl = .add
+                    onDelete(note.id)
+                }
+                .focusable()
+                .focused($focusedControl, equals: .confirmDelete)
+                .overlay { focusOutline(focusedControl == .confirmDelete) }
+                .accessibilityIdentifier("confirmNoteDeletion")
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("deleteNoteConfirmation")
+        .onAppear {
+            isDraftFocused = false
+            focusedControl = .cancelDelete
         }
     }
 

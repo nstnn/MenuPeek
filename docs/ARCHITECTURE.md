@@ -12,6 +12,8 @@ MenuPocket is a Swift 6 macOS application using SwiftUI for its menu bar scene a
 
 `DailyNotesState` is the main-actor observable owner of the displayed daily snapshot, drafts, and errors. Panel open and calendar-day notification trigger reads. The state asks a `NoteRepository` for today's rows and yesterday's unfinished count. Add, completion, edit, and delete operations update the displayed notes only after a successful repository write. A failed read does not publish a partial snapshot; a failed add or edit retains the draft.
 
+`DailyNotesView` keeps deletion confirmation inside the menu bar panel, avoiding a separate alert that can take focus from the transient `MenuBarExtra` window. Cancel, Escape, or closing the panel clears the pending confirmation. Confirming clears it before requesting the repository write; a failed deletion leaves the saved note visible with an inline error.
+
 `SQLiteNoteRepository` opens one database at `Application Support/MenuPocket/notes.sqlite` within the app's sandbox container. The database has a versioned `notes` table and day-key index. A newer unknown schema is rejected without rewriting it. The repository interface lets tests inject a fake or a temporary SQLite database. There is no account, network service, or synchronization path.
 
 ## Remaining demo and system boundaries
