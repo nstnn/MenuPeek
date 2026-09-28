@@ -28,7 +28,7 @@ struct DailyNotesPanel: View {
                 state.setCompleted(id: id, completed: completed)
             }
         )
-        .onAppear { state.panelDidOpen() }
+        .onAppear { state.windowWillOpen() }
     }
 
     private static func dateLabel(for dayKey: String?) -> String {

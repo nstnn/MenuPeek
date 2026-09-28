@@ -1,6 +1,6 @@
 # Product requirements
 
-MenuPocket is transitioning from its local daily menu bar checklist to a desktop task window with menu bar progress. The local [desktop plan](../plan/desktop-task-management/desktop-task-management.md) defines that increment; only the TASK-001 lifecycle shell is implemented so far. The approved Notes MVP design is recorded in the local [Notes MVP plan](../plan/mvp/NOTES_MVP_PLAN.md). This tracked document states the product contract and distinguishes current code from the remaining transition work.
+MenuPocket is transitioning from its local daily menu bar checklist to a desktop task window with menu bar progress. The local [desktop plan](../plan/desktop-task-management/desktop-task-management.md) defines that increment; the TASK-001 lifecycle shell and TASK-002 daily-state boundary are implemented so far. The approved Notes MVP design is recorded in the local [Notes MVP plan](../plan/mvp/NOTES_MVP_PLAN.md). This tracked document states the product contract and distinguishes current code from the remaining transition work.
 
 ## Approved Notes MVP
 
@@ -18,7 +18,7 @@ History browsing, automatic carryover, reminders, recurring items, accounts, and
 
 The app now has Dock presence and one reusable task-window shell. The native icon-only menu bar button and Dock reopen show/restore that window, including with Settings open. Closing all windows keeps the app running. The shell has Settings access but does not yet expose task CRUD or progress; the desktop layout and status count remain pending.
 
-The former `DailyNotesPanel` and its CRUD implementation remain in source/tests but are no longer reachable from the menu bar. `DailyNotesState` and SQLite storage are unchanged: saved notes remain intact, reads occur through the existing panel/day lifecycle, and writes publish only after repository success. Manual/login launch policy and first-launch Settings replacement remain pending TASK-007.
+The former `DailyNotesPanel` and its CRUD implementation remain in source/tests but are no longer reachable from the menu bar. `DailyNotesState` now refreshes independently on calendar-day, clock, time-zone, and wake notifications, distinguishes unavailable progress from an empty day, and retains stale edit text for recovery. SQLite storage remains unchanged, saved day assignments remain intact, and writes publish only after repository success. Startup/window refresh entry points are available; connecting them to app lifecycle and presenting recovery notices remain later desktop cards. Manual/login launch policy and first-launch Settings replacement remain pending TASK-007.
 
 Settings now shows Launch at Login, app information, and Quit in English. The notes panel has no Quit control by design. The demo loading and preference code remains in the project, though the current app launch does not start demo loads.
 

@@ -40,6 +40,18 @@ final class NoteDomainTests: XCTestCase {
             .key(for: point), "2026-09-26")
     }
 
+    func testLiveTimeZoneProviderAndFixedCalendarHaveSeparateContracts() {
+        let point = instant("2026-09-27T00:30:00Z")
+        var zone = TimeZone(identifier: "America/Toronto")!
+        let live = NoteDay(now: { point }, timeZone: { zone })
+        let fixed = NoteDay(calendar: calendar(in: zone), now: { point })
+        XCTAssertEqual(live.keys().today, "2026-09-26")
+        zone = TimeZone(secondsFromGMT: 0)!
+        XCTAssertEqual(live.keys().today, "2026-09-27")
+        XCTAssertEqual(live.keys().yesterday, "2026-09-26")
+        XCTAssertEqual(fixed.keys().today, "2026-09-26")
+    }
+
     func testCompletionKeepsAssignedDayAndProgressCountsTodayOnly() {
         let today = note("Today", dayKey: "2026-09-27", createdAt: 2)
         let finished = Note(id: today.id, text: today.text, dayKey: today.dayKey,
