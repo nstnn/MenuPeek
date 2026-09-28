@@ -45,13 +45,17 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(controller.window === window)
         XCTAssertTrue(window.isVisible)
         window.miniaturize(nil)
-        // Window Server animation completes after the synchronous API returns.
+        // Both animations can finish after the synchronous AppKit call returns.
         for _ in 0..<50 {
             if window.isMiniaturized { break }
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertTrue(window.isMiniaturized)
         delegate.showTasks()
+        for _ in 0..<50 {
+            if !window.isMiniaturized && window.isVisible { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
         XCTAssertFalse(window.isMiniaturized)
         XCTAssertTrue(window.isVisible)
         window.close()
