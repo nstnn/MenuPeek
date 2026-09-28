@@ -1,6 +1,6 @@
 # Product requirements
 
-MenuPocket's current direction is a small, local daily checklist in one macOS menu bar panel. The approved Notes MVP design is recorded in the local [Notes MVP plan](../plan/mvp/NOTES_MVP_PLAN.md). This tracked document states the product contract and distinguishes current code from the remaining transition work.
+MenuPocket is transitioning from its local daily menu bar checklist to a desktop task window with menu bar progress. The local [desktop plan](../plan/desktop-task-management/desktop-task-management.md) defines that increment; only the TASK-001 lifecycle shell is implemented so far. The approved Notes MVP design is recorded in the local [Notes MVP plan](../plan/mvp/NOTES_MVP_PLAN.md). This tracked document states the product contract and distinguishes current code from the remaining transition work.
 
 ## Approved Notes MVP
 
@@ -16,7 +16,9 @@ History browsing, automatic carryover, reminders, recurring items, accounts, and
 
 ## Current implementation
 
-The menu bar opens `DailyNotesPanel` with an icon-only label. The panel shows today's notes, progress, yesterday's unfinished count, a single-line composer, completion toggles, and secondary edit/delete actions with deletion confirmation. `DailyNotesState` reads on panel open and calendar-day change; note writes are published to the UI only after the repository succeeds. The SQLite store supports add, read, completion, edit, and delete operations and refuses a newer schema version.
+The app now has Dock presence and one reusable task-window shell. The native icon-only menu bar button and Dock reopen show/restore that window, including with Settings open. Closing all windows keeps the app running. The shell has Settings access but does not yet expose task CRUD or progress; the desktop layout and status count remain pending.
+
+The former `DailyNotesPanel` and its CRUD implementation remain in source/tests but are no longer reachable from the menu bar. `DailyNotesState` and SQLite storage are unchanged: saved notes remain intact, reads occur through the existing panel/day lifecycle, and writes publish only after repository success. Manual/login launch policy and first-launch Settings replacement remain pending TASK-007.
 
 Settings now shows Launch at Login, app information, and Quit in English. The notes panel has no Quit control by design. The demo loading and preference code remains in the project, though the current app launch does not start demo loads.
 

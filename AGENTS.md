@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a native macOS menu bar app built with SwiftUI and AppKit. The current panel is a local daily notes checklist backed by SQLite; the earlier demo module shell still supports some app state and Settings. The repository directory is named `MenuPeek`.
+MenuPocket is a native macOS desktop and menu bar app built with SwiftUI and AppKit. The desktop transition currently exposes a reusable task-window shell; the local daily notes state remains backed by SQLite; the earlier demo module shell still supports some app state and Settings. The repository directory is named `MenuPeek`.
 
 ## Where to look
 

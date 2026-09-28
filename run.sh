@@ -42,4 +42,4 @@ function run(argv) {
 JXA
 
 /usr/bin/open "$app_path"
-echo "MenuPocket launched. Look for the grid icon in the macOS menu bar."
+echo "MenuPocket launched. Click the grid icon in the macOS menu bar to open the task-window shell."
