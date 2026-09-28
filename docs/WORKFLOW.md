@@ -20,6 +20,16 @@ The hosted tests cover note day boundaries, ordering, SQLite persistence and err
 
 For a user-facing change, run the relevant tests and inspect the running app. In particular, exercise panel opening, notes writes and relaunch, empty and long lists, keyboard actions, Settings, and both appearances as applicable. Record unavailable UI or hardware checks as untested. Compilation and XCTest do not prove menu bar or Settings interaction.
 
+## GitHub CI
+
+[`ci.yml`](../.github/workflows/ci.yml) runs on pull requests targeting `main`, pushes to `main` (including merged PRs), and manual runs from the Actions tab once the workflow is on the default branch. For PRs, the default checkout tests GitHub's proposed merge with the target branch. New commits to the same PR or branch cancel its older CI run.
+
+The single `Build and test` job uses GitHub's `macos-15` arm64 runner and selects Xcode 16.4 with `DEVELOPER_DIR`. This version is listed in the [runner image's installed software](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md); update the runner and toolchain together when needed. The job prints the toolchain, builds and runs the Debug hosted XCTest suite with the shared `MenuPocket` scheme, then builds Release. The project retains its existing ad hoc signing, so these checks require no Apple signing secrets. Build outputs remain under `build/DerivedData`.
+
+The workflow has read-only repository permissions and a 20-minute job timeout. A build or test failure fails the check; inspect the failed step's log in Actions or the PR's Checks view. There are no path filters, so a documentation-only PR also receives a check. See GitHub's [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) and [concurrency behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
+Commit and push the workflow to activate it on GitHub, then confirm a real run succeeds. Local command verification does not verify GitHub's runner environment. To require passing CI before merging, separately configure branch protection or a ruleset to require the `Build and test` status check after it has run. Adding the workflow alone does not enforce this merge rule. CI covers automated checks; continue the hands-on interface and login-item checks described here before making acceptance claims. The Release step builds a local-style app and does not publish or notarize it.
+
 ## Local Release and login-item checks
 
 Build a local Release app with the same scheme:
