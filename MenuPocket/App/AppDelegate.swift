@@ -4,6 +4,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel
     let dailyNotesState: DailyNotesState
+    private(set) var taskWindowController: TaskWindowController?
+    private(set) var taskStatusItemController: TaskStatusItemController?
     private(set) var settingsWindowController: SettingsWindowController?
     private let onboardingStore: any OnboardingStoring
 
@@ -23,12 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
+        installApplicationMenu()
+        taskStatusItemController = TaskStatusItemController { [weak self] in
+            self?.showTasks()
+        }
         openSettingsOnFirstLaunchIfNeeded {
             showSettings()
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        taskStatusItemController?.remove()
         model.cancelLoadsForTermination()
     }
 
@@ -43,7 +51,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingStore.markOnboardingCompleted()
     }
 
-    func showSettings() {
+    @objc func showTasks() {
+        if taskWindowController == nil {
+            taskWindowController = TaskWindowController(state: dailyNotesState) { [weak self] in
+                self?.showSettings()
+            }
+        }
+        taskWindowController?.showTasks()
+    }
+
+    @objc func showSettings() {
         let controller = settingsWindowController ?? makeSettingsWindowController()
         controller.showSettings()
     }
@@ -52,12 +69,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        showSettings()
+        showTasks()
         return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func installApplicationMenu() {
+        let menu = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu(title: "MenuPocket")
+        let tasks = appMenu.addItem(withTitle: "Show Tasks", action: #selector(showTasks), keyEquivalent: "")
+        tasks.target = self
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit MenuPocket", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        menu.addItem(appItem)
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileItem.submenu = fileMenu
+        menu.addItem(fileItem)
+        NSApplication.shared.mainMenu = menu
     }
 
     private func makeSettingsWindowController() -> SettingsWindowController {

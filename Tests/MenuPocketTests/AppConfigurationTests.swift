@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import MenuPocket
@@ -11,7 +12,55 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "0.1.0")
         XCTAssertEqual(info["CFBundleVersion"] as? String, "1")
         XCTAssertEqual(info["LSMinimumSystemVersion"] as? String, "14.0")
-        XCTAssertEqual(info["LSUIElement"] as? Bool, true)
+        XCTAssertEqual(info["LSUIElement"] as? Bool, false)
+    }
+
+    @MainActor
+    func testTaskWindowReusesWindowAndStateAcrossCloseMinimizeAndDockReopen() async throws {
+        let suite = "local.menupocket.tests.TaskWindow.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = DailyNotesState(repositoryFactory: { throw CocoaError(.fileReadNoSuchFile) })
+        state.draft = "Retain this draft"
+        let delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults)), dailyNotesState: state)
+        XCTAssertNil(delegate.taskWindowController)
+        delegate.showTasks()
+        let controller = try XCTUnwrap(delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        defer {
+            window.close()
+            delegate.settingsWindowController?.window?.close()
+        }
+        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskWindowShell>)
+        XCTAssertTrue(host.rootView.state === state)
+        XCTAssertTrue(controller.state === state)
+        XCTAssertFalse(window.isReleasedWhenClosed)
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertEqual(window.contentMinSize, TaskWindowController.minimumContentSize)
+        delegate.showTasks()
+        XCTAssertTrue(delegate.taskWindowController === controller)
+        window.close()
+        XCTAssertFalse(window.isVisible)
+        delegate.showTasks()
+        XCTAssertTrue(controller.window === window)
+        XCTAssertTrue(window.isVisible)
+        window.miniaturize(nil)
+        // Window Server animation completes after the synchronous API returns.
+        for _ in 0..<50 {
+            if window.isMiniaturized { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(window.isMiniaturized)
+        delegate.showTasks()
+        XCTAssertFalse(window.isMiniaturized)
+        XCTAssertTrue(window.isVisible)
+        window.close()
+        delegate.showSettings()
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true))
+        XCTAssertTrue(window.isVisible)
+        XCTAssertTrue(delegate.taskWindowController === controller)
+        XCTAssertEqual(state.draft, "Retain this draft")
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
     }
 
     @MainActor

@@ -1,20 +1,15 @@
 import AppKit
-import SwiftUI
 
+// AppKit owns the windows and status item; there is no SwiftUI scene that can
+// independently create or restore a second task window.
 @main
-struct MenuPocketApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
-    var body: some Scene {
-        MenuBarExtra {
-            DailyNotesPanel(state: appDelegate.dailyNotesState) {
-                appDelegate.showSettings()
-            }
-        } label: {
-            Label("MenuPocket", systemImage: "square.grid.2x2")
-                .labelStyle(.iconOnly)
-                .accessibilityLabel("MenuPocket")
-        }
-        .menuBarExtraStyle(.window)
+struct MenuPocketApp {
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        application.run()
+        withExtendedLifetime(delegate) {}
     }
 }

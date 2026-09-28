@@ -1,10 +1,16 @@
 # Architecture
 
-MenuPocket is a Swift 6 macOS application using SwiftUI for its menu bar scene and views, AppKit for lifecycle and the retained Settings window, Foundation for state, and system SQLite for notes. The project has one app target and a hosted `MenuPocketTests` target in the shared Xcode scheme. It is sandboxed and configured as an accessory app without a Dock icon.
+MenuPocket is a Swift 6 macOS application using SwiftUI for hosted views, AppKit for lifecycle and the retained Settings window, Foundation for state, and system SQLite for notes. The project has one app target and a hosted `MenuPocketTests` target in the shared Xcode scheme. It is sandboxed and configured as a regular Dock-visible app in Debug and Release.
 
 ## App composition
 
-`MenuPocketApp` creates a `.window` style `MenuBarExtra`. `AppDelegate` owns a `DailyNotesState`, the older demo-oriented `AppModel`, and one `SettingsWindowController`. The current menu bar panel receives `DailyNotesState`; the Settings window receives `AppModel` for launch-at-login status and preference warnings. It exposes Launch at Login, app information, and Quit. The app creates the Settings window on first launch through a separate onboarding marker, and reuses that window afterward.
+`MenuPocketApp` runs `NSApplication` with a retained `AppDelegate`; no SwiftUI scene independently creates windows. `AppDelegate` owns one `DailyNotesState`, the older demo-oriented `AppModel`, a lazy `TaskWindowController`, a retained `TaskStatusItemController`, and one reusable `SettingsWindowController`.
+
+The desktop transition currently implements only the lifecycle shell (TASK-001). `showTasks()` reuses the same SwiftUI-hosting AppKit window, restores minimization, activates the app, and brings it forward. Dock reopen and the native icon-only status button call that boundary, even when Settings is visible. Closing all windows leaves the app running. The native application menu provides Show Tasks, Settings, Close, and Quit; termination removes the status item.
+
+The shell receives the same daily state but does not yet render or edit tasks. The former compact Notes view remains in source and tests; it is no longer the app's menu bar surface. Today layout, progress rendering/refresh, complete commands, and manual/login launch policy belong to subsequent desktop cards. Existing first-launch Settings/onboarding behavior is retained until TASK-007.
+
+Settings continues to receive `AppModel` for launch-at-login status and preference warnings. No persistence, identity, or login registration changes are introduced by the shell.
 
 ## Notes flow
 
