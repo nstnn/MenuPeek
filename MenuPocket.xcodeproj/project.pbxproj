@@ -640,8 +640,8 @@
 			};
 			"buildConfigurationList" = "000000000000000000000025";
 			"compatibilityVersion" = "Xcode 14.0";
-			"developmentRegion" = "vi";
-			"knownRegions" = ("vi", "Base",);
+			"developmentRegion" = "en";
+			"knownRegions" = ("en", "Base",);
 			"mainGroup" = "000000000000000000000012";
 			"productRefGroup" = "000000000000000000000011";
 			"projectDirPath" = "";

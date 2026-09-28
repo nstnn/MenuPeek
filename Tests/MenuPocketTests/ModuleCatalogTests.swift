@@ -8,13 +8,13 @@ final class ModuleCatalogTests: XCTestCase {
             [
                 ModuleDescriptor(
                     id: "demo.tasks",
-                    displayName: "Công việc mẫu",
+                    displayName: "Sample tasks",
                     systemImageName: "checklist",
                     canBePinned: true
                 ),
                 ModuleDescriptor(
                     id: "demo.status",
-                    displayName: "Trạng thái mẫu",
+                    displayName: "Sample status",
                     systemImageName: "circle.grid.2x2",
                     canBePinned: true
                 ),

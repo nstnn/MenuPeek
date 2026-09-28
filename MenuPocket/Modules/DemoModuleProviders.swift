@@ -8,10 +8,10 @@ enum DemoScenario: String, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
-        case .normal: "Bình thường"
-        case .noData: "Không có dữ liệu"
-        case .error: "Lỗi"
-        case .slowResponse: "Phản hồi chậm"
+        case .normal: "Normal"
+        case .noData: "No data"
+        case .error: "Error"
+        case .slowResponse: "Slow response"
         }
     }
 }
@@ -45,7 +45,7 @@ private struct DemoFixtureProvider: Sendable {
         try Task.checkCancellation()
         return ModuleSnapshot(
             primaryValue: primaryValue,
-            description: "Dữ liệu minh họa",
+            description: "Sample data",
             pinnedLabel: pinnedLabel,
             updatedAt: clock()
         )
@@ -61,8 +61,8 @@ struct DemoTasksProvider: ModuleProvider {
         delay: @escaping DemoDelay = { try await Task.sleep(for: $0) }
     ) {
         fixture = DemoFixtureProvider(
-            primaryValue: "3 việc",
-            pinnedLabel: "Demo: 3 việc",
+            primaryValue: "3 tasks",
+            pinnedLabel: "Demo: 3 tasks",
             clock: clock,
             delay: delay
         )
@@ -82,7 +82,7 @@ struct DemoStatusProvider: ModuleProvider {
         delay: @escaping DemoDelay = { try await Task.sleep(for: $0) }
     ) {
         fixture = DemoFixtureProvider(
-            primaryValue: "Sẵn sàng",
+            primaryValue: "Ready",
             pinnedLabel: "Demo: OK",
             clock: clock,
             delay: delay

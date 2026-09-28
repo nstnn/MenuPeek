@@ -16,13 +16,13 @@ enum ModuleCatalog {
     static let defaultModules: [ModuleDescriptor] = [
         ModuleDescriptor(
             id: tasksID,
-            displayName: "Công việc mẫu",
+            displayName: "Sample tasks",
             systemImageName: "checklist",
             canBePinned: true
         ),
         ModuleDescriptor(
             id: statusID,
-            displayName: "Trạng thái mẫu",
+            displayName: "Sample status",
             systemImageName: "circle.grid.2x2",
             canBePinned: true
         ),

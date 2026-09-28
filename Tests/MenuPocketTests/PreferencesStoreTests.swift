@@ -90,7 +90,7 @@ final class PreferencesStoreTests: XCTestCase {
     func testReconcilerIgnoresRemovedIDsPreservesKnownOrderAndAppendsNewIDs() {
         let newModule = ModuleDescriptor(
             id: "demo.new",
-            displayName: "Nội dung mới",
+            displayName: "New content",
             systemImageName: "sparkles",
             canBePinned: true
         )
@@ -120,7 +120,7 @@ final class PreferencesStoreTests: XCTestCase {
     func testReconcilerClearsDisabledAndUnpinnablePins() {
         let unpinnableModule = ModuleDescriptor(
             id: "demo.unpinnable",
-            displayName: "Không thể ghim",
+            displayName: "Cannot pin",
             systemImageName: "nosign",
             canBePinned: false
         )

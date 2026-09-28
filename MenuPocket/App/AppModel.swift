@@ -15,26 +15,26 @@ struct MenuBarPresentation: Equatable {
             if state.lastError != nil {
                 displayText = "\(snapshot.pinnedLabel) ⚠︎"
                 accessibilityLabel =
-                    "MenuPocket, \(snapshot.pinnedLabel). Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+                    "MenuPocket, \(snapshot.pinnedLabel). Warning: could not refresh; showing previous data."
             } else if state.isLoading {
                 displayText = snapshot.pinnedLabel
                 accessibilityLabel =
-                    "MenuPocket, \(snapshot.pinnedLabel). Đang cập nhật dữ liệu demo."
+                    "MenuPocket, \(snapshot.pinnedLabel). Refreshing demo data."
             } else {
                 displayText = snapshot.pinnedLabel
                 accessibilityLabel = "MenuPocket, \(snapshot.pinnedLabel)."
             }
         } else if state.isLoading || !state.hasCompletedAttempt {
             displayText = "Demo: …"
-            accessibilityLabel = "MenuPocket, đang tải dữ liệu demo."
+            accessibilityLabel = "MenuPocket, loading demo data."
         } else if state.lastError != nil {
             displayText = "Demo: !"
-            accessibilityLabel = "MenuPocket, không tải được dữ liệu demo."
+            accessibilityLabel = "MenuPocket, could not load demo data."
         } else {
             // The source requires clearing stale data but does not prescribe the
             // compact empty label. An em dash keeps the result short and distinct.
             displayText = "Demo: —"
-            accessibilityLabel = "MenuPocket, không có dữ liệu demo."
+            accessibilityLabel = "MenuPocket, no demo data."
         }
     }
 

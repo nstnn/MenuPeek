@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class AppModelLoadingTests: XCTestCase {
     func testPanelPhaseDistinguishesLoadingReadyEmptyAndFailureStates() {
-        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+        let snapshot = makeSnapshot("3 tasks", at: 1_700_000_000)
 
         XCTAssertEqual(ModulePanelPhase(state: ModuleRuntimeState()), .loading)
         XCTAssertEqual(
@@ -132,34 +132,34 @@ final class AppModelLoadingTests: XCTestCase {
         await assertRequests(status, [.normal])
         XCTAssertTrue(model.retryModule(ModuleCatalog.statusID))
         await status.waitForRequestCount(2)
-        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_100))
+        await status.completeNext(with: makeSnapshot("Ready", at: 1_700_000_100))
         await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.statusID]?.lastError)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.statusID]?.snapshot?.primaryValue,
-                       "Sẵn sàng")
+                       "Ready")
     }
 
     func testRefreshKeepsOldDataDuringLoadingAndFailureThenEmptyClearsIt() async {
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let model = makeModel(tasks: tasks)
-        let original = makeSnapshot("3 việc", at: 1_700_000_000)
+        let original = makeSnapshot("3 tasks", at: 1_700_000_000)
 
         XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
         await tasks.completeNext(with: original)
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
-        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
-        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, Demo: 3 việc.")
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 tasks")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, Demo: 3 tasks.")
 
         XCTAssertTrue(model.refreshModule(ModuleCatalog.tasksID))
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.isLoading, true)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
-        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 tasks")
         XCTAssertEqual(
             model.menuBarAccessibilityLabel,
-            "MenuPocket, Demo: 3 việc. Đang cập nhật dữ liệu demo."
+            "MenuPocket, Demo: 3 tasks. Refreshing demo data."
         )
         await tasks.waitForRequestCount(2)
         await tasks.failNext()
@@ -167,16 +167,16 @@ final class AppModelLoadingTests: XCTestCase {
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertNotNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
-        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc ⚠︎")
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 tasks ⚠︎")
         XCTAssertEqual(
             model.menuBarAccessibilityLabel,
-            "MenuPocket, Demo: 3 việc. Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+            "MenuPocket, Demo: 3 tasks. Warning: could not refresh; showing previous data."
         )
 
         XCTAssertTrue(model.retryModule(ModuleCatalog.tasksID))
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.snapshot, original)
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
-        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 việc")
+        XCTAssertEqual(model.menuBarDisplayText, "Demo: 3 tasks")
         await tasks.waitForRequestCount(3)
         await tasks.completeNext(with: nil)
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
@@ -184,14 +184,14 @@ final class AppModelLoadingTests: XCTestCase {
         XCTAssertNil(model.runtimeStates[ModuleCatalog.tasksID]?.lastError)
         XCTAssertEqual(model.runtimeStates[ModuleCatalog.tasksID]?.hasCompletedAttempt, true)
         XCTAssertEqual(model.menuBarDisplayText, "Demo: —")
-        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, không có dữ liệu demo.")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, no demo data.")
     }
 
     func testModulesStayIndependentAndScenarioChangeReloadsOnlyItsModule() async {
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let status = ControlledProvider(id: ModuleCatalog.statusID)
         let model = makeModel(tasks: tasks, status: status)
-        let statusSnapshot = makeSnapshot("Sẵn sàng", at: 1_700_000_100)
+        let statusSnapshot = makeSnapshot("Ready", at: 1_700_000_100)
 
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
@@ -222,16 +222,16 @@ final class AppModelLoadingTests: XCTestCase {
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
         await status.waitForRequestCount(1)
-        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_000))
-        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_100))
+        await tasks.completeNext(with: makeSnapshot("3 tasks", at: 1_700_000_000))
+        await status.completeNext(with: makeSnapshot("Ready", at: 1_700_000_100))
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
         await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
 
         model.refreshEnabledModules()
         await tasks.waitForRequestCount(2)
         await status.waitForRequestCount(2)
-        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_200))
-        await status.completeNext(with: makeSnapshot("Sẵn sàng", at: 1_700_000_300))
+        await tasks.completeNext(with: makeSnapshot("3 tasks", at: 1_700_000_200))
+        await status.completeNext(with: makeSnapshot("Ready", at: 1_700_000_300))
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
         await model.waitForCurrentLoad(of: ModuleCatalog.statusID)
         await assertRequests(tasks, [.normal, .normal])
@@ -239,7 +239,7 @@ final class AppModelLoadingTests: XCTestCase {
 
         XCTAssertTrue(model.retryModule(ModuleCatalog.tasksID))
         await tasks.waitForRequestCount(3)
-        await tasks.completeNext(with: makeSnapshot("3 việc", at: 1_700_000_400))
+        await tasks.completeNext(with: makeSnapshot("3 tasks", at: 1_700_000_400))
         await model.waitForCurrentLoad(of: ModuleCatalog.tasksID)
         await assertRequests(tasks, [.normal, .normal, .normal])
         await assertRequests(status, [.normal, .normal])
@@ -408,7 +408,7 @@ final class AppModelLoadingTests: XCTestCase {
         let store = LoadingPreferencesStore(preferences: preferences)
         let tasks = ControlledProvider(id: ModuleCatalog.tasksID)
         let model = AppModel(store: store, providers: [tasks])
-        let snapshot = makeSnapshot("3 việc", at: 1_700_000_000)
+        let snapshot = makeSnapshot("3 tasks", at: 1_700_000_000)
 
         model.startInitialLoads()
         await tasks.waitForRequestCount(1)
@@ -462,7 +462,7 @@ final class AppModelLoadingTests: XCTestCase {
     private func makeSnapshot(_ value: String, at time: TimeInterval) -> ModuleSnapshot {
         ModuleSnapshot(
             primaryValue: value,
-            description: "Dữ liệu minh họa",
+            description: "Sample data",
             pinnedLabel: "Demo: \(value)",
             updatedAt: Date(timeIntervalSince1970: time)
         )

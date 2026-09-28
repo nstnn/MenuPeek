@@ -34,7 +34,7 @@ final class AppModelTests: XCTestCase {
     func testPinSelectionRequiresKnownEnabledPinnableModule() {
         let unpinnable = ModuleDescriptor(
             id: "demo.unpinnable",
-            displayName: "Không thể ghim",
+            displayName: "Cannot pin",
             systemImageName: "nosign",
             canBePinned: false
         )
@@ -95,7 +95,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.enabledPinnableModulesInOrder.map(\.id),
                        [ModuleCatalog.tasksID, ModuleCatalog.statusID])
         XCTAssertEqual(model.menuBarDisplayText, "Demo: …")
-        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, đang tải dữ liệu demo.")
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "MenuPocket, loading demo data.")
         XCTAssertFalse(model.moveModuleUp(ModuleCatalog.tasksID))
         XCTAssertFalse(model.moveModuleDown(ModuleCatalog.statusID))
 
@@ -129,30 +129,30 @@ final class AppModelTests: XCTestCase {
     @MainActor
     func testMenuBarPresentationStateTable() {
         let tasks = ModuleSnapshot(
-            primaryValue: "3 việc",
-            description: "Dữ liệu minh họa",
-            pinnedLabel: "Demo: 3 việc",
+            primaryValue: "3 tasks",
+            description: "Sample data",
+            pinnedLabel: "Demo: 3 tasks",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         let status = ModuleSnapshot(
-            primaryValue: "Sẵn sàng",
-            description: "Dữ liệu minh họa",
+            primaryValue: "Ready",
+            description: "Sample data",
             pinnedLabel: "Demo: OK",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
         )
         let cases: [(String, ModuleRuntimeState, String, String)] = [
             (
                 "before first load", ModuleRuntimeState(), "Demo: …",
-                "MenuPocket, đang tải dữ liệu demo."
+                "MenuPocket, loading demo data."
             ),
             (
                 "initial loading", ModuleRuntimeState(isLoading: true), "Demo: …",
-                "MenuPocket, đang tải dữ liệu demo."
+                "MenuPocket, loading demo data."
             ),
             (
                 "tasks ready",
                 ModuleRuntimeState(snapshot: tasks, hasCompletedAttempt: true),
-                "Demo: 3 việc", "MenuPocket, Demo: 3 việc."
+                "Demo: 3 tasks", "MenuPocket, Demo: 3 tasks."
             ),
             (
                 "status ready",
@@ -162,12 +162,12 @@ final class AppModelTests: XCTestCase {
             (
                 "refreshing after success",
                 ModuleRuntimeState(snapshot: tasks, isLoading: true, hasCompletedAttempt: true),
-                "Demo: 3 việc", "MenuPocket, Demo: 3 việc. Đang cập nhật dữ liệu demo."
+                "Demo: 3 tasks", "MenuPocket, Demo: 3 tasks. Refreshing demo data."
             ),
             (
                 "initial failure",
                 ModuleRuntimeState(lastError: "Provider detail", hasCompletedAttempt: true),
-                "Demo: !", "MenuPocket, không tải được dữ liệu demo."
+                "Demo: !", "MenuPocket, could not load demo data."
             ),
             (
                 "stale data after failure",
@@ -176,13 +176,13 @@ final class AppModelTests: XCTestCase {
                     lastError: "Provider detail",
                     hasCompletedAttempt: true
                 ),
-                "Demo: 3 việc ⚠︎",
-                "MenuPocket, Demo: 3 việc. Cảnh báo: không cập nhật được; đang hiển thị dữ liệu trước đó."
+                "Demo: 3 tasks ⚠︎",
+                "MenuPocket, Demo: 3 tasks. Warning: could not refresh; showing previous data."
             ),
             (
                 "completed empty result",
                 ModuleRuntimeState(hasCompletedAttempt: true),
-                "Demo: —", "MenuPocket, không có dữ liệu demo."
+                "Demo: —", "MenuPocket, no demo data."
             ),
         ]
 
@@ -197,7 +197,7 @@ final class AppModelTests: XCTestCase {
     func testPinChoicesExcludeUnpinnableModules() {
         let unpinnable = ModuleDescriptor(
             id: "demo.unpinnable",
-            displayName: "Không thể ghim",
+            displayName: "Cannot pin",
             systemImageName: "nosign",
             canBePinned: false
         )

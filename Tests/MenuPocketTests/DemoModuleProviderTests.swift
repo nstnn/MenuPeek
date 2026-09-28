@@ -28,17 +28,17 @@ final class DemoModuleProviderTests: XCTestCase {
         XCTAssertEqual(
             taskSnapshot,
             ModuleSnapshot(
-                primaryValue: "3 việc",
-                description: "Dữ liệu minh họa",
-                pinnedLabel: "Demo: 3 việc",
+                primaryValue: "3 tasks",
+                description: "Sample data",
+                pinnedLabel: "Demo: 3 tasks",
                 updatedAt: loadedAt
             )
         )
         XCTAssertEqual(
             statusSnapshot,
             ModuleSnapshot(
-                primaryValue: "Sẵn sàng",
-                description: "Dữ liệu minh họa",
+                primaryValue: "Ready",
+                description: "Sample data",
                 pinnedLabel: "Demo: OK",
                 updatedAt: loadedAt
             )
@@ -108,7 +108,7 @@ final class DemoModuleProviderTests: XCTestCase {
     func testScenarioLabelsMatchTheDemoControls() {
         XCTAssertEqual(
             DemoScenario.allCases.map(\.displayName),
-            ["Bình thường", "Không có dữ liệu", "Lỗi", "Phản hồi chậm"]
+            ["Normal", "No data", "Error", "Slow response"]
         )
     }
 }

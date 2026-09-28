@@ -116,7 +116,7 @@ struct TaskWindowView: View {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         guard let date = formatter.date(from: key) else { return key }
-        formatter.locale = .current
+        formatter.locale = Locale(identifier: "en")
         formatter.dateStyle = .full
         formatter.timeStyle = .none
         return formatter.string(from: date)

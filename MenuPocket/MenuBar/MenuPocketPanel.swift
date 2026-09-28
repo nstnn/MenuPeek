@@ -60,7 +60,7 @@ struct MenuPocketPanel: View {
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Dữ liệu demo")
+                .accessibilityLabel("Demo data")
         }
     }
 
@@ -68,9 +68,9 @@ struct MenuPocketPanel: View {
     private var moduleContent: some View {
         if model.enabledModulesInOrder.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Chưa bật nội dung nào.")
+                Text("No content enabled.")
                     .fontWeight(.medium)
-                Text("Mở Cài đặt để chọn nội dung hiển thị.")
+                Text("Open Settings to choose what to display.")
                     .foregroundStyle(.secondary)
             }
         } else {
@@ -89,21 +89,21 @@ struct MenuPocketPanel: View {
 
     private var footer: some View {
         HStack {
-            Button("Cài đặt…", action: onOpenSettings)
-                .accessibilityLabel("Mở Cài đặt MenuPocket")
+            Button("Settings…", action: onOpenSettings)
+                .accessibilityLabel("Open MenuPocket Settings")
 
             Spacer()
 
-            Button("Làm mới") {
+            Button("Refresh") {
                 model.refreshEnabledModules()
             }
             .disabled(model.enabledModulesInOrder.isEmpty)
-            .accessibilityLabel("Làm mới dữ liệu demo")
+            .accessibilityLabel("Refresh demo data")
 
-            Button("Thoát", role: .destructive) {
+            Button("Quit", role: .destructive) {
                 NSApplication.shared.terminate(nil)
             }
-            .accessibilityLabel("Thoát MenuPocket")
+            .accessibilityLabel("Quit MenuPocket")
         }
     }
 }
@@ -157,23 +157,23 @@ private struct ModulePanelRow: View {
 
             switch phase {
             case .loading:
-                loadingText("Đang tải dữ liệu demo…")
+                loadingText("Loading demo data…")
             case let .ready(snapshot):
                 snapshotContent(snapshot)
             case let .refreshing(snapshot):
                 snapshotContent(snapshot)
-                loadingText("Đang cập nhật dữ liệu demo…")
+                loadingText("Refreshing demo data…")
             case .empty:
-                Text("Chưa có dữ liệu demo")
+                Text("No demo data")
                     .foregroundStyle(.secondary)
             case .initialFailure:
-                Text("Không tải được dữ liệu demo.")
+                Text("Could not load demo data.")
                     .foregroundStyle(.secondary)
                 retryButton
             case let .stale(snapshot):
                 snapshotContent(snapshot)
                 Label(
-                    "Không cập nhật được; đang hiển thị dữ liệu trước đó.",
+                    "Could not refresh; showing previous data.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .foregroundStyle(.secondary)
@@ -190,7 +190,7 @@ private struct ModulePanelRow: View {
             .fontWeight(.semibold)
         Text(snapshot.description)
             .foregroundStyle(.secondary)
-        Text("Cập nhật lúc \(snapshot.updatedAt.formatted(date: .omitted, time: .shortened))")
+        Text("Updated at \(snapshot.updatedAt.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(Locale(identifier: "en"))))")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
@@ -206,7 +206,7 @@ private struct ModulePanelRow: View {
     }
 
     private var retryButton: some View {
-        Button("Thử lại", action: onRetry)
-            .accessibilityLabel("Thử lại \(module.displayName)")
+        Button("Retry", action: onRetry)
+            .accessibilityLabel("Retry \(module.displayName)")
     }
 }

@@ -11,6 +11,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(Bundle.main.bundleIdentifier, "local.menupocket.app")
         XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "0.1.0")
         XCTAssertEqual(info["CFBundleVersion"] as? String, "1")
+        XCTAssertEqual(info["CFBundleDevelopmentRegion"] as? String, "en")
         XCTAssertEqual(info["LSMinimumSystemVersion"] as? String, "14.0")
         XCTAssertEqual(info["LSUIElement"] as? Bool, false)
     }
