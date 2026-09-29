@@ -17,7 +17,7 @@ Open `MenuPocket.xcodeproj` in Xcode, or run the local Debug launcher from this 
 ./run.sh
 ```
 
-The launcher builds with the shared `MenuPocket` scheme into ignored `build/DerivedData`, stops this checkout's running Debug copy, and opens the rebuilt app. MenuPocket appears in the Dock. Its grid icon and saved completed/total count in the menu bar open the Today task window.
+The launcher builds with the shared `MenuPocket` scheme into ignored `build/DerivedData`, stops this checkout's running Debug copy, and opens the rebuilt app. MenuPocket appears in the Dock. Its saved completed/total count in the menu bar opens the Today task window.
 
 To run the hosted XCTest target:
 
@@ -29,7 +29,7 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 
 ## Use the Today window
 
-Opening MenuPocket explicitly shows the Today task window. Click the menu bar grid icon or reopen MenuPocket from the Dock to restore the same window. Closing or minimizing it leaves the app, Dock icon, and menu bar progress running. Quit from the application menu, Settings, or Command-Q to exit.
+Opening MenuPocket explicitly shows the Today task window. Click the menu bar progress count or reopen MenuPocket from the Dock to restore the same window. Closing or minimizing it leaves the app, Dock icon, and menu bar progress running. Quit from the application menu, Settings, or Command-Q to exit.
 
 The Today view shows the local date, progress, and a scrollable checklist. Incomplete tasks appear first, newest first within each group. Add task opens a single-line field; Return or Save stores trimmed text, and Escape or Cancel discards it. Checkboxes complete or uncomplete tasks. Row Edit and Delete actions provide text editing and deletion confirmation. A rejected write keeps the saved task/count and recoverable draft text, with an inline error.
 

@@ -10,7 +10,7 @@ MenuPocket is a Swift 6 macOS application using SwiftUI for hosted views, AppKit
 | [AppDelegate](../MenuPocket/App/AppDelegate.swift) | Own one daily state, the retained demo/preferences model, lazy task-window controller, retained status controller, and reusable Settings controller. Route startup, explicit presentation, Dock reopen, commands, activation, and termination. |
 | [TaskWindowController](../MenuPocket/Notes/TaskWindowController.swift) | Retain one AppKit window hosting `TaskWindowView`; refresh, restore minimization, activate, and bring it forward through `showTasks()`. Own transient `TaskWindowPresentation`. |
 | [TaskWindowView](../MenuPocket/Notes/TaskWindowView.swift) | Render Today and saved rows; bind drafts and actions to daily state. Own composer visibility/focus, not saved data. |
-| [TaskStatusItemController](../MenuPocket/MenuBar/TaskStatusItemController.swift) | Render icon/count, tooltip, and accessibility label from that same state. Primary click calls `showTasks()`. Create no repository or saved snapshot. |
+| [TaskStatusItemController](../MenuPocket/MenuBar/TaskStatusItemController.swift) | Render the count without an icon, plus tooltip and accessibility label, from that same state. Primary click calls `showTasks()`. Create no repository or saved snapshot. |
 | [DailyNotesState](../MenuPocket/Notes/DailyNotesState.swift) | Own saved daily data, one cached repository connection, drafts, errors, recovery text, and independent refresh observers. |
 | [SettingsWindowController](../MenuPocket/Settings/SettingsWindowController.swift) | Reuse one Settings window with the existing `AppModel` preference/login boundary. |
 

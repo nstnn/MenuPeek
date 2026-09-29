@@ -14,8 +14,6 @@ final class TaskStatusItemController: NSObject {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "MenuPocket")
-            button.imagePosition = .imageLeading
             button.target = self
             button.action = #selector(openTasks)
         }
