@@ -361,7 +361,7 @@ private struct DailyNotesPreview: View {
     var body: some View {
         DailyNotesView(
             dateLabel: "26 Sep",
-            notes: NoteOrder.sorted(notes),
+            notes: notes,
             progress: NoteProgress(notes: notes, for: "2026-09-26"),
             yesterdayIncompleteCount: notes.isEmpty ? 0 : 3,
             errorMessage: nil,

@@ -113,7 +113,7 @@ final class DailyNotesState {
             let savedNotes = try store.notes(for: keys.today)
             let previousCount = try store.incompleteCount(for: keys.yesterday)
             todayKey = keys.today
-            notes = NoteOrder.sorted(savedNotes.filter { $0.dayKey == keys.today })
+            notes = savedNotes.filter { $0.dayKey == keys.today }
             if let editingNoteID, !notes.contains(where: { $0.id == editingNoteID }) {
                 invalidateEditing()
                 refreshNotice = "The edited task is no longer available. Unsaved text was kept for recovery."
@@ -143,7 +143,7 @@ final class DailyNotesState {
                         createdAt: instant, completedAt: nil)
         do {
             try repository.add(note)
-            notes = NoteOrder.sorted(notes + [note])
+            notes.append(note)
             draft = ""
             issue = nil
             return true
@@ -164,7 +164,6 @@ final class DailyNotesState {
             try repository.setCompleted(id: id, completedAt: completedAt)
             notes[index] = Note(id: saved.id, text: saved.text, dayKey: saved.dayKey,
                                 createdAt: saved.createdAt, completedAt: completedAt)
-            notes = NoteOrder.sorted(notes)
             issue = nil
             return true
         } catch {

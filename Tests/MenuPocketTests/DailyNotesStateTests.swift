@@ -126,7 +126,7 @@ final class DailyNotesStateTests: XCTestCase {
         let newest = note("New", day: "2026-09-27", createdAt: 5)
         store.saved.append(newest)
         state.windowWillOpen()
-        XCTAssertEqual(state.notes, [newest, today, finished])
+        XCTAssertEqual(state.notes, [today, finished, newest])
         XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 3))
     }
 
@@ -321,15 +321,16 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(store.saved.isEmpty)
     }
 
-    func testNoteChangesPersistAcrossFreshStateWithSQLite() throws {
+    func testFixedInsertionOrderSurvivesTaskChangesAndFreshStateWithSQLite() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DailyNotesStateTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("notes.sqlite")
+        var current = instant("2026-09-27T12:00:00-04:00")
         let makeState = {
             DailyNotesState(
                 repositoryFactory: { try SQLiteNoteRepository(databaseURL: databaseURL) },
-                day: self.makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                day: self.makeDay(now: { current }),
                 notificationCenter: NotificationCenter()
             )
         }
@@ -340,31 +341,47 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(firstSession.addDraft())
         firstSession.draft = "Second note"
         XCTAssertTrue(firstSession.addDraft())
+        // Equal timestamps and a clock adjustment must not affect insertion order.
+        current = current.addingTimeInterval(-60)
+        firstSession.draft = "Third note"
+        XCTAssertTrue(firstSession.addDraft())
+        XCTAssertEqual(firstSession.notes.map(\.text), ["First note", "Second note", "Third note"])
+        let originalIDs = firstSession.notes.map(\.id)
         let firstID = try XCTUnwrap(firstSession.notes.first(where: { $0.text == "First note" })?.id)
         XCTAssertTrue(firstSession.setCompleted(id: firstID, completed: true))
-        XCTAssertEqual(firstSession.progress, NoteProgress(completed: 1, total: 2))
-        XCTAssertEqual(firstSession.notes.last?.id, firstID)
+        XCTAssertEqual(firstSession.progress, NoteProgress(completed: 1, total: 3))
+        XCTAssertEqual(firstSession.notes.map(\.id), originalIDs)
+        firstSession.refresh()
+        XCTAssertEqual(firstSession.notes.map(\.id), originalIDs)
 
         let secondSession = makeState()
         secondSession.windowWillOpen()
-        XCTAssertEqual(secondSession.notes.map(\.text), ["Second note", "First note"])
-        XCTAssertEqual(secondSession.progress, NoteProgress(completed: 1, total: 2))
-        XCTAssertTrue(secondSession.notes.last?.isCompleted == true)
+        XCTAssertEqual(secondSession.notes.map(\.id), originalIDs)
+        XCTAssertEqual(secondSession.progress, NoteProgress(completed: 1, total: 3))
+        XCTAssertTrue(secondSession.notes.first?.isCompleted == true)
         XCTAssertTrue(secondSession.setCompleted(id: firstID, completed: false))
+        XCTAssertEqual(secondSession.notes.map(\.id), originalIDs)
 
         let thirdSession = makeState()
         thirdSession.windowWillOpen()
-        XCTAssertEqual(thirdSession.progress, NoteProgress(completed: 0, total: 2))
+        XCTAssertEqual(thirdSession.progress, NoteProgress(completed: 0, total: 3))
+        XCTAssertEqual(thirdSession.notes.map(\.id), originalIDs)
         XCTAssertFalse(try XCTUnwrap(thirdSession.notes.first(where: { $0.id == firstID })).isCompleted)
         thirdSession.beginEditing(id: firstID)
         thirdSession.editDraft = "  Updated note  "
         XCTAssertTrue(thirdSession.saveEdit())
+        XCTAssertEqual(thirdSession.notes.map(\.id), originalIDs)
         let secondID = try XCTUnwrap(thirdSession.notes.first(where: { $0.text == "Second note" })?.id)
         XCTAssertTrue(thirdSession.delete(id: secondID))
+        XCTAssertEqual(thirdSession.notes.map(\.id), [originalIDs[0], originalIDs[2]])
+        thirdSession.draft = "Fourth note"
+        XCTAssertTrue(thirdSession.addDraft())
+        XCTAssertEqual(thirdSession.notes.map(\.text), ["Updated note", "Third note", "Fourth note"])
 
         let fourthSession = makeState()
         fourthSession.windowWillOpen()
-        XCTAssertEqual(fourthSession.notes.map(\.text), ["Updated note"])
+        XCTAssertEqual(fourthSession.notes, thirdSession.notes)
+        XCTAssertEqual(fourthSession.progress, NoteProgress(completed: 0, total: 3))
         XCTAssertEqual(fourthSession.notes.first?.id, firstID)
     }
 
@@ -547,7 +564,7 @@ private final class FakeNoteRepository: NoteRepository {
 
     func notes(for dayKey: String) throws -> [Note] {
         onRead?(dayKey)
-        return NoteOrder.sorted(saved.filter { $0.dayKey == dayKey })
+        return saved.filter { $0.dayKey == dayKey }
     }
 
     func incompleteCount(for dayKey: String) throws -> Int {

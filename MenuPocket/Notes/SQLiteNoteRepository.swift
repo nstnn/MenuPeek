@@ -93,11 +93,13 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     func notes(for dayKey: String) throws -> [Note] {
+        // The existing table's rowid preserves insertion order across task updates.
+        // Do not rebuild this table without preserving that relative order.
         let statement = try prepare(
             """
             SELECT id, text, day_key, created_at, completed_at
             FROM notes WHERE day_key = ?
-            ORDER BY completed_at IS NOT NULL, created_at DESC, id ASC
+            ORDER BY rowid ASC
             """
         )
         defer { sqlite3_finalize(statement) }
