@@ -139,6 +139,24 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(store.saved.count, 1)
     }
 
+    func testCancelNewDraftClearsFailedAddWithoutChangingSavedTasks() {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.windowWillOpen()
+        state.draft = "Retry or discard"
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        state.windowWillOpen()
+        XCTAssertEqual(state.draft, "Retry or discard")
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.issue, .add)
+        state.cancelDraft()
+        XCTAssertEqual(state.draft, "")
+        XCTAssertNil(state.issue)
+        XCTAssertTrue(store.saved.isEmpty)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+    }
+
     func testFailedCompletionEditAndDeleteNeverChangeSavedDisplay() {
         let original = note("Original", day: "2026-09-27", createdAt: 1)
         let store = FakeNoteRepository(notes: [original])

@@ -29,7 +29,7 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 
 ## Use the Today window
 
-Click the menu bar grid icon or reopen MenuPocket from the Dock to show the same task window. Closing or minimizing it does not quit the app; another presentation restores it. The Today view shows the local date, saved task progress, and ordered tasks in a scrollable list, with Settings access and Retry when tasks cannot load. Add task is visible but disabled until the next interaction card; completion, editing, and the menu bar count remain pending. The previous compact checklist is no longer exposed.
+Click the menu bar grid icon or reopen MenuPocket from the Dock to show the same task window. Closing or minimizing it does not quit the app; another presentation restores it. The Today view shows the local date, saved task progress, and ordered tasks in a scrollable list, with Settings access and Retry when tasks cannot load. Add task opens a single-line field: Return or Save adds trimmed text; Escape or Cancel discards it. Checkboxes complete or uncomplete tasks and update saved progress. Failed writes preserve draft text or the saved checkbox/count and show an inline error. Unsaved new-task text survives closing and reopening the window within the running app. Editing/deletion and the menu bar count remain pending. The previous compact checklist is no longer exposed.
 
 Saved notes and preferences are preserved. Notes stay assigned to their creation day in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences remain separate in `UserDefaults`. Settings retains Open at Login, app information, and Quit. Startup policy remains unchanged until the dedicated lifecycle card.
 

@@ -118,6 +118,11 @@ final class DailyNotesState {
         }
     }
 
+    func cancelDraft() {
+        draft = ""
+        if issue == .add { issue = nil }
+    }
+
     @discardableResult
     func addDraft() -> Bool {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
