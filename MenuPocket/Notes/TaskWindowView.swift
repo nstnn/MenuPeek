@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// Desktop presentation of the app-owned saved snapshot. Task creation and
-/// row mutations are connected by the subsequent interaction cards.
+/// Desktop checklist backed by the app-owned saved snapshot and draft.
 struct TaskWindowView: View {
-    private enum FocusControl: Hashable { case add, settings, retry }
+    private enum FocusControl: Hashable {
+        case add, settings, retry, save, draft
+        case completion(UUID)
+    }
 
-    let state: DailyNotesState
+    @Bindable var state: DailyNotesState
     let onSettings: () -> Void
-    var onAddTask: (() -> Void)? = nil
+    @State private var isComposerVisible = false
     @FocusState private var focusedControl: FocusControl?
 
     var body: some View {
@@ -44,31 +46,39 @@ struct TaskWindowView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("todayTaskList")
             Divider()
-            HStack {
-                Button {
-                    onAddTask?()
-                } label: {
-                    Label("Add task", systemImage: "plus")
+            VStack(alignment: .leading, spacing: 12) {
+                if isComposerVisible || !state.draft.isEmpty {
+                    composer
                 }
-                .focusable()
-                .focused($focusedControl, equals: .add)
-                .onKeyPress(keys: [.space, .return]) { _ in
-                    onAddTask?()
-                    return .handled
+                if let issue = state.issue, issue == .add || issue == .complete {
+                    Text(issue == .add ? "Could not save task. Try again." : "Could not update task. Try again.")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("taskWriteError")
                 }
-                .overlay { focusOutline(focusedControl == .add) }
-                .disabled(onAddTask == nil || state.availableProgress == nil)
-                .accessibilityIdentifier("addTask")
-                Spacer()
-                Button("Settings…", action: onSettings)
+                HStack {
+                    Button(action: showComposer) {
+                        Label("Add task", systemImage: "plus")
+                    }
                     .focusable()
-                    .focused($focusedControl, equals: .settings)
+                    .focused($focusedControl, equals: .add)
                     .onKeyPress(keys: [.space, .return]) { _ in
-                        onSettings()
+                        showComposer()
                         return .handled
                     }
-                    .overlay { focusOutline(focusedControl == .settings) }
-                    .accessibilityLabel("Open Settings")
+                    .overlay { focusOutline(focusedControl == .add) }
+                    .disabled(state.availableProgress == nil)
+                    .accessibilityIdentifier("addTask")
+                    Spacer()
+                    Button("Settings…", action: onSettings)
+                        .focusable()
+                        .focused($focusedControl, equals: .settings)
+                        .onKeyPress(keys: [.space, .return]) { _ in
+                            onSettings()
+                            return .handled
+                        }
+                        .overlay { focusOutline(focusedControl == .settings) }
+                        .accessibilityLabel("Open Settings")
+                }
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -176,9 +186,23 @@ struct TaskWindowView: View {
 
     private func taskRow(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: note.isCompleted ? "checkmark.square.fill" : "square")
-                .font(.title3)
-                .accessibilityHidden(true)
+            Toggle(isOn: Binding(
+                get: { state.notes.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
+                set: { state.setCompleted(id: note.id, completed: $0) }
+            )) { Text(note.text) }
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .focusable()
+                .focused($focusedControl, equals: .completion(note.id))
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    if let saved = state.notes.first(where: { $0.id == note.id }) {
+                        state.setCompleted(id: note.id, completed: !saved.isCompleted)
+                    }
+                    return .handled
+                }
+                .overlay { focusOutline(focusedControl == .completion(note.id)) }
+                .accessibilityLabel(note.text)
+                .accessibilityIdentifier("taskCompletion-\(note.id)")
             Text(note.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -186,9 +210,57 @@ struct TaskWindowView: View {
         }
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 14)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(note.text), \(note.isCompleted ? "completed" : "incomplete")")
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("taskRow-\(note.id)")
+    }
+
+    private var composer: some View {
+        HStack(spacing: 12) {
+            TextField("Write a task", text: $state.draft)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("New task")
+                .accessibilityIdentifier("newTaskDraft")
+                .focused($focusedControl, equals: .draft)
+                .onSubmit(saveDraft)
+                .onExitCommand(perform: cancelDraft)
+                .task {
+                    await Task.yield()
+                    focusedControl = .draft
+                }
+            Button("Save", action: saveDraft)
+                .focusable()
+                .focused($focusedControl, equals: .save)
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    saveDraft()
+                    return .handled
+                }
+                .disabled(state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
+                .accessibilityIdentifier("saveTask")
+            Button("Cancel", action: cancelDraft)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("cancelNewTask")
+        }
+    }
+
+    private func showComposer() {
+        isComposerVisible = true
+        Task { @MainActor in
+            await Task.yield()
+            focusedControl = .draft
+        }
+    }
+
+    private func saveDraft() {
+        if state.addDraft() {
+            isComposerVisible = false
+            focusedControl = .add
+        }
+    }
+
+    private func cancelDraft() {
+        state.cancelDraft()
+        isComposerVisible = false
+        focusedControl = .add
     }
 
     private func focusOutline(_ focused: Bool) -> some View {
