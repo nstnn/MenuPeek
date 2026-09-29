@@ -7,6 +7,108 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+    func testStatusItemObservesSuccessiveSavedWritesWithoutAWindow() async throws {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        var clicks = 0
+        let controller = TaskStatusItemController(state: state) { clicks += 1 }
+        defer { controller.remove() }
+        let button = try XCTUnwrap(controller.statusItem?.button)
+        XCTAssertEqual(button.title, "—")
+        XCTAssertNotNil(button.image)
+        state.startup()
+        try await waitForStatusTitle("0/0", controller: controller)
+        state.draft = "First task"
+        XCTAssertTrue(state.addDraft())
+        try await waitForStatusTitle("0/1", controller: controller)
+        let id = try XCTUnwrap(state.notes.first?.id)
+        XCTAssertTrue(state.setCompleted(id: id, completed: true))
+        try await waitForStatusTitle("1/1", controller: controller)
+        XCTAssertEqual(button.accessibilityLabel(), "MenuPocket, today, 1 of 1 tasks completed")
+        XCTAssertTrue(state.setCompleted(id: id, completed: false))
+        try await waitForStatusTitle("0/1", controller: controller)
+        XCTAssertTrue(state.delete(id: id))
+        try await waitForStatusTitle("0/0", controller: controller)
+        button.performClick(nil)
+        button.performClick(nil)
+        XCTAssertEqual(clicks, 2)
+    }
+
+    func testStatusItemDistinguishesReadFailureRetryAndRejectedWrites() async throws {
+        let saved = note("Saved", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [saved])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let controller = TaskStatusItemController(state: state, showTasks: {})
+        defer { controller.remove() }
+        try await waitForStatusTitle("0/1", controller: controller)
+        for failure in [DailyNotesIssue.add, .complete, .delete] {
+            store.failWrite = failure
+            switch failure {
+            case .add:
+                state.draft = "Rejected"
+                XCTAssertFalse(state.addDraft())
+            case .complete: XCTAssertFalse(state.setCompleted(id: saved.id, completed: true))
+            case .delete: XCTAssertFalse(state.delete(id: saved.id))
+            default: XCTFail("Unexpected fixture failure")
+            }
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertEqual(controller.statusItem?.button?.title, "0/1")
+        }
+        store.failCount = true
+        state.refresh()
+        try await waitForStatusTitle("—", controller: controller)
+        XCTAssertEqual(state.notes, [saved])
+        XCTAssertTrue(controller.statusItem?.button?.accessibilityLabel()?.contains("unavailable") == true)
+        store.failCount = false
+        store.failWrite = nil
+        state.refresh()
+        try await waitForStatusTitle("0/1", controller: controller)
+    }
+
+    func testStatusItemRefreshesClosedWindowDayAndExactMultiDigitCounts() async throws {
+        let saved = (0..<12).map { note("Task \($0)", day: "2026-09-27", createdAt: Double($0), completedAt: Date()) }
+        let store = FakeNoteRepository(notes: saved)
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let center = NotificationCenter()
+        let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
+                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter())
+        state.startup()
+        let controller = TaskStatusItemController(state: state, showTasks: {})
+        defer { controller.remove() }
+        try await waitForStatusTitle("12/12", controller: controller)
+        XCTAssertTrue(controller.statusItem?.button?.toolTip?.contains("12 of 12") == true)
+        current = instant("2026-09-28T00:01:00-04:00")
+        center.post(name: .NSCalendarDayChanged, object: nil)
+        try await waitForStatusTitle("0/0", controller: controller)
+        XCTAssertEqual(store.saved, saved)
+    }
+
+    func testRemovingStatusItemDoesNotRecreateItOrRetainController() async throws {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        var controller: TaskStatusItemController? = TaskStatusItemController(state: state, showTasks: {})
+        weak var releasedController = controller
+        state.startup() // Queue an update, then remove before it executes.
+        controller?.remove()
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertNil(controller?.statusItem)
+        state.draft = "After removal"
+        XCTAssertTrue(state.addDraft())
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertNil(controller?.statusItem)
+        controller = nil
+        XCTAssertNil(releasedController)
+    }
+
+    private func waitForStatusTitle(_ title: String, controller: TaskStatusItemController) async throws {
+        for _ in 0..<100 {
+            if controller.statusItem?.button?.title == title { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(controller.statusItem?.button?.title, title)
+    }
+
     func testRefreshAndReopenPublishSavedDailySnapshot() {
         let today = note("Today", day: "2026-09-27", createdAt: 2)
         let finished = note("Finished", day: "2026-09-27", createdAt: 3,
