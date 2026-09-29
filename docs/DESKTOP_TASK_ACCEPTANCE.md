@@ -61,3 +61,11 @@ Full feature acceptance requires material interface requirements to pass on the 
 The imported narrative is `plan/desktop-task-management/evidence/task-009.md`. Local identity/process records and fixture preparation are under `build/desktop-task-management/task-009/`, including `identity.json`, `process-single-release.txt`, `process-after-release-quit.txt`, `process-relaunch.txt`, and `process-final.txt`. These directories remain Git-ignored; the results, identity, limits and pending gate above remain available in this tracked record.
 
 The [historical Notes MVP acceptance](NOTES_MVP_ACCEPTANCE.md) describes the superseded compact panel and retains its original limitations. It does not replace this desktop acceptance record.
+
+## Focus outline follow-up — 2026-09-29
+
+This is a separate Debug interface check of the Today-window focus fix, not a revision to Task 9's Release results or remaining gate. Source was `main` at `299edef1af01f12edd6a5f446f372f80aadadce8` with uncommitted focus and documentation changes. The checked app was `build/DerivedData/Build/Products/Debug/MenuPocket.app`, executable SHA-256 `20b4f983e31323d21f9194d0fc6cf63eba1d62c3cfa79b6855f3f8afef240596`, running as PID `37676` after its 14:36 EDT launch. Computer Use observed the dark Today window directly; screenshots were inspected in the tool trace but not exported.
+
+After Add task and Cancel, Add showed the orange focus outline. Clicking empty header, task-list, and footer space each removed the outline; accessibility focus moved to the window. Tab then focused a task checkbox again. Add still opened its focused draft field, and Cancel removed it. A task-text click moved focus to the text. No task text was added, edited, or deleted.
+
+T2 became completed during an earlier app relaunch in this verification session; the cause was not established. It was restored to the initial unchecked state through the checkbox, and the final window showed both rows unchecked with `0/2` progress and no open draft or confirmation. This focused Debug check does not verify Release, menu bar, Dock, light appearance, or the other open Task 9 acceptance items.

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Desktop checklist backed by the app-owned saved snapshot and draft.
@@ -18,6 +19,7 @@ struct TaskWindowView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(24)
+                .background { focusClearingBackground }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -48,6 +50,8 @@ struct TaskWindowView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("todayTaskList")
             .disabled(presentation.deletionTarget != nil)
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 if let target = presentation.deletionTarget,
@@ -89,6 +93,7 @@ struct TaskWindowView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
+            .background { focusClearingBackground }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -399,6 +404,21 @@ struct TaskWindowView: View {
         state.cancelDraft()
         isComposerVisible = false
         focusedControl = .add
+    }
+
+    private func clearFocus() {
+        focusedControl = nil
+        // Clear AppKit's first responder as well as SwiftUI's focus state.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    private var focusClearingBackground: some View {
+        Button(action: clearFocus) {
+            Color(nsColor: .windowBackgroundColor)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityHidden(true)
     }
 
     private func focusOutline(_ focused: Bool) -> some View {
