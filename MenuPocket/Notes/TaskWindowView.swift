@@ -3,11 +3,13 @@ import SwiftUI
 /// Desktop checklist backed by the app-owned saved snapshot and draft.
 struct TaskWindowView: View {
     private enum FocusControl: Hashable {
-        case add, settings, retry, save, draft
+        case add, settings, retry, save, draft, cancelDelete, confirmDelete
         case completion(UUID)
+        case edit(UUID), delete(UUID)
     }
 
     @Bindable var state: DailyNotesState
+    let presentation: TaskWindowPresentation
     let onSettings: () -> Void
     @State private var isComposerVisible = false
     @FocusState private var focusedControl: FocusControl?
@@ -45,13 +47,17 @@ struct TaskWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("todayTaskList")
+            .disabled(presentation.deletionTarget != nil)
             Divider()
             VStack(alignment: .leading, spacing: 12) {
-                if isComposerVisible || !state.draft.isEmpty {
+                if let target = presentation.deletionTarget,
+                   let note = state.notes.first(where: { $0.id == target.id }) {
+                    deletionConfirmation(note)
+                } else if state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty {
                     composer
                 }
-                if let issue = state.issue, issue == .add || issue == .complete {
-                    Text(issue == .add ? "Could not save task. Try again." : "Could not update task. Try again.")
+                if let message = writeError {
+                    Text(message)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("taskWriteError")
                 }
@@ -66,7 +72,7 @@ struct TaskWindowView: View {
                         return .handled
                     }
                     .overlay { focusOutline(focusedControl == .add) }
-                    .disabled(state.availableProgress == nil)
+                    .disabled(state.availableProgress == nil || state.editingNoteID != nil || presentation.deletionTarget != nil)
                     .accessibilityIdentifier("addTask")
                     Spacer()
                     Button("Settings…", action: onSettings)
@@ -78,6 +84,7 @@ struct TaskWindowView: View {
                         }
                         .overlay { focusOutline(focusedControl == .settings) }
                         .accessibilityLabel("Open Settings")
+                        .disabled(presentation.deletionTarget != nil)
                 }
             }
             .padding(.horizontal, 24)
@@ -85,6 +92,26 @@ struct TaskWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: state.notes) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: presentation.deletionTarget?.id) { old, new in
+            if let old, new == nil { restoreRowFocus(old) }
+        }
+        .onChange(of: state.editingNoteID) { old, new in
+            if new != nil { focusDraft() }
+            else if let old { restoreRowFocus(old) }
+        }
+    }
+
+    private var writeError: String? {
+        switch state.issue {
+        case .add: "Could not save task. Try again."
+        case .complete: "Could not update task. Try again."
+        case .edit: "Could not save edit. Try again."
+        case .delete: "Could not delete task. Try again."
+        default: nil
+        }
     }
 
     private var header: some View {
@@ -207,6 +234,38 @@ struct TaskWindowView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                state.beginEditing(id: note.id)
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .focusable()
+            .focused($focusedControl, equals: .edit(note.id))
+            .onKeyPress(keys: [.space, .return]) { _ in
+                state.beginEditing(id: note.id)
+                return .handled
+            }
+            .overlay { focusOutline(focusedControl == .edit(note.id)) }
+            .disabled(state.editingNoteID != nil)
+            .help("Edit task")
+            .accessibilityLabel("Edit task: \(note.text)")
+            .accessibilityIdentifier("editTask-\(note.id)")
+            Button(role: .destructive) {
+                requestDeletion(note.id)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .focusable()
+            .focused($focusedControl, equals: .delete(note.id))
+            .onKeyPress(keys: [.space, .return]) { _ in
+                requestDeletion(note.id)
+                return .handled
+            }
+            .overlay { focusOutline(focusedControl == .delete(note.id)) }
+            .disabled(state.editingNoteID != nil)
+            .help("Delete task")
+            .accessibilityLabel("Delete task: \(note.text)")
+            .accessibilityIdentifier("deleteTask-\(note.id)")
         }
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 14)
@@ -216,10 +275,11 @@ struct TaskWindowView: View {
 
     private var composer: some View {
         HStack(spacing: 12) {
-            TextField("Write a task", text: $state.draft)
+            TextField(state.editingNoteID == nil ? "Write a task" : "Edit task",
+                      text: state.editingNoteID == nil ? $state.draft : $state.editDraft)
                 .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("New task")
-                .accessibilityIdentifier("newTaskDraft")
+                .accessibilityLabel(state.editingNoteID == nil ? "New task" : "Edit task")
+                .accessibilityIdentifier(state.editingNoteID == nil ? "newTaskDraft" : "editTaskDraft")
                 .focused($focusedControl, equals: .draft)
                 .onSubmit(saveDraft)
                 .onExitCommand(perform: cancelDraft)
@@ -234,30 +294,102 @@ struct TaskWindowView: View {
                     saveDraft()
                     return .handled
                 }
-                .disabled(state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
+                .disabled((state.editingNoteID == nil ? state.draft : state.editDraft)
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
                 .accessibilityIdentifier("saveTask")
             Button("Cancel", action: cancelDraft)
                 .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier("cancelNewTask")
+                .accessibilityIdentifier(state.editingNoteID == nil ? "cancelNewTask" : "cancelTaskEdit")
         }
     }
 
-    private func showComposer() {
-        isComposerVisible = true
+    private func deletionConfirmation(_ note: Note) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Delete task?").font(.headline)
+            Text(note.text)
+                .lineLimit(2)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    presentation.cancelDeletion()
+                }
+                .keyboardShortcut(.cancelAction)
+                .focusable()
+                .focused($focusedControl, equals: .cancelDelete)
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    presentation.cancelDeletion()
+                    return .handled
+                }
+                .overlay { focusOutline(focusedControl == .cancelDelete) }
+                .accessibilityIdentifier("cancelTaskDeletion")
+                Button("Delete", role: .destructive) {
+                    confirmDeletion()
+                }
+                .focusable()
+                .focused($focusedControl, equals: .confirmDelete)
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    confirmDeletion()
+                    return .handled
+                }
+                .overlay { focusOutline(focusedControl == .confirmDelete) }
+                .accessibilityIdentifier("confirmTaskDeletion")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("taskDeletionConfirmation")
+        .task {
+            await Task.yield()
+            focusedControl = .cancelDelete
+        }
+    }
+
+    private func requestDeletion(_ id: UUID) {
+        presentation.requestDeletion(id: id, state: state)
+    }
+
+    private func confirmDeletion() {
+        _ = presentation.confirmDeletion(state: state)
+    }
+
+    private func restoreRowFocus(_ id: UUID) {
+        Task { @MainActor in
+            await Task.yield()
+            focusedControl = state.notes.contains(where: { $0.id == id }) ? .edit(id) : .add
+        }
+    }
+
+    private func focusDraft() {
         Task { @MainActor in
             await Task.yield()
             focusedControl = .draft
         }
     }
 
+    private func showComposer() {
+        guard state.editingNoteID == nil else { return }
+        isComposerVisible = true
+        focusDraft()
+    }
+
     private func saveDraft() {
-        if state.addDraft() {
+        if state.editingNoteID != nil {
+            _ = state.saveEdit()
+        } else if state.addDraft() {
             isComposerVisible = false
             focusedControl = .add
         }
     }
 
     private func cancelDraft() {
+        if let id = state.editingNoteID {
+            state.cancelEditing()
+            restoreRowFocus(id)
+            return
+        }
         state.cancelDraft()
         isComposerVisible = false
         focusedControl = .add

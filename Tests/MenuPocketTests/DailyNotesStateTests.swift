@@ -157,6 +157,31 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
     }
 
+    func testBlankEditAndCancellationKeepSavedTaskAndSeparateNewDraft() {
+        let original = note("Original", day: "2026-09-27", createdAt: 1,
+                            completedAt: Date(timeIntervalSince1970: 2))
+        let store = FakeNoteRepository(notes: [original])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Separate new task"
+        state.beginEditing(id: original.id)
+        state.editDraft = "  \n "
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(store.saved, [original])
+        state.editDraft = "Unsaved correction"
+        store.failWrite = .edit
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(state.issue, .edit)
+        state.cancelEditing()
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.editDraft, "")
+        XCTAssertNil(state.issue)
+        XCTAssertEqual(state.draft, "Separate new task")
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(store.saved, [original])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 1, total: 1))
+    }
+
     func testFailedCompletionEditAndDeleteNeverChangeSavedDisplay() {
         let original = note("Original", day: "2026-09-27", createdAt: 1)
         let store = FakeNoteRepository(notes: [original])

@@ -97,6 +97,107 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testClosingTaskWindowCancelsDeletionButRetainsCurrentDayEditAndNewDraft() throws {
+        let store = TaskWindowReadFixture()
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = NoteDay(now: { instant })
+        let note = Note(id: UUID(), text: "Original task", dayKey: day.keys().today,
+                        createdAt: instant, completedAt: nil)
+        store.saved = [note]
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter())
+        let controller = TaskWindowController(state: state, onSettings: {})
+        defer { controller.window?.close() }
+        controller.showTasks()
+        state.draft = "Separate new draft"
+        state.beginEditing(id: note.id)
+        state.editDraft = "Retain this edit"
+        controller.presentation.requestDeletion(id: note.id, state: state)
+        XCTAssertNotNil(controller.presentation.deletionTarget)
+        controller.window?.close()
+        XCTAssertNil(controller.presentation.deletionTarget)
+        XCTAssertFalse(controller.presentation.confirmDeletion(state: state))
+        controller.showTasks()
+        XCTAssertEqual(state.editingNoteID, note.id)
+        XCTAssertEqual(state.editDraft, "Retain this edit")
+        XCTAssertEqual(state.draft, "Separate new draft")
+        XCTAssertEqual(store.saved, [note])
+        XCTAssertEqual(store.deleteAttempts, 0)
+    }
+
+    @MainActor
+    func testDeletionConsumesConfirmationBeforeWriteAndRequiresFreshConfirmationAfterFailure() {
+        let store = TaskWindowReadFixture()
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = NoteDay(now: { instant })
+        let note = Note(id: UUID(), text: "Delete me", dayKey: day.keys().today,
+                        createdAt: instant, completedAt: instant)
+        store.saved = [note]
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter())
+        state.startup()
+        let presentation = TaskWindowPresentation()
+        store.onDelete = { XCTAssertNil(presentation.deletionTarget) }
+        presentation.requestDeletion(id: note.id, state: state)
+        presentation.cancelDeletion()
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 0)
+        store.failDelete = true
+        presentation.requestDeletion(id: note.id, state: state)
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(state.notes, [note])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 1, total: 1))
+        XCTAssertEqual(state.issue, .delete)
+        store.failDelete = false
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 1)
+        presentation.requestDeletion(id: note.id, state: state)
+        XCTAssertTrue(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 2)
+        XCTAssertTrue(store.saved.isEmpty)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+        XCTAssertNil(state.issue)
+    }
+
+    @MainActor
+    func testDeletionRejectsRolloverAndInvalidatesRemovedOrUnavailableTargets() {
+        let store = TaskWindowReadFixture()
+        var instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = NoteDay(now: { instant })
+        let note = Note(id: UUID(), text: "Previous day", dayKey: day.keys().today,
+                        createdAt: instant, completedAt: nil)
+        store.saved = [note]
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter())
+        state.startup()
+        let presentation = TaskWindowPresentation()
+        presentation.requestDeletion(id: note.id, state: state)
+        instant = instant.addingTimeInterval(86400)
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.saved, [note])
+        XCTAssertEqual(store.deleteAttempts, 0)
+        instant = instant.addingTimeInterval(-86400)
+        state.refresh()
+        presentation.requestDeletion(id: note.id, state: state)
+        store.saved = []
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertNil(presentation.deletionTarget)
+        store.saved = [note]
+        state.refresh()
+        presentation.requestDeletion(id: note.id, state: state)
+        store.failRead = true
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertNil(presentation.deletionTarget)
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 0)
+    }
+
+    @MainActor
     func testAppDelegateReusesItsSettingsWindow() throws {
         let suiteName = "local.menupocket.tests.AppConfigurationTests.\(UUID().uuidString)"
         let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -196,6 +297,9 @@ final class AppConfigurationTests: XCTestCase {
 private final class TaskWindowReadFixture: NoteRepository {
     var saved: [Note] = []
     var failRead = false
+    var failDelete = false
+    var deleteAttempts = 0
+    var onDelete: (() -> Void)?
 
     func notes(for dayKey: String) throws -> [Note] {
         if failRead { throw CocoaError(.fileReadUnknown) }
@@ -209,5 +313,11 @@ private final class TaskWindowReadFixture: NoteRepository {
     func add(_ note: Note) throws { throw CocoaError(.fileWriteNoPermission) }
     func setCompleted(id: UUID, completedAt: Date?) throws { throw CocoaError(.fileWriteNoPermission) }
     func updateText(id: UUID, text: String) throws { throw CocoaError(.fileWriteNoPermission) }
-    func delete(id: UUID) throws { throw CocoaError(.fileWriteNoPermission) }
+    func delete(id: UUID) throws {
+        deleteAttempts += 1
+        onDelete?()
+        if failDelete { throw CocoaError(.fileWriteNoPermission) }
+        guard saved.contains(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
+        saved.removeAll { $0.id == id }
+    }
 }
