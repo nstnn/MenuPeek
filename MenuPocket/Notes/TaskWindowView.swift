@@ -249,6 +249,9 @@ struct TaskWindowView: View {
                 state.beginEditing(id: note.id)
             } label: {
                 Image(systemName: "pencil")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
             }
             .focusable()
             .focused($focusedControl, equals: .edit(note.id))
@@ -265,6 +268,9 @@ struct TaskWindowView: View {
                 requestDeletion(note.id)
             } label: {
                 Image(systemName: "trash")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
             }
             .focusable()
             .focused($focusedControl, equals: .delete(note.id))
