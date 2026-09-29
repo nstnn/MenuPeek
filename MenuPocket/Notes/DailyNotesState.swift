@@ -44,6 +44,7 @@ final class DailyNotesState {
     @ObservationIgnored private var repository: (any NoteRepository)?
     @ObservationIgnored private let day: NoteDay
     @ObservationIgnored nonisolated(unsafe) private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    @ObservationIgnored private var isTerminating = false
 
     var progress: NoteProgress {
         NoteProgress(notes: notes, for: todayKey ?? "")
@@ -81,11 +82,19 @@ final class DailyNotesState {
     func startup() { refresh() }
     func windowWillOpen() { refresh() }
 
+    func stopForTermination() {
+        isTerminating = true
+        for (center, token) in observers { center.removeObserver(token) }
+        observers.removeAll()
+        repository = nil
+    }
+
     func refreshIfDayChanged() {
         if day.keys().today != todayKey { refresh() }
     }
 
     func refresh() {
+        guard !isTerminating else { return }
         let keys = day.keys()
         if todayKey != keys.today {
             // Invalidate the old snapshot before asking storage for the new day.

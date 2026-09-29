@@ -11,6 +11,20 @@ final class TaskWindowPresentation {
     }
 
     private(set) var deletionTarget: DeletionTarget?
+    private(set) var newTaskRequestID: UUID?
+
+    func canAddTask(state: DailyNotesState) -> Bool {
+        state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil
+    }
+
+    @discardableResult
+    func requestNewTask(state: DailyNotesState) -> Bool {
+        guard canAddTask(state: state) else { return false }
+        newTaskRequestID = UUID()
+        return true
+    }
+
+    func consumeNewTaskRequest() { newTaskRequestID = nil }
 
     func requestDeletion(id: UUID, state: DailyNotesState) {
         state.refreshIfDayChanged()

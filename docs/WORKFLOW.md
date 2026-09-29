@@ -16,9 +16,9 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
   -derivedDataPath build/DerivedData test
 ```
 
-The hosted tests cover note day boundaries, ordering, SQLite persistence and errors, observable state, preferences, demo loading, and login-item behavior through injected fakes. Tests must not modify the Mac's real login-item registration.
+The hosted tests cover note day boundaries, ordering, SQLite persistence and errors, observable state, preferences, demo loading, and login-item behavior through injected fakes. Tests must not modify the Mac's real login-item registration. The Debug XCTest host skips production delegate initialization; lifecycle tests supply isolated daily repositories, defaults, launch context, and login services. Tests that start a delegate must clean up its windows/status item and restore native menus.
 
-For a user-facing change, run the relevant tests and inspect the running app. In particular, exercise panel opening, notes writes and relaunch, empty and long lists, keyboard actions, Settings, and both appearances as applicable. Record unavailable UI or hardware checks as untested. Compilation and XCTest do not prove menu bar or Settings interaction.
+For a user-facing change, run the relevant tests and inspect the running app. In particular, exercise task-window opening, task writes and relaunch, empty and long lists, Command-N/W/Q/comma, native text editing, Settings reuse, and both appearances as applicable. Check explicit launch versus quiet login startup separately, without changing real login registration to seed an automated test. Record unavailable UI or hardware checks as untested. Compilation and XCTest do not prove menu bar or Settings interaction.
 
 ## GitHub CI
 
