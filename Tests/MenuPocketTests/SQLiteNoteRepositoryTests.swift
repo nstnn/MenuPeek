@@ -65,8 +65,71 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
     }
 
+    func testExistingVersionOneTodayAndYesterdayRowsSurviveOpenWriteAndReopen() throws {
+        // Seed the existing format directly, independently of repository bootstrap.
+        try executeRaw(
+            """
+            CREATE TABLE notes (
+                id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL,
+                day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL
+            );
+            CREATE INDEX notes_day_key_idx ON notes(day_key);
+            INSERT INTO notes VALUES
+                ('00000000-0000-0000-0000-000000000001', 'Today '' quote 📝',
+                 '2026-09-27', 10, NULL),
+                ('00000000-0000-0000-0000-000000000002', 'Today completed',
+                 '2026-09-27', 20, 25),
+                ('00000000-0000-0000-0000-000000000003', 'Yesterday unfinished',
+                 '2026-09-26', 30, NULL),
+                ('00000000-0000-0000-0000-000000000004', 'Yesterday completed',
+                 '2026-09-26', 40, 45);
+            PRAGMA user_version = 1;
+            """
+        )
+        let today = [
+            Note(id: try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001")),
+                 text: "Today ' quote 📝", dayKey: "2026-09-27",
+                 createdAt: Date(timeIntervalSince1970: 10), completedAt: nil),
+            Note(id: try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000002")),
+                 text: "Today completed", dayKey: "2026-09-27",
+                 createdAt: Date(timeIntervalSince1970: 20),
+                 completedAt: Date(timeIntervalSince1970: 25))
+        ]
+        let yesterday = [
+            Note(id: try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000003")),
+                 text: "Yesterday unfinished", dayKey: "2026-09-26",
+                 createdAt: Date(timeIntervalSince1970: 30), completedAt: nil),
+            Note(id: try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000004")),
+                 text: "Yesterday completed", dayKey: "2026-09-26",
+                 createdAt: Date(timeIntervalSince1970: 40),
+                 completedAt: Date(timeIntervalSince1970: 45))
+        ]
+        let added = note("Added after transition", day: "2026-09-27", createdAt: 50)
+
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.notes(for: "2026-09-27"), today)
+            XCTAssertEqual(try store.notes(for: "2026-09-26"), yesterday)
+            try store.add(added)
+        }
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), [added] + today)
+        XCTAssertEqual(try reopened.notes(for: "2026-09-26"), yesterday)
+        XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-27"), 2)
+        XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
+        XCTAssertEqual(try schemaVersion(), 1)
+    }
+
     func testNewerSchemaIsRejectedWithoutChangingDatabase() throws {
-        try executeRaw("PRAGMA user_version = 2")
+        try executeRaw(
+            """
+            CREATE TABLE future_data (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+            INSERT INTO future_data VALUES (1, 'Preserve unknown future data 📝');
+            PRAGMA user_version = 2;
+            """
+        )
+        let originalBytes = try Data(contentsOf: databaseURL)
 
         XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
             guard case SQLiteNoteStoreError.unsupportedSchemaVersion(2) = error else {
@@ -74,6 +137,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             }
         }
         XCTAssertEqual(try schemaVersion(), 2)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
     }
 
     func testOpenFailureIsReported() throws {
