@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import SwiftUI
 import XCTest
 @testable import MenuPocket
@@ -23,7 +24,9 @@ final class AppConfigurationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let state = DailyNotesState(repositoryFactory: { throw CocoaError(.fileReadNoSuchFile) })
         state.draft = "Retain this draft"
-        let delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults)), dailyNotesState: state)
+        let delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults)),
+                                   dailyNotesState: state,
+                                   onboardingStore: UserDefaultsOnboardingStore(userDefaults: defaults))
         XCTAssertNil(delegate.taskWindowController)
         delegate.showTasks()
         let controller = try XCTUnwrap(delegate.taskWindowController)
@@ -203,7 +206,8 @@ final class AppConfigurationTests: XCTestCase {
         let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         let model = AppModel(store: PreferencesStore(userDefaults: userDefaults))
-        let delegate = AppDelegate(model: model)
+        let delegate = AppDelegate(model: model,
+                                   onboardingStore: UserDefaultsOnboardingStore(userDefaults: userDefaults))
 
         XCTAssertNil(delegate.settingsWindowController)
         delegate.showSettings()
@@ -242,36 +246,238 @@ final class AppConfigurationTests: XCTestCase {
         window.close()
     }
 
-    @MainActor
-    func testFirstLaunchUsesSeparatePersistentMarkerAndOpensSettingsOnlyOnce() throws {
-        let suiteName = "local.menupocket.tests.Onboarding.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
-        let first = AppDelegate(
-            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
-            onboardingStore: onboarding
-        )
-        var presentations = 0
-
-        XCTAssertNotNil(defaults.data(forKey: PreferencesStore.storageKey))
-        XCTAssertFalse(onboarding.hasCompletedOnboarding)
-        first.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
-        XCTAssertEqual(presentations, 1)
-        XCTAssertTrue(onboarding.hasCompletedOnboarding)
-
-        let second = AppDelegate(
-            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
-            onboardingStore: UserDefaultsOnboardingStore(userDefaults: defaults)
-        )
-        second.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
-        XCTAssertEqual(presentations, 1)
-        XCTAssertNil(second.settingsWindowController)
+    func testLaunchContextDecodesOnlyLoginOpenApplicationEvents() {
+        XCTAssertEqual(AppLaunchContext(appleEvent: nil), .manual)
+        let event = NSAppleEventDescriptor(eventClass: kCoreEventClass, eventID: kAEOpenApplication,
+            targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID))
+        XCTAssertEqual(AppLaunchContext(appleEvent: event), .manual)
+        event.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsLogInItem), forKeyword: keyAEPropData)
+        XCTAssertEqual(AppLaunchContext(appleEvent: event), .login)
+        event.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsServiceItem), forKeyword: keyAEPropData)
+        XCTAssertEqual(AppLaunchContext(appleEvent: event), .manual)
+        let reopen = NSAppleEventDescriptor(eventClass: kCoreEventClass, eventID: kAEReopenApplication,
+            targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID))
+        reopen.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsLogInItem), forKeyword: keyAEPropData)
+        XCTAssertEqual(AppLaunchContext(appleEvent: reopen), .manual)
     }
 
     @MainActor
-    func testCorruptPreferencesDoNotResetCompletedOnboarding() throws {
+    func testManualLaunchOpensTasksEvenWithCompletedOnboardingAndReusesReopenRoute() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let preferences = fixture.defaults.data(forKey: PreferencesStore.storageKey)
+        fixture.launch()
+        let firstWindow = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        XCTAssertTrue(firstWindow.isVisible)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertTrue(fixture.onboarding.hasCompletedOnboarding)
+        XCTAssertTrue(UserDefaultsOnboardingStore(userDefaults: fixture.defaults).hasCompletedOnboarding)
+        XCTAssertEqual(fixture.defaults.data(forKey: PreferencesStore.storageKey), preferences)
+        firstWindow.close()
+        XCTAssertTrue(fixture.delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+        XCTAssertTrue(firstWindow === fixture.delegate.taskWindowController?.window)
+        XCTAssertTrue(firstWindow.isVisible)
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+
+        let second = AppDelegate(model: fixture.delegate.model,
+            dailyNotesState: DailyNotesState(repositoryFactory: { fixture.repository },
+                notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter()),
+            onboardingStore: UserDefaultsOnboardingStore(userDefaults: fixture.defaults), launchContext: { .manual })
+        defer { second.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        second.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        XCTAssertTrue(second.taskWindowController?.window?.isVisible == true)
+        XCTAssertNil(second.settingsWindowController)
+        XCTAssertTrue(fixture.onboarding.hasCompletedOnboarding)
+        XCTAssertEqual(fixture.defaults.data(forKey: PreferencesStore.storageKey), preferences)
+    }
+
+    @MainActor
+    func testLoginLaunchLoadsProgressWithoutPresentingOrCompletingOnboarding() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        let note = Note(id: UUID(), text: "Saved task", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: Date())
+        fixture.repository.saved = [note]
+        let preferences = fixture.defaults.data(forKey: PreferencesStore.storageKey)
+        let keyWindow = NSApplication.shared.keyWindow
+        let active = NSApplication.shared.isActive
+        fixture.launch()
+        XCTAssertEqual(fixture.state.availableProgress, NoteProgress(completed: 1, total: 1))
+        XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, "1/1")
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertTrue(NSApplication.shared.keyWindow === keyWindow)
+        XCTAssertEqual(NSApplication.shared.isActive, active)
+        XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
+        XCTAssertEqual(fixture.defaults.data(forKey: PreferencesStore.storageKey), preferences)
+        XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+        fixture.delegate.showTasks()
+        XCTAssertTrue(fixture.delegate.taskWindowController?.window?.isVisible == true)
+        XCTAssertTrue(fixture.onboarding.hasCompletedOnboarding)
+        XCTAssertEqual(fixture.repository.saved, [note])
+    }
+
+    @MainActor
+    func testFailedLoginReadRemainsUnavailableUntilExplicitRetry() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.repository.failRead = true
+        fixture.launch()
+        XCTAssertNil(fixture.state.availableProgress)
+        XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, "—")
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
+        fixture.repository.failRead = false
+        fixture.delegate.showTasks()
+        await waitForStatusTitle("0/0", fixture: fixture)
+        XCTAssertEqual(fixture.state.availableProgress, NoteProgress(completed: 0, total: 0))
+    }
+
+    @MainActor
+    func testActivationRefreshesSavedTasksWithoutOpeningWindowsOrRegisteringLogin() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let note = Note(id: UUID(), text: "External saved task", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: nil)
+        fixture.repository.saved = [note]
+        fixture.delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        await waitForStatusTitle("0/1", fixture: fixture)
+        XCTAssertEqual(fixture.state.notes, [note])
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
+        XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+    }
+
+    @MainActor
+    func testNativeAddAndTextCommandsFocusComposerAndPreserveDraftAcrossRepeatedRequests() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let window = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        let editor = try await focusedEditor(in: window)
+        let clipboard = NSPasteboard.general
+        let previousItems = (clipboard.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
+        defer {
+            clipboard.clearContents()
+            clipboard.writeObjects(previousItems)
+        }
+        editor.insertText("Native task text", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(fixture.state.draft, "Native task text")
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("a", keyCode: 0)))
+        XCTAssertEqual(editor.selectedRange().length, editor.string.utf16.count)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("c", keyCode: 8)))
+        XCTAssertEqual(clipboard.string(forType: .string), "Native task text")
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("x", keyCode: 7)))
+        XCTAssertEqual(editor.string, "")
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("v", keyCode: 9)))
+        XCTAssertEqual(fixture.state.draft, "Native task text")
+        fixture.delegate.showSettings()
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        _ = try await focusedEditor(in: window)
+        XCTAssertTrue(window === fixture.delegate.taskWindowController?.window)
+        XCTAssertEqual(fixture.state.draft, "Native task text")
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+    }
+
+    @MainActor
+    func testAddCommandDoesNotReplaceEditOrDeletionAndRejectsUnavailableData() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let note = Note(id: UUID(), text: "Original", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: nil)
+        fixture.repository.saved = [note]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let item = NSMenuItem(title: "Add Task", action: #selector(AppDelegate.addTask), keyEquivalent: "n")
+        fixture.state.draft = "Separate draft"
+        fixture.state.beginEditing(id: note.id)
+        fixture.state.editDraft = "Unsaved edit"
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(controller.presentation.newTaskRequestID)
+        XCTAssertEqual(fixture.state.editingNoteID, note.id)
+        XCTAssertEqual(fixture.state.editDraft, "Unsaved edit")
+        XCTAssertEqual(fixture.state.draft, "Separate draft")
+        fixture.state.cancelEditing()
+        controller.presentation.requestDeletion(id: note.id, state: fixture.state)
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertEqual(controller.presentation.deletionTarget?.id, note.id)
+        XCTAssertNil(controller.presentation.newTaskRequestID)
+        controller.presentation.cancelDeletion()
+        fixture.repository.failRead = true
+        fixture.state.refresh()
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(controller.presentation.newTaskRequestID)
+        XCTAssertEqual(fixture.state.draft, "Separate draft")
+        XCTAssertEqual(fixture.repository.saved, [note])
+    }
+
+    @MainActor
+    func testSettingsShortcutReusesWindowAndCloseDoesNotTerminate() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        let taskWindow = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        fixture.delegate.showSettings()
+        let settings = try XCTUnwrap(fixture.delegate.settingsWindowController)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent(",", keyCode: 43)))
+        XCTAssertTrue(fixture.delegate.settingsWindowController === settings)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("w", keyCode: 13)))
+        XCTAssertFalse(settings.window?.isVisible == true)
+        XCTAssertTrue(taskWindow.isVisible)
+        fixture.delegate.showTasks()
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("w", keyCode: 13)))
+        XCTAssertFalse(taskWindow.isVisible)
+        XCTAssertNotNil(fixture.delegate.taskStatusItemController?.statusItem)
+        XCTAssertFalse(fixture.delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
+
+    @MainActor
+    func testTerminationClosesWindowsRemovesStatusAndStopsQueuedRefreshes() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        fixture.delegate.showSettings()
+        let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
+        let tasks = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        let settings = try XCTUnwrap(fixture.delegate.settingsWindowController?.window)
+        let reads = fixture.repository.readAttempts
+        fixture.notifications.post(name: .NSCalendarDayChanged, object: nil)
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        fixture.notifications.post(name: .NSSystemClockDidChange, object: nil)
+        fixture.state.refresh()
+        fixture.delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        fixture.delegate.showTasks()
+        fixture.delegate.showSettings()
+        fixture.delegate.addTask()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertNil(status.statusItem)
+        XCTAssertNil(fixture.delegate.taskStatusItemController)
+        XCTAssertFalse(tasks.isVisible)
+        XCTAssertFalse(settings.isVisible)
+        XCTAssertEqual(fixture.repository.readAttempts, reads)
+        XCTAssertNil(fixture.delegate.taskWindowController?.presentation.newTaskRequestID)
+        XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+    }
+
+    @MainActor
+    func testCorruptPreferencesDoNotResetCompletedOnboardingOrPreventManualPresentation() throws {
         let suiteName = "local.menupocket.tests.OnboardingRecovery.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -279,19 +485,46 @@ final class AppConfigurationTests: XCTestCase {
         onboarding.markOnboardingCompleted()
         let corruptData = Data("invalid".utf8)
         defaults.set(corruptData, forKey: PreferencesStore.storageKey)
-
-        let delegate = AppDelegate(
-            model: AppModel(store: PreferencesStore(userDefaults: defaults)),
-            onboardingStore: onboarding
-        )
-        var presentations = 0
-        delegate.openSettingsOnFirstLaunchIfNeeded { presentations += 1 }
-
-        XCTAssertEqual(presentations, 0)
+        let delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults)),
+            dailyNotesState: DailyNotesState(repositoryFactory: { throw CocoaError(.fileReadNoSuchFile) },
+                notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter()),
+            onboardingStore: onboarding)
+        defer { delegate.taskWindowController?.close() }
+        delegate.showTasks()
+        XCTAssertTrue(delegate.taskWindowController?.window?.isVisible == true)
+        XCTAssertNil(delegate.settingsWindowController)
+        XCTAssertTrue(onboarding.hasCompletedOnboarding)
         XCTAssertEqual(delegate.model.preferenceWarning, .corruptData)
         XCTAssertTrue(delegate.model.isPreferenceEditingAllowed)
         XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), corruptData)
     }
+
+    @MainActor
+    private func commandEvent(_ key: String, keyCode: UInt16) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: NSApplication.shared.keyWindow?.windowNumber ?? 0,
+            context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: keyCode)!
+    }
+
+    @MainActor
+    private func focusedEditor(in window: NSWindow) async throws -> NSTextView {
+        for _ in 0..<50 {
+            if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor { return editor }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Task composer must receive native text focus")
+        return try XCTUnwrap(window.firstResponder as? NSTextView)
+    }
+
+    @MainActor
+    private func waitForStatusTitle(_ title: String, fixture: AppLifecycleFixture) async {
+        for _ in 0..<50 {
+            if fixture.delegate.taskStatusItemController?.statusItem?.button?.title == title { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, title)
+    }
+
 }
 
 private final class TaskWindowReadFixture: NoteRepository {
@@ -300,8 +533,10 @@ private final class TaskWindowReadFixture: NoteRepository {
     var failDelete = false
     var deleteAttempts = 0
     var onDelete: (() -> Void)?
+    var readAttempts = 0
 
     func notes(for dayKey: String) throws -> [Note] {
+        readAttempts += 1
         if failRead { throw CocoaError(.fileReadUnknown) }
         return saved.filter { $0.dayKey == dayKey }
     }
@@ -320,4 +555,55 @@ private final class TaskWindowReadFixture: NoteRepository {
         guard saved.contains(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
         saved.removeAll { $0.id == id }
     }
+}
+
+
+@MainActor
+private final class AppLifecycleFixture {
+    let suite = "local.menupocket.tests.Lifecycle.\(UUID().uuidString)"
+    let defaults: UserDefaults
+    let onboarding: UserDefaultsOnboardingStore
+    let repository = TaskWindowReadFixture()
+    let notifications = NotificationCenter()
+    let state: DailyNotesState
+    let loginService = LifecycleLoginItemService()
+    let delegate: AppDelegate
+    private let previousMenu = NSApplication.shared.mainMenu
+    private let previousWindowsMenu = NSApplication.shared.windowsMenu
+
+    init(context: AppLaunchContext) throws {
+        defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
+        let repository = repository
+        state = DailyNotesState(repositoryFactory: { repository }, notificationCenter: notifications,
+                                workspaceNotificationCenter: NotificationCenter())
+        delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults),
+                                              loginItemService: loginService),
+                               dailyNotesState: state, onboardingStore: onboarding, launchContext: { context })
+    }
+
+    func launch() {
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+    }
+
+    func cleanup() {
+        delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        NSApplication.shared.mainMenu = previousMenu
+        NSApplication.shared.windowsMenu = previousWindowsMenu
+        defaults.removePersistentDomain(forName: suite)
+    }
+}
+
+private final class LifecycleLoginItemService: LoginItemService {
+    private(set) var registrationAttempts = 0
+    func readStatus() -> LoginItemStatus { .enabled }
+    func register() -> LoginItemOperationResult {
+        registrationAttempts += 1
+        return LoginItemOperationResult(status: .enabled, failure: nil)
+    }
+    func unregister() -> LoginItemOperationResult {
+        registrationAttempts += 1
+        return LoginItemOperationResult(status: .disabled, failure: nil)
+    }
+    func openSystemSettingsLoginItems() { XCTFail("Lifecycle must not open system Settings") }
 }

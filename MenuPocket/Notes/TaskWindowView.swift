@@ -72,7 +72,7 @@ struct TaskWindowView: View {
                         return .handled
                     }
                     .overlay { focusOutline(focusedControl == .add) }
-                    .disabled(state.availableProgress == nil || state.editingNoteID != nil || presentation.deletionTarget != nil)
+                    .disabled(!presentation.canAddTask(state: state))
                     .accessibilityIdentifier("addTask")
                     Spacer()
                     Button("Settings…", action: onSettings)
@@ -92,6 +92,12 @@ struct TaskWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: presentation.newTaskRequestID, initial: true) { _, request in
+            if request != nil {
+                showComposer()
+                presentation.consumeNewTaskRequest()
+            }
+        }
         .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: state.notes) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
@@ -370,7 +376,7 @@ struct TaskWindowView: View {
     }
 
     private func showComposer() {
-        guard state.editingNoteID == nil else { return }
+        guard presentation.canAddTask(state: state) else { return }
         isComposerVisible = true
         focusDraft()
     }

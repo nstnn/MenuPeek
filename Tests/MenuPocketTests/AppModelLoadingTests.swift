@@ -58,7 +58,17 @@ final class AppModelLoadingTests: XCTestCase {
         let status = ControlledProvider(id: ModuleCatalog.statusID)
         let model = AppModel(store: store, providers: [tasks, status])
 
-        let delegate = AppDelegate(model: model, onboardingStore: CompletedOnboardingStore())
+        let delegate = AppDelegate(model: model, dailyNotesState: DailyNotesState(
+            repositoryFactory: { throw CocoaError(.fileReadNoSuchFile) },
+            notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter()
+        ), onboardingStore: CompletedOnboardingStore(), launchContext: { .login })
+        let previousMenu = NSApplication.shared.mainMenu
+        let previousWindowsMenu = NSApplication.shared.windowsMenu
+        defer {
+            delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            NSApplication.shared.mainMenu = previousMenu
+            NSApplication.shared.windowsMenu = previousWindowsMenu
+        }
         delegate.applicationDidFinishLaunching(
             Notification(name: NSApplication.didFinishLaunchingNotification)
         )

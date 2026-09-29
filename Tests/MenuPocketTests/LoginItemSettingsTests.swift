@@ -140,7 +140,10 @@ final class LoginItemSettingsTests: XCTestCase {
     func testBecomingActiveRereadsExternalStatusWithoutRegistering() {
         let service = FakeLoginItemService(status: .disabled)
         let model = makeModel(service: service)
-        let delegate = AppDelegate(model: model)
+        let delegate = AppDelegate(model: model, dailyNotesState: DailyNotesState(
+            repositoryFactory: { throw CocoaError(.fileReadNoSuchFile) },
+            notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter()
+        ))
 
         service.status = .requiresApproval
         delegate.applicationDidBecomeActive(
