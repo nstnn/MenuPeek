@@ -10,7 +10,7 @@ The behavior below is implemented in source. Dated verification results belong i
 | --- | --- |
 | REQ-001 — Task window | One resizable task window is reachable from the menu bar and Dock. Repeated presentation restores the same window after closing or minimizing it, including while Settings is open. |
 | REQ-002 — Menu bar progress | The saved completed/total count stays visible in the menu bar without an icon while running. A successful empty read shows `0/0`; initial or failed reads show `—`. Successful writes update progress without opening the window; rejected writes retain the last saved count. |
-| REQ-003 — Today layout | Show the current local date, progress, tasks, Add task, Settings access, and an informational yesterday count when nonzero. Highlight the yesterday reminder in semibold red so unfinished planned tasks are easy to notice. Incomplete tasks precede completed tasks, newest first within each group. Keep empty, all-completed, long-list, long-text, and resized states usable. |
+| REQ-003 — Today layout | Show the current local date, progress, tasks, Add task, Settings access, and an informational yesterday count when nonzero. Highlight the yesterday reminder in semibold red so unfinished planned tasks are easy to notice. Tasks stay in creation order, first created first; new tasks append at the bottom. Completion, uncompletion, editing, refresh, and relaunch preserve that order. Deletion closes the gap while keeping the remaining tasks in relative order. Keep empty, all-completed, long-list, long-text, and resized states usable. |
 | REQ-004 — Task actions | Add, complete, uncomplete, edit, and delete tasks. Trim input and reject whitespace-only text. Confirm deletion with cancellation available. Publish saved changes only after a successful write; failures retain saved rows/count and recoverable draft text with an inline error. |
 | REQ-005 — Daily model | Keep each task's assigned local day. Do not carry unfinished tasks into today. Refresh both surfaces on day, clock, time-zone, and wake changes without requiring an open task window. Yesterday's unfinished count is informational. |
 | REQ-006 — Lifecycle | Explicit launch, Dock reopening, and a primary menu bar click show tasks. The app remains in the Dock and Command-Tab. Closing the last window leaves the process and status item running; Quit exits and removes the item. |
@@ -22,7 +22,7 @@ The behavior below is implemented in source. Dated verification results belong i
 
 ## Interaction and recovery rules
 
-Add and edit use single-line fields. Return/Save stores valid trimmed text; Escape/Cancel discards the relevant draft. Completing or uncompleting a task changes saved ordering and progress only after persistence succeeds. Completed tasks remain visible with muted presentation.
+Add and edit use single-line fields. Return/Save stores valid trimmed text; Escape/Cancel discards the relevant draft. Completing or uncompleting a task changes its saved checkbox and progress only after persistence succeeds, without moving the row. Completed tasks remain visible in their original positions with muted presentation.
 
 New and current-day edit drafts survive task-window close/reopen within the running process. Add and other row actions cannot replace an active edit. Command-N is unavailable during editing, deletion confirmation, or unavailable data. Quit/relaunch preserves saved tasks but does not promise unsaved-draft recovery.
 
@@ -54,6 +54,6 @@ Task 9's actual Release report records partial acceptance: window/text/cancellat
 
 ## Historical Notes MVP
 
-The earlier MVP used an icon-only `MenuBarExtra` and compact daily checklist. Its daily ordering, CRUD, failure recovery, SQLite preservation, English copy, Settings, and local-only scope remain the baseline. The desktop task contract supersedes its compact-panel, icon-only label, and Settings-first explicit-launch presentation.
+The earlier MVP used an icon-only `MenuBarExtra` and compact daily checklist. Its CRUD, failure recovery, SQLite preservation, English copy, Settings, and local-only scope remain the baseline. The desktop task contract supersedes its completion-based ordering, compact-panel, icon-only label, and Settings-first explicit-launch presentation.
 
 The original [Notes MVP regression](NOTES_MVP_REGRESSION.md) and [Notes MVP acceptance](NOTES_MVP_ACCEPTANCE.md) retain their dated results and automation limitations. They do not establish acceptance of the desktop window or native status item. Detailed local plans are linked from the [documentation index](index.md).

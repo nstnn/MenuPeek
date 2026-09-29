@@ -67,19 +67,6 @@ final class NoteDomainTests: XCTestCase {
         XCTAssertEqual(yesterday.dayKey, "2026-09-26")
     }
 
-    func testOrderGroupsCompletedBelowIncompleteAndUsesCreationTime() {
-        let oldest = note("Old", dayKey: "2026-09-27", createdAt: 1)
-        let newest = note("New", dayKey: "2026-09-27", createdAt: 3)
-        let completed = Note(id: UUID(), text: "Done", dayKey: "2026-09-27",
-                             createdAt: Date(timeIntervalSince1970: 4),
-                             completedAt: Date(timeIntervalSince1970: 5))
-
-        XCTAssertEqual(NoteOrder.sorted([completed, oldest, newest]).map(\.text),
-                       ["New", "Old", "Done"])
-        XCTAssertEqual(NoteProgress(notes: [completed, oldest, newest], for: "2026-09-27"),
-                       NoteProgress(completed: 1, total: 3))
-    }
-
     private func calendar(in zone: TimeZone) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone

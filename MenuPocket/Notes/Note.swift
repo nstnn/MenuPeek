@@ -27,19 +27,3 @@ struct NoteProgress: Equatable {
         self.init(completed: dailyNotes.count(where: \.isCompleted), total: dailyNotes.count)
     }
 }
-
-enum NoteOrder {
-    /// Incomplete notes first; newest creation first within each group.
-    /// The ID makes ordering deterministic when creation instants match.
-    static func sorted(_ notes: [Note]) -> [Note] {
-        notes.sorted { left, right in
-            if left.isCompleted != right.isCompleted {
-                return !left.isCompleted
-            }
-            if left.createdAt != right.createdAt {
-                return left.createdAt > right.createdAt
-            }
-            return left.id.uuidString < right.id.uuidString
-        }
-    }
-}

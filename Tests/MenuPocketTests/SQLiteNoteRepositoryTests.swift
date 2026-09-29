@@ -33,12 +33,12 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             try store.add(new)
             try store.add(yesterday)
             try store.add(completed)
-            XCTAssertEqual(try store.notes(for: "2026-09-27"), [new, old, completed])
+            XCTAssertEqual(try store.notes(for: "2026-09-27"), [old, new, completed])
             XCTAssertEqual(try store.incompleteCount(for: "2026-09-27"), 2)
         }
 
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
-        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), [new, old, completed])
+        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), [old, new, completed])
         XCTAssertEqual(try reopened.notes(for: "2026-09-26"), [yesterday])
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
         XCTAssertEqual(try reopened.notes(for: "2026-09-27' OR 1=1 --"), [])
@@ -114,7 +114,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
 
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
-        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), [added] + today)
+        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), today + [added])
         XCTAssertEqual(try reopened.notes(for: "2026-09-26"), yesterday)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-27"), 2)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
