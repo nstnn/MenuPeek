@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         installApplicationMenu()
-        taskStatusItemController = TaskStatusItemController { [weak self] in
+        taskStatusItemController = TaskStatusItemController(state: dailyNotesState) { [weak self] in
             self?.showTasks()
         }
         openSettingsOnFirstLaunchIfNeeded {
