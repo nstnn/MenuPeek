@@ -69,3 +69,11 @@ This is a separate Debug interface check of the Today-window focus fix, not a re
 After Add task and Cancel, Add showed the orange focus outline. Clicking empty header, task-list, and footer space each removed the outline; accessibility focus moved to the window. Tab then focused a task checkbox again. Add still opened its focused draft field, and Cancel removed it. A task-text click moved focus to the text. No task text was added, edited, or deleted.
 
 T2 became completed during an earlier app relaunch in this verification session; the cause was not established. It was restored to the initial unchecked state through the checkbox, and the final window showed both rows unchecked with `0/2` progress and no open draft or confirmation. This focused Debug check does not verify Release, menu bar, Dock, light appearance, or the other open Task 9 acceptance items.
+
+## Yesterday reminder highlight — 2026-09-29
+
+Pass for the observed dark Today window: Computer Use confirmed `2 unfinished tasks from yesterday` renders in semibold red after rebuilding and relaunching the Debug app. The existing task UUID `1040897D-01D7-4ED3-ADAB-24CD1D8A788C`, text `1`, unchecked value, `0/1` progress, and yesterday count matched the pre-relaunch snapshot. No saved task action was performed. Screenshots were inspected in the tool trace; light appearance and Release were not checked for this follow-up.
+
+Source was `fix/menu-bar-count-only` at `31333b3`, with the reminder styling and requirements changes plus pre-existing project/asset/design work. Xcode 27.0 (`27A266a`) built the shared `MenuPocket` Debug scheme successfully; the initial sandboxed attempt could not run Swift macro plugins, and the authorized build outside that sandbox passed. No new unit tests were added or run for this text-style change; `git diff --check` passed.
+
+The app was `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`, executable SHA-256 `6984d75a3738d2ecbb4d0597f9a851355d2ea1da7f3971a7c3ed66d91799ee30`. A process check at approximately 16:01 EDT recorded PID `51096` at that exact executable path. The rebuilt app was left running. This focused check does not close the earlier full-feature acceptance gaps.

@@ -37,8 +37,8 @@ struct TaskWindowView: View {
                         }
                         if state.yesterdayIncompleteCount > 0 {
                             Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.red)
                         }
                     } else {
                         unavailableState
