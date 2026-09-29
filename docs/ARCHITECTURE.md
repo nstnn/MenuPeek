@@ -1,47 +1,78 @@
 # Architecture
 
-MenuPocket is a Swift 6 macOS application using SwiftUI for hosted views, AppKit for lifecycle and the retained Settings window, Foundation for state, and system SQLite for notes. The project has one app target and a hosted `MenuPocketTests` target in the shared Xcode scheme. It is sandboxed and configured as a regular Dock-visible app in Debug and Release.
+MenuPocket is a Swift 6 macOS application using SwiftUI for hosted views, AppKit for lifecycle/windows/the native status item, Foundation and Observation for state, and system SQLite for tasks. It has one app target and a hosted `MenuPocketTests` target in the shared scheme. Debug and Release are sandboxed regular Dock-visible applications.
 
-## App composition
+## App ownership
 
-`MenuPocketApp` runs `NSApplication` with a retained `AppDelegate`; no SwiftUI scene independently creates windows. `AppDelegate` owns one `DailyNotesState`, the older demo-oriented `AppModel`, a lazy `TaskWindowController`, a retained `TaskStatusItemController`, and one reusable `SettingsWindowController`.
-
-The desktop transition currently implements the lifecycle shell (TASK-001), independent daily-state boundary (TASK-002), Today layout (TASK-003), creation/completion (TASK-004), editing/deletion (TASK-005), menu bar progress (TASK-006), and startup/native commands (TASK-007). `showTasks()` reuses the same SwiftUI-hosting AppKit window, refreshes saved daily state, restores minimization, activates the app, and brings it forward. Dock reopen and the native icon/count status button call that boundary, even when Settings is visible. Closing all windows leaves the app running. The native application menu provides Show Tasks, Settings, Close, and Quit; termination removes the status item.
-
-`TaskWindowController` hosts `TaskWindowView` with the app-owned daily state. The view reads `availableProgress` before deciding whether to show saved rows, a valid empty state, or an unavailable state with Retry. The header and action area remain outside the flexible scroll view; rows wrap long text and preserve the state-owned ordering. It displays refresh notices and selectable recovery text. Composer visibility and keyboard focus stay in the desktop view, while its text binds to the shared `draft`. Return and Save use `addDraft()`; only success dismisses the composer. Explicit Escape/Cancel uses `cancelDraft()` to discard text and clear an add error. Completion controls read saved state and call `setCompleted`; they do not keep optimistic checkbox state. Inline add/completion errors preserve the last saved rows and count. Nonempty draft text also makes the composer visible, so rebuilding presentation cannot hide recoverable text. The former compact Notes view remains in source and tests; it is no longer the app's menu bar surface. Editing binds the composer to the shared `editingNoteID`/`editDraft` and calls `saveEdit()` or `cancelEditing()` without discarding a separate new-task draft. Add and row Edit/Delete actions are disabled during editing to prevent draft replacement. All desktop write errors are visible. The controller owns a small `TaskWindowPresentation` containing the transient deletion ID/day and new-task request; it never stores saved rows or progress. Confirmation is inline, starts with Cancel focused, and is consumed before `delete()` is called. The native window delegate clears confirmation on close without cancelling editing. Snapshot/readiness changes clear stale confirmation, and confirmation revalidates the current day and ID before writing. Cancellation returns focus to a surviving row action or Add task. The controller-owned presentation also carries a consumed new-task request. Command-N reaches that boundary rather than storing composer focus or saved text in the delegate; the SwiftUI view opens/focuses its existing composer. Button/menu requests preserve edits, deletion confirmation, and unavailable-state guards. The app-owned `TaskStatusItemController` receives that same daily state and uses re-armed Observation tracking of `availableProgress` to update its variable-width icon/count button, tooltip, and accessibility label on the main actor after state mutation. It creates no repository or second saved snapshot. Removal clears the status item; queued observation callbacks then return without re-arming, and weak callback captures allow controller release. Actual system menu bar acceptance remains open. Explicit launch presents tasks rather than first-launch Settings.
-
-Settings continues to receive `AppModel` for launch-at-login status and preference warnings. No persistence, identity, or login registration changes are introduced by the desktop transition.
-
-`AppLaunchContext` decodes the `kAEOpenApplication` event's `keyAEPropData` enumeration as login only when it equals `keyAELaunchedAsLogInItem`. The delegate reads `NSAppleEventManager.shared().currentAppleEvent` synchronously in `applicationDidFinishLaunching`; the launch-context provider is injectable independently of presentation. A missing/non-login event takes the explicit-launch path. Login startup creates no window and makes no activation request; explicit presentation marks onboarding complete only after an owned window becomes visible. The actual login event and capture timing still require observation on a stable installed app at real login; descriptor/injected-context tests do not prove that system boundary.
-
-The native menu routes Command-N through task presentation and Command-comma through the same Settings controller. Edit items use the responder chain so the focused field handles cut/copy/paste/select-all and text undo/redo; no saved-task undo is added. The Window menu is registered with AppKit. Command-W closes the active window; both Quit routes terminate `NSApplication`. Termination removes/releases the status controller, stops daily refresh, cancels model loads, and closes owned windows. In Debug hosted XCTest, the entry point runs the application loop without constructing a production delegate, so tests supply isolated owners without opening saved storage or completing real onboarding.
-
-## Notes flow
-
-`NoteDay` derives today and yesterday from an injectable Gregorian calendar and clock. Its default path rebuilds a Gregorian calendar using the current system time zone for each calculation; an explicitly injected calendar stays fixed. One `keys()` call uses the same instant and calendar for both days. A note keeps the local day key assigned at creation; creation and completion times are absolute instants. `NoteOrder` places incomplete notes first and uses creation time, then ID, for stable order.
-
-`DailyNotesState` is the main-actor observable owner of the displayed daily snapshot, drafts, and errors. State-owned observers trigger reads on calendar-day, system-clock, time-zone, and workspace wake notifications, even with no window open; they are removed when state is released. The task-window controller calls `windowWillOpen()` on every explicit presentation; `AppDelegate` calls `startup()` before creating the status controller on every launch and refreshes daily state on activation. During termination, state removes its observer tokens and releases its repository; a guard prevents already-queued notifications from rereading storage. The state asks a `NoteRepository` for today's rows and yesterday's unfinished count. Add, completion, edit, and delete operations update the displayed notes only after a successful repository write. A failed read does not publish a partial snapshot; a failed add or edit retains the draft.
-
-Consumers use `availableProgress` to distinguish an initial/failed read (`nil`, rendered as `—` by both the Today view and the status item) from a successful empty read (`0/0`). `hasLoadedToday` becomes false on every failed read, including a same-day refresh; same-day cached rows remain available for recovery but are not an available count. Failed writes retain the last saved rows and available count. Both Today rows and yesterday's informational count must load successfully before publishing a snapshot.
-
-A changed day clears the old snapshot before reading the new day and never reassigns stored day keys. Existing-row actions that discover a rollover refresh and return false; stale IDs cannot mutate yesterday's rows. Refresh cancels an edit whose day changed or target disappeared, retaining its text in `recoveredEditDraft` and exposing `refreshNotice`. Same-day window refresh preserves a valid active edit. The new-task `draft` remains independent and is assigned to the then-current day only on explicit save. The Today view presents recovery text/notices and clears local deletion confirmation when the day or target changes; state guards remain the final protection against stale deletion. Recovery text is session-only and is never automatically saved as a new task.
-
-`DailyNotesView` keeps deletion confirmation inside the menu bar panel, avoiding a separate alert that can take focus from the transient `MenuBarExtra` window. Cancel, Escape, or closing the panel clears the pending confirmation. Confirming clears it before requesting the repository write; a failed deletion leaves the saved note visible with an inline error.
-
-`SQLiteNoteRepository` opens one database at `Application Support/MenuPocket/notes.sqlite` within the app's sandbox container. The database has a versioned `notes` table and day-key index. A newer unknown schema is rejected without rewriting it. The repository interface lets tests inject a fake or a temporary SQLite database. There is no account, network service, or synchronization path.
-
-## Remaining demo and system boundaries
-
-`AppModel`, `ModuleCatalog`, demo providers, `AppPreferences`, and `PreferencesStore` retain earlier demo behavior, but it is not exposed in Settings. Product preferences use a namespaced `UserDefaults` value with reconciliation and newer-schema write protection; they are distinct from the SQLite notes database. Demo providers are no longer started on app launch.
-
-`LoginItemService` wraps `SMAppService.mainApp`. Settings rereads system status and reports disabled, enabled, approval-required, and unavailable states. Tests inject a fake service so they do not register or unregister the host Mac's real login item. Release and login-item verification need an installed copy at a stable location; registration alone does not prove startup at the next login.
-
-## Source map
-
-| Area | Main files |
+| Owner | Responsibility |
 | --- | --- |
-| App lifecycle and menu bar | `MenuPocket/App/MenuPocketApp.swift`, `AppDelegate.swift` |
-| Notes domain, state, UI, and storage | `MenuPocket/Notes/` |
-| Settings and login item | `MenuPocket/Settings/`, `MenuPocket/Services/LoginItemService.swift` |
-| Legacy demo and preferences | `MenuPocket/Modules/`, `MenuPocket/App/AppModel.swift`, `MenuPocket/Services/PreferencesStore.swift` |
-| Behavior tests | `Tests/MenuPocketTests/` |
+| [MenuPocketApp](../MenuPocket/App/MenuPocketApp.swift) | Run `NSApplication` with one retained delegate. No SwiftUI scene independently creates or restores windows. |
+| [AppDelegate](../MenuPocket/App/AppDelegate.swift) | Own one daily state, the retained demo/preferences model, lazy task-window controller, retained status controller, and reusable Settings controller. Route startup, explicit presentation, Dock reopen, commands, activation, and termination. |
+| [TaskWindowController](../MenuPocket/Notes/TaskWindowController.swift) | Retain one AppKit window hosting `TaskWindowView`; refresh, restore minimization, activate, and bring it forward through `showTasks()`. Own transient `TaskWindowPresentation`. |
+| [TaskWindowView](../MenuPocket/Notes/TaskWindowView.swift) | Render Today and saved rows; bind drafts and actions to daily state. Own composer visibility/focus, not saved data. |
+| [TaskStatusItemController](../MenuPocket/MenuBar/TaskStatusItemController.swift) | Render icon/count, tooltip, and accessibility label from that same state. Primary click calls `showTasks()`. Create no repository or saved snapshot. |
+| [DailyNotesState](../MenuPocket/Notes/DailyNotesState.swift) | Own saved daily data, one cached repository connection, drafts, errors, recovery text, and independent refresh observers. |
+| [SettingsWindowController](../MenuPocket/Settings/SettingsWindowController.swift) | Reuse one Settings window with the existing `AppModel` preference/login boundary. |
+
+```mermaid
+flowchart TD
+    L["App launch"] --> A["AppDelegate"]
+    A --> S["DailyNotesState startup read"]
+    A --> C["Classify manual or login launch"]
+    C -->|"Manual"| W["One TaskWindowController"]
+    C -->|"Login"| Q["No foreground window"]
+    M["Menu bar click or Dock reopen"] --> W
+    N["Day / clock / time zone / wake<br/>or app activation"] --> S
+    W -->|"Refresh and task actions"| S
+    S --> R["One SQLite repository connection"]
+    R -->|"Read succeeds or write commits"| P["Publish saved snapshot"]
+    R -->|"Read or write fails"| E["State-owned error and recovery"]
+    P --> V["Today window"]
+    P --> B["Retained native status item"]
+    E --> V
+    E --> B
+```
+
+Both surfaces consume one saved-data authority. Read failures render unavailable progress; write failures preserve the last saved count. Closing the task window does not remove the status item or refresh observers.
+
+The task window starts at 800 × 560 pt with a 600 × 400 pt minimum. The header and actions stay outside its flexible scroll view; rows wrap long text. Window geometry is presentation configuration, not a data contract.
+
+## Daily state and persistence
+
+[NoteDay](../MenuPocket/Notes/NoteDay.swift) derives Gregorian today/yesterday keys from one clock reading. Production calculations rebuild the calendar with the current system time zone; injected calendars remain fixed. A `Note` keeps its assigned creation-day key and absolute creation/completion instants. `NoteOrder` places incomplete tasks first, then sorts newest first with ID as a stable tie-breaker. The visible UI says task; stored `Note` types and tables retain their names.
+
+`DailyNotesState` reads today's rows and yesterday's unfinished count together. Both reads must succeed before publishing the snapshot. `availableProgress` is nil before a successful load or after any failed read, rendered as `—`. A successful empty read publishes `0/0`. Same-day cached rows may remain for recovery after a failed refresh, but do not establish available progress.
+
+Add, completion, edit, and deletion publish changed rows/progress only after repository success. A rejected write retains saved data/count and an add/edit draft as applicable. The [SQLite repository](../MenuPocket/Notes/SQLiteNoteRepository.swift) stores schema-version-1 tasks at Application Support `MenuPocket/notes.sqlite` within the sandbox container. Unsupported newer schemas are rejected without rewriting them. Preferences and onboarding markers remain in `UserDefaults`; the bundle identifier stays `local.menupocket.app`. No migration or external service is introduced.
+
+State-owned calendar-day, system-clock, time-zone, and workspace-wake observers work without an open window. Startup reads before the status controller is created; activation and every explicit window presentation refresh the same state. Retry also goes through that boundary.
+
+A changed day invalidates the old snapshot before reading the new one and never reassigns saved day keys or carries tasks forward. Existing-row actions detecting rollover refresh and reject the stale action. Day/target changes cancel editing, preserve text in `recoveredEditDraft`, and expose `refreshNotice`. New-task text remains separate and receives its day only on explicit save.
+
+## Presentation and native commands
+
+`TaskWindowPresentation` owns only a pending deletion ID/day and a consumed new-task request. It does not store rows or progress. Confirmation revalidates readiness, day, and target, then consumes the request before deletion. Window close and invalidating snapshots cancel confirmation. Failed deletion keeps the saved row/count and requires a fresh confirmation.
+
+The view binds new/edit text to shared state. Return/Save dismisses a composer only after a successful save; Escape/Cancel discards that draft. Same-day close/reopen preserves drafts; stale edit text remains selectable for recovery and is never saved automatically. Unsaved recovery is session-only.
+
+The native App/File/Edit/Window menus route Show Tasks and Command-N through task presentation and Command-comma through the same Settings controller. Add requests preserve existing composer text and reject active editing, deletion confirmation, or unavailable data. Edit commands use the responder chain for cut/copy/paste/select-all and text undo/redo. Saved-task undo is not implemented.
+
+Command-W closes the active window. `applicationShouldTerminateAfterLastWindowClosed` returns false. Quit routes terminate `NSApplication`; termination removes/releases the status item, stops daily observers, releases the repository, cancels model loads, and closes owned windows. Queued refresh/observation callbacks cannot recreate those resources after termination.
+
+The status controller uses re-armed Observation tracking of `availableProgress`. Its callback reads the settled snapshot on the main actor after mutation; weak captures allow release. It observes successive writes independently of window presentation.
+
+## Launch and Settings boundaries
+
+`AppLaunchContext` classifies login only when the launch `kAEOpenApplication` event's `keyAEPropData` enumeration equals `keyAELaunchedAsLogInItem`. The delegate reads the current launch event synchronously in `applicationDidFinishLaunching`; missing/non-login events take the manual path. The provider is injectable for hosted checks.
+
+Manual launch shows tasks even after onboarding is complete. Login launch creates no task/Settings window and requests no activation; the regular Dock icon remains. Explicit task or Settings presentation completes unfinished onboarding only after an owned window is visible.
+
+[LoginItemService](../MenuPocket/Services/LoginItemService.swift) wraps `SMAppService.mainApp`. Settings rereads status and handles disabled, enabled, approval-required, and unavailable states. Startup classification itself does not register or unregister login items. Fake services isolate automated checks; real registration and a stable installed copy are needed for an intended genuine-login observation.
+
+## Retained legacy code and verification
+
+`DailyNotesView`/`DailyNotesPanel` and the older demo panel remain in source/tests but are no longer reachable from the menu bar. Their compact-panel confirmation behavior describes a historical surface. `AppModel`, module providers, and preference stores retain earlier demo/preferences responsibilities; demo loads no longer start on app launch.
+
+Debug hosted XCTest runs the application loop without constructing a production delegate. Fixtures supply isolated repositories, defaults, onboarding stores, launch contexts, and fake login services, then clean up windows, menus, status items, and observers.
+
+[Desktop regression](DESKTOP_TASK_REGRESSION.md) records automated/build/artifact evidence. [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) records available system evidence and its limits. Injected login contexts, callback cleanup, separate fixture windows, and metadata do not by themselves prove genuine login, actual process exit, or menu bar/Dock interaction.
