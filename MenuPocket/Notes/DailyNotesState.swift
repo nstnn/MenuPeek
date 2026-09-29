@@ -174,6 +174,7 @@ final class DailyNotesState {
     func cancelEditing() {
         editingNoteID = nil
         editDraft = ""
+        if issue == .edit { issue = nil }
     }
 
     @discardableResult
