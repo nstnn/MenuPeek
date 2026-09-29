@@ -5,6 +5,8 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"000000000000000000001601" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "folder.assetcatalog"; "path" = "Assets.xcassets"; "sourceTree" = "<group>"; };
+		"000000000000000000001602" = { "isa" = "PBXBuildFile"; "fileRef" = "000000000000000000001601"; };
 		"000000000000000000001505" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "TaskWindowView.swift"; "sourceTree" = "<group>"; };
 		"000000000000000000001506" = { "isa" = "PBXBuildFile"; "fileRef" = "000000000000000000001505"; };
 		"000000000000000000001501" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "path" = "TaskWindowController.swift"; "sourceTree" = "<group>"; };
@@ -262,7 +264,7 @@
 		};
 		"00000000000000000000000E" = {
 			"isa" = "PBXGroup";
-			"children" = ("000000000000000000000009", "00000000000000000000000A", "00000000000000000000000B", "00000000000000000000000C", "00000000000000000000000D", "000000000000000000001405",);
+			"children" = ("000000000000000000001601", "000000000000000000000009", "00000000000000000000000A", "00000000000000000000000B", "00000000000000000000000C", "00000000000000000000000D", "000000000000000000001405",);
 			"path" = "MenuPocket";
 			"sourceTree" = "<group>";
 		};
@@ -440,12 +442,13 @@
 		"000000000000000000000018" = {
 			"isa" = "PBXResourcesBuildPhase";
 			"buildActionMask" = 2147483647;
-			"files" = ();
+			"files" = ("000000000000000000001602",);
 			"runOnlyForDeploymentPostprocessing" = 0;
 		};
 		"000000000000000000000019" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"CODE_SIGN_ENTITLEMENTS" = "MenuPocket/App/MenuPocket.entitlements";
 				"COMBINE_HIDPI_IMAGES" = "YES";
 				"CURRENT_PROJECT_VERSION" = "1";
@@ -465,6 +468,7 @@
 		"00000000000000000000001A" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"CODE_SIGN_ENTITLEMENTS" = "MenuPocket/App/MenuPocket.entitlements";
 				"COMBINE_HIDPI_IMAGES" = "YES";
 				"CURRENT_PROJECT_VERSION" = "1";

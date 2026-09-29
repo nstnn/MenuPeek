@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#37C8BB"/><stop offset="1" stop-color="#087F8C"/></linearGradient>
+    <linearGradient id="pocket" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#17596F"/><stop offset="1" stop-color="#103B53"/></linearGradient>
+  </defs>
+  <rect x="100" y="112" width="824" height="824" rx="184" fill="#082F49" opacity="0.12"/>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#tile)"/>
+  <rect x="310" y="231" width="404" height="498" rx="48" fill="#064E60" opacity="0.16"/>
+  <rect x="310" y="215" width="404" height="498" rx="48" fill="#FAFCF7"/>
+  <path d="M365 329l25 25 48-55" fill="none" stroke="#118F87" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M490 329h155" stroke="#AABDC0" stroke-width="22" stroke-linecap="round"/>
+  <rect x="366" y="402" width="58" height="58" rx="14" fill="none" stroke="#9AAFB5" stroke-width="12"/>
+  <path d="M490 431h124" stroke="#AABDC0" stroke-width="22" stroke-linecap="round"/>
+  <path d="M250 521Q512 584 774 521v143q0 55-49 81L553 837q-41 22-82 0L299 745q-49-26-49-81z" fill="url(#pocket)"/>
+  <path d="M278 553Q512 606 746 553" fill="none" stroke="#6ACAC6" stroke-width="10" stroke-linecap="round" opacity="0.65"/>
+  <path d="M462 696l36 36 68-77" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
