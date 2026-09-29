@@ -15,7 +15,7 @@ final class DailyNotesStateTests: XCTestCase {
         defer { controller.remove() }
         let button = try XCTUnwrap(controller.statusItem?.button)
         XCTAssertEqual(button.title, "—")
-        XCTAssertNotNil(button.image)
+        XCTAssertNil(button.image)
         state.startup()
         try await waitForStatusTitle("0/0", controller: controller)
         state.draft = "First task"
