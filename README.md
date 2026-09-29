@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a local macOS desktop and menu bar app for daily tasks. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. The desktop transition provides a resizable Today task window; editing, deletion, and live menu bar progress are available. Existing notes remain stored in SQLite. See [current behavior and remaining MVP work](docs/REQUIREMENTS.md).
+MenuPocket is a local macOS desktop and menu bar app for daily tasks. Manage today's checklist in one resizable task window and see saved completed/total progress in the menu bar. Tasks stay in local SQLite storage. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. See the [product requirements](docs/REQUIREMENTS.md) for scope and the [desktop acceptance record](docs/DESKTOP_TASK_ACCEPTANCE.md) for verification status.
 
 ## Requirements
 
@@ -29,14 +29,33 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 
 ## Use the Today window
 
-Opening MenuPocket explicitly shows the Today task window. Click the menu bar grid icon or reopen MenuPocket from the Dock to show the same task window. Closing or minimizing it does not quit the app; another presentation restores it. The Today view shows the local date, saved task progress, and ordered tasks in a scrollable list, with Settings access and Retry when tasks cannot load. Add task opens a single-line field: Return or Save adds trimmed text; Escape or Cancel discards it. Checkboxes complete or uncomplete tasks and update saved progress. Failed writes preserve draft text or the saved checkbox/count and show an inline error. Unsaved new-task text survives closing and reopening the window within the running app. Use each row’s Edit and Delete buttons to correct text or request deletion. Editing uses Return/Save and Escape/Cancel; deletion requires confirmation. Closing the window cancels pending deletion while retaining a current-day edit draft. A day change or removed target exposes unsaved edit text for recovery. The menu bar shows the saved completed/total count, including `0/0` after a successful empty read; unloaded or failed reads show `—`. Failed writes keep the last saved count. Progress observation remains active when the task window is closed. The previous compact checklist is no longer exposed.
+Opening MenuPocket explicitly shows the Today task window. Click the menu bar grid icon or reopen MenuPocket from the Dock to restore the same window. Closing or minimizing it leaves the app, Dock icon, and menu bar progress running. Quit from the application menu, Settings, or Command-Q to exit.
 
-Saved notes and preferences are preserved. Notes stay assigned to their creation day in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences remain separate in `UserDefaults`. Settings retains Open at Login, app information, and Quit. Command-N opens or focuses the new-task composer in the same window; it is unavailable while editing, confirming deletion, or unable to read tasks. Command-comma opens the reusable Settings window, Command-W closes the active window, and Command-Q quits. Native text cut/copy/paste/select-all are available. Login launch loads menu bar progress without raising task or Settings windows; the Dock icon remains visible. Real login startup and final system-interface acceptance remain unverified; see [Requirements](docs/REQUIREMENTS.md).
+The Today view shows the local date, progress, and a scrollable checklist. Incomplete tasks appear first, newest first within each group. Add task opens a single-line field; Return or Save stores trimmed text, and Escape or Cancel discards it. Checkboxes complete or uncomplete tasks. Row Edit and Delete actions provide text editing and deletion confirmation. A rejected write keeps the saved task/count and recoverable draft text, with an inline error.
+
+Current-day new and edit drafts survive window close/reopen within the running process. Closing cancels deletion confirmation. Day changes or removed edit targets expose unsaved edit text for recovery. Quit/relaunch preserves saved tasks but does not promise recovery of unsaved drafts.
+
+The menu bar shows saved completed/total progress, including `0/0` after a successful empty read. Unloaded or failed reads show `—`; open the window and use Retry. Failed writes retain the last saved count. Progress refresh remains active with the window closed. The previous compact editable popup is no longer exposed.
+
+Tasks keep their assigned local day; unfinished tasks do not carry forward. Yesterday's unfinished count is informational. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
+
+Settings provides Open at Login, app information, and Quit. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
+
+| Shortcut | Action |
+| --- | --- |
+| Command-N | Restore the task window and focus Add task; unavailable during editing, deletion confirmation, or unavailable data. |
+| Command-comma | Open the reusable Settings window. |
+| Command-W | Close the active window while the app keeps running. |
+| Command-Q | Quit the app. |
+
+Focused text fields support native cut/copy/paste/select-all and text undo/redo. Saved-task undo is outside this increment.
 
 ## Project documentation
 
 - [Documentation index](docs/index.md): where each topic lives.
-- [Requirements](docs/REQUIREMENTS.md): current behavior, approved Notes MVP target, and gaps.
+- [Requirements](docs/REQUIREMENTS.md): desktop behavior, daily-only scope, and acceptance criteria.
 - [Architecture](docs/ARCHITECTURE.md): state, storage, and system boundaries.
 - [Workflow](docs/WORKFLOW.md): development checks and local Release procedure.
-- [Notes MVP regression](docs/NOTES_MVP_REGRESSION.md): dated Debug build and hosted test results for the Task 11 handoff.
+- [Desktop regression](docs/DESKTOP_TASK_REGRESSION.md): dated automated results and retained app identity.
+- [Desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md): actual-interface evidence and remaining evidence gaps.
+- Earlier Notes MVP records remain linked as history in the documentation index.

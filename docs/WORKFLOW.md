@@ -16,7 +16,7 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
   -derivedDataPath build/DerivedData test
 ```
 
-The hosted tests cover note day boundaries, ordering, SQLite persistence and errors, observable state, preferences, demo loading, and login-item behavior through injected fakes. Tests must not modify the Mac's real login-item registration. The Debug XCTest host skips production delegate initialization; lifecycle tests supply isolated daily repositories, defaults, launch context, and login services. Tests that start a delegate must clean up its windows/status item and restore native menus.
+The hosted tests cover note day boundaries, ordering, SQLite persistence and errors, shared-state availability and refresh, repeated status-count observation, window/lifecycle/native commands, preferences, demo loading, and login-item behavior through injected fakes. Tests must not modify the Mac's real login-item registration. The Debug XCTest host skips production delegate initialization; lifecycle tests supply isolated daily repositories, defaults, launch context, and login services. Tests that start a delegate must clean up its windows/status item and restore native menus.
 
 For a user-facing change, run the relevant tests and inspect the running app. In particular, exercise task-window opening, task writes and relaunch, empty and long lists, Command-N/W/Q/comma, native text editing, Settings reuse, and both appearances as applicable. Check explicit launch versus quiet login startup separately, without changing real login registration to seed an automated test. Record unavailable UI or hardware checks as untested. Compilation and XCTest do not prove menu bar or Settings interaction.
 
@@ -44,6 +44,12 @@ The expected product path is `build/DerivedData/Build/Products/Release/MenuPocke
 
 Keep source, build/test result, app identity, and hands-on UI observations together when making an acceptance claim. A rebuild after source changes makes earlier artifact and UI evidence stale.
 
+Record automated results in [Desktop regression](DESKTOP_TASK_REGRESSION.md) and actual-interface results in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md). Identify the source revision and dirty inputs, configuration, toolchain, version/build, app path, executable/bundle hashes, timestamp, and running path/PID as applicable. Distinguish an installed production-identity app from fixtures using another bundle ID, database, defaults suite, or sandbox arrangement. Keep screenshots/observations tied to the artifact; a process snapshot alone does not identify which UI action succeeded.
+
+Use Pass, Fail, Not tested, or Blocked for checks with recorded outcomes. A dependency completion assumption is not an observed result. A genuine login, day transition, display configuration, or VoiceOver check needs its own evidence; injected contexts and registration status remain supporting automated facts. Retain the essential identity and results in tracked documents even when raw logs, app bundles, or screenshots remain under ignored `build/`.
+
 ## Documentation changes
 
 Update [Requirements](REQUIREMENTS.md) when product behavior or scope changes, [Architecture](ARCHITECTURE.md) when component or data boundaries change, and this workflow when verification or release steps change. Keep [README](../README.md) concise and update [AGENTS.md](../AGENTS.md) only when its project-wide rules or document map changes.
+
+For documentation-only changes, review links, commands, behavior descriptions, and evidence provenance, and run `git diff --check`. Do not turn copied historical results into new test or acceptance claims. Preserve the dated Notes MVP records as history. Maintain local plan status separately from tracked requirements/evidence, without changing the ignored-plan policy.
