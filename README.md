@@ -39,7 +39,7 @@ The menu bar shows saved completed/total progress, including `0/0` after a succe
 
 Tasks keep their assigned local day; unfinished tasks do not carry forward. Yesterday's unfinished count is informational. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
 
-Settings provides Open at Login, app information, and Quit. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
+Settings provides Open at Login, a Theme choice, app information, and Quit. Theme defaults to System, which follows the macOS appearance; Light or Dark applies to the whole app immediately and is remembered across launches. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
 
 | Shortcut | Action |
 | --- | --- |
