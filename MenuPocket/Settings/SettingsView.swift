@@ -48,6 +48,21 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Appearance") {
+                Picker("Theme", selection: Binding(
+                    get: { model.preferences.theme },
+                    set: { model.setTheme($0) }
+                )) {
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!model.isPreferenceEditingAllowed)
+                .accessibilityIdentifier("themePicker")
+            }
+
             Section("App") {
                 LabeledContent("Name", value: "MenuPocket")
                     .accessibilityRepresentation {
@@ -64,6 +79,16 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private extension AppTheme {
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
     }
 }
 
