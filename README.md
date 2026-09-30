@@ -39,7 +39,7 @@ The menu bar shows saved completed/total progress, including `0/0` after a succe
 
 Tasks keep their assigned local day; unfinished tasks do not carry forward. Yesterday's unfinished count is informational. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
 
-Settings provides Open at Login, a Theme choice, app information, and Quit. Theme defaults to System, which follows the macOS appearance; Light or Dark applies to the whole app immediately and is remembered across launches. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
+Settings provides Open at Login, a Theme choice, a Quick Add switch, app information, and Quit. Theme defaults to System, which follows the macOS appearance; Light or Dark applies to the whole app immediately and is remembered across launches. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
 
 | Shortcut | Action |
 | --- | --- |
@@ -47,8 +47,13 @@ Settings provides Open at Login, a Theme choice, app information, and Quit. Them
 | Command-comma | Open the reusable Settings window. |
 | Command-W | Close the active window while the app keeps running. |
 | Command-Q | Quit the app. |
+| Control-Option-N | With Quick Add on, show the capture panel from any app. |
 
 Focused text fields support native cut/copy/paste/select-all and text undo/redo. Saved-task undo is outside this increment.
+
+## Quick Add
+
+Turn on Quick Add in Settings to add a task from any app without switching to MenuPocket. Press Control-Option-N, type the task in the small floating panel, and press Return to save it to today's list. Escape, Command-W, clicking outside, or pressing the shortcut again closes the panel and discards the text. Quick Add is off by default and the shortcut is fixed. If another app already holds the shortcut exclusively, Settings says so; quit that app, then turn the switch off and on to retry. MenuPocket cannot detect every conflict, such as system shortcuts.
 
 ## Project documentation
 
