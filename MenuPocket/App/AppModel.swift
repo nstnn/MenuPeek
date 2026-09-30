@@ -277,6 +277,11 @@ final class AppModel {
         commit { $0.theme = theme }
     }
 
+    @discardableResult
+    func setQuickAddEnabled(_ enabled: Bool) -> Bool {
+        commit { $0.quickAddEnabled = enabled }
+    }
+
     private func moveModule(_ id: ModuleDescriptor.ID, by offset: Int) -> Bool {
         guard let index = preferences.moduleOrder.firstIndex(of: id),
               preferences.moduleOrder.indices.contains(index + offset) else { return false }

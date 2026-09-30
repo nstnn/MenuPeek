@@ -33,7 +33,8 @@ final class ModuleCatalogTests: XCTestCase {
                 enabledModuleIDs: ["demo.tasks", "demo.status"],
                 pinnedModuleID: "demo.tasks",
                 menuBarDisplayMode: .iconAndInformation,
-                theme: .system
+                theme: .system,
+                quickAddEnabled: false
             )
         )
     }

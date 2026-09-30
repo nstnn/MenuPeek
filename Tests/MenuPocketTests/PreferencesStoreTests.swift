@@ -46,7 +46,8 @@ final class PreferencesStoreTests: XCTestCase {
             enabledModuleIDs: [ModuleCatalog.statusID],
             pinnedModuleID: ModuleCatalog.statusID,
             menuBarDisplayMode: .iconOnly,
-            theme: .dark
+            theme: .dark,
+            quickAddEnabled: true
         )
         let store = PreferencesStore(userDefaults: userDefaults)
 
@@ -65,7 +66,8 @@ final class PreferencesStoreTests: XCTestCase {
             enabledModuleIDs: [ModuleCatalog.statusID],
             pinnedModuleID: ModuleCatalog.statusID,
             menuBarDisplayMode: .iconOnly,
-            theme: .light
+            theme: .light,
+            quickAddEnabled: false
         )
         let store = PreferencesStore(userDefaults: userDefaults)
 
@@ -86,6 +88,7 @@ final class PreferencesStoreTests: XCTestCase {
                 "pinnedModuleID",
                 "menuBarDisplayMode",
                 "theme",
+                "quickAddEnabled",
             ]
         )
     }
@@ -111,7 +114,8 @@ final class PreferencesStoreTests: XCTestCase {
                     enabledModuleIDs: [ModuleCatalog.statusID],
                     pinnedModuleID: ModuleCatalog.statusID,
                     menuBarDisplayMode: .iconOnly,
-                    theme: .system
+                    theme: .system,
+                    quickAddEnabled: false
                 )
             )
         )
@@ -140,10 +144,73 @@ final class PreferencesStoreTests: XCTestCase {
                     enabledModuleIDs: [ModuleCatalog.tasksID],
                     pinnedModuleID: nil,
                     menuBarDisplayMode: .iconOnly,
-                    theme: .system
+                    theme: .system,
+                    quickAddEnabled: false
                 )
             )
         )
+    }
+
+    func testPreferencesSavedBeforeQuickAddLoadWithQuickAddOffAndKeepOtherFields() throws {
+        // Schema 1 with a theme but no Quick Add key, as the theme build wrote it.
+        let data = Data(
+            """
+            {"enabledModuleIDs":["demo.status"],"menuBarDisplayMode":"iconOnly",\
+            "moduleOrder":["demo.status","demo.tasks"],"pinnedModuleID":"demo.status",\
+            "schemaVersion":1,"theme":"dark"}
+            """.utf8
+        )
+        userDefaults.set(data, forKey: PreferencesStore.storageKey)
+
+        let outcome = try PreferencesStore(userDefaults: userDefaults).load()
+
+        XCTAssertEqual(
+            outcome,
+            .loaded(
+                AppPreferences(
+                    schemaVersion: 1,
+                    moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
+                    enabledModuleIDs: [ModuleCatalog.statusID],
+                    pinnedModuleID: ModuleCatalog.statusID,
+                    menuBarDisplayMode: .iconOnly,
+                    theme: .dark,
+                    quickAddEnabled: false
+                )
+            )
+        )
+        XCTAssertNil(outcome.warning)
+        XCTAssertEqual(userDefaults.data(forKey: PreferencesStore.storageKey), data)
+    }
+
+    func testUnreadableQuickAddValueLoadsOffWithoutDiscardingOtherFields() throws {
+        for value in [#""yes""#, "null", #"{"on":true}"#] {
+            let data = Data(
+                """
+                {"enabledModuleIDs":["demo.tasks"],"menuBarDisplayMode":"iconOnly",\
+                "moduleOrder":["demo.status","demo.tasks"],"pinnedModuleID":null,\
+                "schemaVersion":1,"theme":"light","quickAddEnabled":\(value)}
+                """.utf8
+            )
+            userDefaults.set(data, forKey: PreferencesStore.storageKey)
+
+            let outcome = try PreferencesStore(userDefaults: userDefaults).load()
+
+            XCTAssertEqual(
+                outcome,
+                .loaded(
+                    AppPreferences(
+                        schemaVersion: 1,
+                        moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
+                        enabledModuleIDs: [ModuleCatalog.tasksID],
+                        pinnedModuleID: nil,
+                        menuBarDisplayMode: .iconOnly,
+                        theme: .light,
+                        quickAddEnabled: false
+                    )
+                ),
+                "quickAddEnabled: \(value)"
+            )
+        }
     }
 
     func testReconcilerIgnoresRemovedIDsPreservesKnownOrderAndAppendsNewIDs() {
@@ -162,7 +229,8 @@ final class PreferencesStoreTests: XCTestCase {
             enabledModuleIDs: ["demo.removed", ModuleCatalog.statusID, "demo.new"],
             pinnedModuleID: "demo.removed",
             menuBarDisplayMode: .iconOnly,
-            theme: .dark
+            theme: .dark,
+            quickAddEnabled: true
         )
 
         XCTAssertEqual(
@@ -173,7 +241,8 @@ final class PreferencesStoreTests: XCTestCase {
                 enabledModuleIDs: [ModuleCatalog.statusID, "demo.new"],
                 pinnedModuleID: nil,
                 menuBarDisplayMode: .iconOnly,
-                theme: .dark
+                theme: .dark,
+                quickAddEnabled: true
             )
         )
     }
@@ -197,7 +266,8 @@ final class PreferencesStoreTests: XCTestCase {
                     enabledModuleIDs: [ModuleCatalog.statusID],
                     pinnedModuleID: ModuleCatalog.tasksID,
                     menuBarDisplayMode: .iconAndInformation,
-                    theme: .system
+                    theme: .system,
+                    quickAddEnabled: false
                 )
             ),
             (
@@ -208,7 +278,8 @@ final class PreferencesStoreTests: XCTestCase {
                     enabledModuleIDs: [ModuleCatalog.tasksID, ModuleCatalog.statusID, unpinnableModule.id],
                     pinnedModuleID: unpinnableModule.id,
                     menuBarDisplayMode: .iconAndInformation,
-                    theme: .system
+                    theme: .system,
+                    quickAddEnabled: false
                 )
             ),
         ]
@@ -228,7 +299,8 @@ final class PreferencesStoreTests: XCTestCase {
             enabledModuleIDs: ["demo.removed", ModuleCatalog.statusID],
             pinnedModuleID: "demo.removed",
             menuBarDisplayMode: .iconOnly,
-            theme: .light
+            theme: .light,
+            quickAddEnabled: false
         )
         userDefaults.set(try JSONEncoder().encode(stored), forKey: PreferencesStore.storageKey)
 
@@ -243,7 +315,8 @@ final class PreferencesStoreTests: XCTestCase {
                     enabledModuleIDs: [ModuleCatalog.statusID],
                     pinnedModuleID: nil,
                     menuBarDisplayMode: .iconOnly,
-                    theme: .light
+                    theme: .light,
+                    quickAddEnabled: false
                 )
             )
         )

@@ -254,6 +254,32 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testQuickAddChangeIsSavedWithOtherPreferencesAndRestored() throws {
+        let suiteName = "local.menupocket.tests.AppModelQuickAdd.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertFalse(model.preferences.quickAddEnabled)
+        XCTAssertTrue(model.setTheme(.dark))
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertFalse(model.setQuickAddEnabled(true))
+
+        // Each load and save runs the reconciler, so an enabled value must survive both.
+        let restored = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertEqual(restored.preferences, model.preferences)
+        XCTAssertTrue(restored.preferences.quickAddEnabled)
+        XCTAssertEqual(restored.preferences.theme, .dark)
+        XCTAssertNil(restored.preferenceWarning)
+
+        XCTAssertTrue(restored.setMenuBarDisplayMode(.iconOnly))
+        XCTAssertTrue(AppModel(store: PreferencesStore(userDefaults: defaults)).preferences.quickAddEnabled)
+
+        XCTAssertTrue(restored.setQuickAddEnabled(false))
+        XCTAssertFalse(AppModel(store: PreferencesStore(userDefaults: defaults)).preferences.quickAddEnabled)
+    }
+
+    @MainActor
     func testFutureSchemaBlocksChangesAndDoesNotCallSave() {
         let warning = PreferencesWarning.newerSchema(storedVersion: 2, supportedVersion: 1)
         let store = FakePreferencesStore(
@@ -266,6 +292,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
         XCTAssertFalse(model.setMenuBarDisplayMode(.iconOnly))
         XCTAssertFalse(model.setTheme(.dark))
+        XCTAssertFalse(model.setQuickAddEnabled(true))
         XCTAssertEqual(model.preferences, .defaultValue)
         XCTAssertTrue(store.savedPreferences.isEmpty)
     }
