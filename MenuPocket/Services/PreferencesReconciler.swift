@@ -38,7 +38,8 @@ struct PreferencesReconciler {
             enabledModuleIDs: reconciledEnabledIDs,
             pinnedModuleID: reconciledPinnedID,
             menuBarDisplayMode: storedPreferences.menuBarDisplayMode,
-            theme: storedPreferences.theme
+            theme: storedPreferences.theme,
+            quickAddEnabled: storedPreferences.quickAddEnabled
         )
     }
 }

@@ -24,6 +24,13 @@ enum DailyNotesIssue: Equatable {
 @MainActor
 @Observable
 final class DailyNotesState {
+    enum AddOutcome: Equatable {
+        case added
+        case empty
+        case unavailable
+        case writeFailed
+    }
+
     private(set) var todayKey: String?
     private(set) var notes: [Note] = []
     private(set) var yesterdayIncompleteCount = 0
@@ -134,22 +141,35 @@ final class DailyNotesState {
 
     @discardableResult
     func addDraft() -> Bool {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
+        switch add(text: draft) {
+        case .added:
+            draft = ""
+            issue = nil
+            return true
+        case .writeFailed:
+            issue = .add
+            return false
+        case .empty, .unavailable:
+            return false
+        }
+    }
+
+    /// Saves a task for the current local day without reading or changing the
+    /// window's draft or issue. A readiness refresh may still update shared state.
+    func add(text rawText: String) -> AddOutcome {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return .empty }
         let instant = day.now()
         let key = day.key(for: instant)
-        guard readyForWrite(on: key), let repository else { return false }
+        guard readyForWrite(on: key), let repository else { return .unavailable }
         let note = Note(id: UUID(), text: text, dayKey: key,
                         createdAt: instant, completedAt: nil)
         do {
             try repository.add(note)
             notes.append(note)
-            draft = ""
-            issue = nil
-            return true
+            return .added
         } catch {
-            issue = .add
-            return false
+            return .writeFailed
         }
     }
 

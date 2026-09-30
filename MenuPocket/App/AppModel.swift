@@ -60,9 +60,15 @@ final class AppModel {
     private(set) var demoScenarios: [ModuleDescriptor.ID: DemoScenario]
     private(set) var loginItemStatus: LoginItemStatus
     private(set) var loginItemOperationFailure: LoginItemOperationFailure?
+    private(set) var isQuickAddRegistered = false
+    /// Why the last Quick Add registration was refused. The preference stays on.
+    private(set) var quickAddRegistrationFailure: HotKeyRegistrationError?
 
     @ObservationIgnored private let store: any PreferencesStoring
     @ObservationIgnored private let loginItemService: any LoginItemService
+    @ObservationIgnored private let hotKeyService: any HotKeyService
+    /// Set by `startQuickAdd`; registration changes wait until the app lifecycle has started.
+    @ObservationIgnored private var quickAddPressHandler: (@MainActor () -> Void)?
     @ObservationIgnored private let descriptorsByID: [ModuleDescriptor.ID: ModuleDescriptor]
     @ObservationIgnored private let providersByID: [ModuleDescriptor.ID: any ModuleProvider]
     @ObservationIgnored private var activeLoads: [ModuleDescriptor.ID: ActiveLoad] = [:]
@@ -111,10 +117,12 @@ final class AppModel {
         store: any PreferencesStoring = PreferencesStore(),
         catalog: [ModuleDescriptor] = ModuleCatalog.defaultModules,
         providers: [any ModuleProvider] = [],
-        loginItemService: any LoginItemService = SystemLoginItemService()
+        loginItemService: any LoginItemService = SystemLoginItemService(),
+        hotKeyService: any HotKeyService = CarbonHotKeyService()
     ) {
         self.store = store
         self.loginItemService = loginItemService
+        self.hotKeyService = hotKeyService
         loginItemStatus = loginItemService.readStatus()
         loginItemOperationFailure = nil
         descriptorsByID = Dictionary(
@@ -275,6 +283,49 @@ final class AppModel {
     @discardableResult
     func setTheme(_ theme: AppTheme) -> Bool {
         commit { $0.theme = theme }
+    }
+
+    @discardableResult
+    func setQuickAddEnabled(_ enabled: Bool) -> Bool {
+        // Registration follows only a saved change, so a refused save changes nothing.
+        let changed = commit { $0.quickAddEnabled = enabled }
+        if changed { updateQuickAddRegistration() }
+        return changed
+    }
+
+    /// Called once from the app lifecycle, after launch setup. Registers the
+    /// Quick Add hotkey when the saved preference is on; later preference
+    /// changes register or unregister it.
+    func startQuickAdd(onPress: @escaping @MainActor () -> Void) {
+        guard !isTerminating, quickAddPressHandler == nil else { return }
+        quickAddPressHandler = onPress
+        updateQuickAddRegistration()
+    }
+
+    func stopQuickAdd() {
+        guard quickAddPressHandler != nil else { return }
+        quickAddPressHandler = nil
+        hotKeyService.unregister()
+        isQuickAddRegistered = false
+    }
+
+    private func updateQuickAddRegistration() {
+        guard !isTerminating, let onPress = quickAddPressHandler else { return }
+        guard preferences.quickAddEnabled else {
+            // A refused registration already left nothing registered.
+            if isQuickAddRegistered { hotKeyService.unregister() }
+            isQuickAddRegistered = false
+            quickAddRegistrationFailure = nil
+            return
+        }
+        do throws(HotKeyRegistrationError) {
+            try hotKeyService.register(.quickAdd, onPress: onPress)
+            isQuickAddRegistered = true
+            quickAddRegistrationFailure = nil
+        } catch {
+            isQuickAddRegistered = false
+            quickAddRegistrationFailure = error
+        }
     }
 
     private func moveModule(_ id: ModuleDescriptor.ID, by offset: Int) -> Bool {

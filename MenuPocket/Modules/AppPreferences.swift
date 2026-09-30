@@ -20,6 +20,7 @@ struct AppPreferences: Codable, Equatable, Sendable {
     var pinnedModuleID: ModuleDescriptor.ID?
     var menuBarDisplayMode: MenuBarDisplayMode
     var theme: AppTheme
+    var quickAddEnabled: Bool
 
     static let defaultValue = AppPreferences(
         schemaVersion: currentSchemaVersion,
@@ -27,7 +28,8 @@ struct AppPreferences: Codable, Equatable, Sendable {
         enabledModuleIDs: Set(ModuleCatalog.defaultModules.map(\.id)),
         pinnedModuleID: ModuleCatalog.tasksID,
         menuBarDisplayMode: .iconAndInformation,
-        theme: .system
+        theme: .system,
+        quickAddEnabled: false
     )
 }
 
@@ -45,5 +47,10 @@ extension AppPreferences {
         // making the whole value unreadable, which would discard other fields.
         theme = try container.decodeIfPresent(String.self, forKey: .theme)
             .flatMap(AppTheme.init(rawValue:)) ?? Self.defaultValue.theme
+        // Quick Add was added later in schema 1. A plain decodeIfPresent throws
+        // on a value of the wrong type, so a missing or unreadable value turns
+        // Quick Add off instead of discarding every other field.
+        quickAddEnabled = (try? container.decodeIfPresent(Bool.self, forKey: .quickAddEnabled))
+            .flatMap { $0 } ?? Self.defaultValue.quickAddEnabled
     }
 }

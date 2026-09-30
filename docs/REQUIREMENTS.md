@@ -2,7 +2,7 @@
 
 MenuPocket is one local macOS desktop and menu bar app for daily tasks. The desktop increment replaces the compact editable popup with a reusable Today window and menu bar progress. This tracked document defines the product contract without requiring the Git-ignored local plan.
 
-The behavior below is implemented in source. Dated verification results belong in [Desktop regression](DESKTOP_TASK_REGRESSION.md) and [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md); implementation, automated verification, and actual system observations are separate claims.
+The behavior in the desktop task contract and the rules that follow it is implemented in source; the [planned Quick Add requirement](#planned-quick-add) is not. Dated verification results belong in [Desktop regression](DESKTOP_TASK_REGRESSION.md) and [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md); implementation, automated verification, and actual system observations are separate claims.
 
 ## Desktop task contract
 
@@ -43,9 +43,11 @@ All app-owned visible and accessibility copy is English, including dates indepen
 
 ## Scope exclusions
 
-Future-day planning, history browsing, automatic carryover, projects, tags, priorities, deadlines, reminders, recurring tasks, search, filters, sync, accounts, multiple task windows, a second editable menu bar checklist, and a separate background helper remain outside this increment.
+Future-day planning, history browsing, automatic carryover, projects, tags, priorities, deadlines, reminders, recurring tasks, search, filters, sync, accounts, multiple persistent task windows, a second editable menu bar checklist, and a separate background helper remain outside this increment.
 
 Renaming stored `Note` types/tables, unrelated legacy-demo cleanup, saved-task undo/redo, durable unsaved drafts across Quit, public distribution, notarization, and App Store release are also excluded. Native text undo/redo remains supported.
+
+The planned Quick Add capture panel (REQ-013) does not relax the multiple-task-windows exclusion. It is a transient, single-line entry surface that only adds a task; it does not list, edit, complete, or delete tasks, keeps no draft, and closes after each capture. The Today window remains the only task window.
 
 ## Implementation and acceptance status
 
@@ -54,6 +56,26 @@ The task window, CRUD/recovery rules, shared progress, closed-window refresh, na
 Task 9's actual Release report records partial acceptance: window/text/cancellation/Settings/Quit and observed-row relaunch checks passed, while menu bar/Dock and safe-fixture access were blocked and several layout/system checks were not tested. [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) retains those scoped results and the exact remaining gate. Full feature acceptance remains open until the material observations pass against the final artifact.
 
 The Settings theme choice (REQ-012) is implemented with hosted tests for saving, legacy preferences, launch, and live changes. Its running-app results are recorded separately in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md).
+
+Quick Add (REQ-013) is planned only: it is not implemented, tested, or verified in the running app.
+
+## Planned: Quick Add
+
+Status: planned, not implemented. Nothing in this section describes current behavior. It moves into the desktop task contract only after running-app verification is recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md).
+
+| Requirement | Planned behavior |
+| --- | --- |
+| REQ-013 — Quick Add | Settings has a Quick Add section between Appearance and App with an on/off toggle, off by default, for a fixed global shortcut, Control-Option-N. The choice is saved with the other preferences; preferences saved before it existed, or holding an unreadable value for it, read as off and keep every other value. Turning it on registers the shortcut immediately and turning it off unregisters it; it also registers at launch, including quiet login startup without raising a window, and unregisters on Quit. If the system refuses registration, the setting stays on, Settings shows an inline message, the app keeps working, and the next launch or an off/on toggle retries. Settings never claims the shortcut is free of conflicts. Pressing the shortcut from any app shows one reused floating panel, centered on the screen with the pointer, with a focused single-line field; MenuPocket does not become the active app, the Today window is not raised, and the panel can appear over a full-screen app. Return saves trimmed, nonempty text as a new task for the current local day under the same rules as Add task, closes the panel, and updates the menu bar count. Empty input saves nothing and leaves the panel open; a rejected write keeps the text with an inline error. Escape, Command-W, clicking outside, or pressing the shortcut again closes the panel and discards its text and undo history. The panel supports native text editing and a VoiceOver label; Command-Q, Command-N, and Command-comma do nothing while it is focused. Panel text and errors never change the Today window's drafts, edit or deletion targets, or inline error, except through the existing day-change refresh. When MenuPocket was already active, dismissing the panel returns focus to the previously focused window. If saved data is unavailable, the shortcut tries one refresh and otherwise opens the Today window, which offers Retry. |
+
+The following choices are working assumptions, not confirmed decisions, and may change before implementation:
+
+- The shortcut is Control-Option-N and cannot be changed in this increment; a shortcut recorder is out of scope.
+- The shortcut is registered exclusively through the system hotkey API, with no Accessibility or Input Monitoring permission. Only conflicts the system reports can be shown; while Quick Add holds the shortcut, another app's shared use of the same key stops receiving it.
+- A refused registration leaves the setting on.
+- Dismissing the panel discards unsent text.
+- Command-Q, Command-N, and Command-comma do nothing while the panel is focused.
+- Quick Add saves tasks without a category (General) and, once categories exist, does not change the remembered last-used category.
+- The app keeps its Dock icon and Command-Tab entry (REQ-006). If the panel cannot take focus or appear over a full-screen app under that policy, the requirement is revisited rather than the policy changed.
 
 ## Historical Notes MVP
 
