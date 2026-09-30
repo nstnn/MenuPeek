@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var taskWindowController: TaskWindowController?
     private(set) var taskStatusItemController: TaskStatusItemController?
     private(set) var settingsWindowController: SettingsWindowController?
+    private(set) var quickAddPanelController: QuickAddPanelController?
     private let onboardingStore: any OnboardingStoring
     private let launchContext: () -> AppLaunchContext
     private var hasFinishedLaunching = false
@@ -61,11 +62,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         taskStatusItemController = TaskStatusItemController(state: dailyNotesState) { [weak self] in
             self?.showTasks()
         }
+        // Registers in both launch contexts; a press never raises a window on its own.
+        model.startQuickAdd { [weak self] in self?.quickAddHotKeyPressed() }
         if context == .manual { showTasks() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        model.stopQuickAdd()
+        quickAddPanelController?.dismiss()
+        quickAddPanelController?.panel.close()
         dailyNotesState.stopForTermination()
         taskStatusItemController?.remove()
         taskStatusItemController = nil
@@ -102,6 +108,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let controller = settingsWindowController ?? makeSettingsWindowController()
         controller.showSettings()
         if controller.window?.isVisible == true { completeOnboardingAfterPresentation() }
+    }
+
+    /// The Quick Add hotkey toggles the capture panel. The panel needs saved
+    /// data it can write to: after one refresh, unavailable data opens the
+    /// Today window, which offers Retry, instead.
+    func quickAddHotKeyPressed() {
+        guard hasFinishedLaunching, !isTerminating else { return }
+        if let controller = quickAddPanelController, controller.isShown {
+            controller.dismiss()
+            return
+        }
+        if dailyNotesState.availableProgress == nil { dailyNotesState.refresh() }
+        guard dailyNotesState.availableProgress != nil else {
+            showTasks()
+            return
+        }
+        let controller = quickAddPanelController ?? makeQuickAddPanelController()
+        controller.show()
     }
 
     func applicationShouldHandleReopen(
@@ -196,6 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(windowItem)
         NSApplication.shared.mainMenu = menu
         NSApplication.shared.windowsMenu = windowMenu
+    }
+
+    private func makeQuickAddPanelController() -> QuickAddPanelController {
+        // Saves through the independent write path, so the Today window's
+        // draft, edit, deletion, and inline error are untouched.
+        let controller = QuickAddPanelController { [weak self] text in
+            guard let self, !self.isTerminating else { return .unavailable }
+            return switch self.dailyNotesState.add(text: text) {
+            case .added: .added
+            case .empty: .empty
+            case .unavailable: .unavailable
+            case .writeFailed: .writeFailed
+            }
+        }
+        quickAddPanelController = controller
+        return controller
     }
 
     private func makeSettingsWindowController() -> SettingsWindowController {

@@ -280,6 +280,98 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testQuickAddRegistrationWaitsForStartAndFollowsSavedChanges() {
+        let hotKeys = FakeHotKeyService()
+        let store = FakePreferencesStore()
+        let model = AppModel(store: store, hotKeyService: hotKeys)
+        var presses = 0
+
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertEqual(hotKeys.registerCount, 0)
+        XCTAssertFalse(model.isQuickAddRegistered)
+
+        model.startQuickAdd { presses += 1 }
+        model.startQuickAdd { XCTFail("A second start must not replace the handler") }
+        XCTAssertEqual(hotKeys.registerCount, 1)
+        XCTAssertEqual(hotKeys.registeredCombination, .quickAdd)
+        XCTAssertTrue(model.isQuickAddRegistered)
+        hotKeys.simulatePress()
+        XCTAssertEqual(presses, 1)
+
+        XCTAssertTrue(model.setQuickAddEnabled(false))
+        XCTAssertEqual(hotKeys.unregisterCount, 1)
+        XCTAssertFalse(hotKeys.isRegistered)
+        XCTAssertFalse(model.isQuickAddRegistered)
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertEqual(hotKeys.registerCount, 2)
+        XCTAssertTrue(model.isQuickAddRegistered)
+        XCTAssertFalse(model.setQuickAddEnabled(true))
+        XCTAssertEqual(hotKeys.registerCount, 2)
+    }
+
+    @MainActor
+    func testRefusedQuickAddSaveDoesNotChangeRegistration() {
+        let warning = PreferencesWarning.newerSchema(storedVersion: 2, supportedVersion: 1)
+        let hotKeys = FakeHotKeyService()
+        let model = AppModel(store: FakePreferencesStore(saveOutcome: .writeProtected(warning)),
+                             hotKeyService: hotKeys)
+        model.startQuickAdd {}
+
+        XCTAssertFalse(model.setQuickAddEnabled(true))
+        XCTAssertFalse(model.preferences.quickAddEnabled)
+        XCTAssertEqual(hotKeys.registerCount, 0)
+        XCTAssertEqual(hotKeys.unregisterCount, 0)
+    }
+
+    @MainActor
+    func testRefusedQuickAddRegistrationKeepsPreferenceOnUntilARetrySucceeds() {
+        var preferences = AppPreferences.defaultValue
+        preferences.quickAddEnabled = true
+        let hotKeys = FakeHotKeyService()
+        hotKeys.registerError = .alreadyInUse
+        let model = AppModel(store: FakePreferencesStore(outcome: .loaded(preferences)),
+                             hotKeyService: hotKeys)
+
+        model.startQuickAdd {}
+        XCTAssertEqual(model.quickAddRegistrationFailure, .alreadyInUse)
+        XCTAssertFalse(model.isQuickAddRegistered)
+        XCTAssertTrue(model.preferences.quickAddEnabled)
+
+        hotKeys.registerError = .systemError(-1)
+        XCTAssertTrue(model.setQuickAddEnabled(false))
+        XCTAssertNil(model.quickAddRegistrationFailure)
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertEqual(model.quickAddRegistrationFailure, .systemError(-1))
+
+        hotKeys.registerError = nil
+        XCTAssertTrue(model.setQuickAddEnabled(false))
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertNil(model.quickAddRegistrationFailure)
+        XCTAssertTrue(model.isQuickAddRegistered)
+    }
+
+    @MainActor
+    func testStoppingQuickAddUnregistersOnceAndStartIsIgnoredAfterTermination() {
+        var preferences = AppPreferences.defaultValue
+        preferences.quickAddEnabled = true
+        let hotKeys = FakeHotKeyService()
+        let model = AppModel(store: FakePreferencesStore(outcome: .loaded(preferences)),
+                             hotKeyService: hotKeys)
+
+        model.stopQuickAdd()
+        XCTAssertEqual(hotKeys.unregisterCount, 0)
+        model.startQuickAdd {}
+        model.stopQuickAdd()
+        model.stopQuickAdd()
+        XCTAssertEqual(hotKeys.unregisterCount, 1)
+        XCTAssertFalse(model.isQuickAddRegistered)
+
+        model.cancelLoadsForTermination()
+        model.startQuickAdd {}
+        XCTAssertEqual(hotKeys.registerCount, 1)
+    }
+
+    @MainActor
     func testFutureSchemaBlocksChangesAndDoesNotCallSave() {
         let warning = PreferencesWarning.newerSchema(storedVersion: 2, supportedVersion: 1)
         let store = FakePreferencesStore(

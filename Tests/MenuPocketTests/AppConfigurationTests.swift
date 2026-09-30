@@ -558,6 +558,179 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testQuickAddRegistersOnceAtLoginLaunchWithoutPresentingWindows() throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        let keyWindow = NSApplication.shared.keyWindow
+        fixture.launch()
+        fixture.launch()
+        XCTAssertEqual(fixture.hotKeys.registerCount, 1)
+        XCTAssertEqual(fixture.hotKeys.registeredCombination, .quickAdd)
+        XCTAssertTrue(fixture.delegate.model.isQuickAddRegistered)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertNil(fixture.delegate.quickAddPanelController)
+        XCTAssertTrue(NSApplication.shared.keyWindow === keyWindow)
+        XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
+    }
+
+    @MainActor
+    func testQuickAddStaysUnregisteredWhenOffAndFollowsTheSetting() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        XCTAssertEqual(fixture.hotKeys.registerCount, 0)
+        XCTAssertTrue(fixture.delegate.model.setQuickAddEnabled(true))
+        XCTAssertTrue(fixture.hotKeys.isRegistered)
+        XCTAssertTrue(fixture.delegate.model.setQuickAddEnabled(false))
+        XCTAssertFalse(fixture.hotKeys.isRegistered)
+        XCTAssertFalse(fixture.delegate.model.isQuickAddRegistered)
+    }
+
+    @MainActor
+    func testQuickAddPanelSavesTaskWithoutChangingTheWindowsDraftEditOrError() async throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        let note = Note(id: UUID(), text: "Original", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: nil)
+        fixture.repository.saved = [note]
+        fixture.repository.allowAdd = true
+        fixture.launch()
+        await waitForStatusTitle("0/1", fixture: fixture)
+        fixture.state.draft = "Window draft"
+        fixture.state.beginEditing(id: note.id)
+        fixture.state.editDraft = "Unsaved edit"
+
+        fixture.hotKeys.simulatePress()
+        let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
+        XCTAssertTrue(panel.isShown)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        panel.model.text = "  Captured task  "
+        panel.submit()
+
+        XCTAssertFalse(panel.isShown)
+        XCTAssertEqual(fixture.repository.saved.map(\.text), ["Original", "Captured task"])
+        XCTAssertNil(fixture.repository.saved.last?.categoryID)
+        await waitForStatusTitle("0/2", fixture: fixture)
+        XCTAssertEqual(fixture.state.draft, "Window draft")
+        XCTAssertEqual(fixture.state.editingNoteID, note.id)
+        XCTAssertEqual(fixture.state.editDraft, "Unsaved edit")
+        XCTAssertNil(fixture.state.issue)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+
+        // One panel is reused, and a second press closes it and discards its text.
+        fixture.hotKeys.simulatePress()
+        XCTAssertTrue(fixture.delegate.quickAddPanelController === panel)
+        XCTAssertTrue(panel.isShown)
+        XCTAssertEqual(panel.model.text, "")
+        panel.model.text = "Discarded"
+        fixture.hotKeys.simulatePress()
+        XCTAssertFalse(panel.isShown)
+        XCTAssertEqual(panel.model.text, "")
+        XCTAssertEqual(fixture.repository.saved.count, 2)
+    }
+
+    @MainActor
+    func testQuickAddRejectedWriteKeepsTextAndErrorInThePanelOnly() throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        fixture.state.draft = "Window draft"
+        fixture.hotKeys.simulatePress()
+        let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
+        panel.model.text = "Rejected"
+        panel.submit()
+        XCTAssertTrue(panel.isShown)
+        XCTAssertEqual(panel.model.text, "Rejected")
+        XCTAssertEqual(panel.model.errorMessage, QuickAddSubmitResult.writeFailed.message)
+        XCTAssertEqual(fixture.state.draft, "Window draft")
+        XCTAssertNil(fixture.state.issue)
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+    }
+
+    @MainActor
+    func testQuickAddWithUnavailableDataRefreshesOnceThenShowsPanelOrOpensToday() throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        fixture.repository.failRead = true
+        fixture.launch()
+        XCTAssertNil(fixture.state.availableProgress)
+
+        // Still unavailable after one refresh: the Today window offers Retry.
+        fixture.hotKeys.simulatePress()
+        XCTAssertNil(fixture.delegate.quickAddPanelController)
+        XCTAssertTrue(fixture.delegate.taskWindowController?.window?.isVisible == true)
+        fixture.delegate.taskWindowController?.window?.close()
+
+        // A refresh that succeeds shows the panel instead.
+        XCTAssertNil(fixture.state.availableProgress)
+        fixture.repository.failRead = false
+        let reads = fixture.repository.readAttempts
+        fixture.hotKeys.simulatePress()
+        XCTAssertEqual(fixture.repository.readAttempts, reads + 1)
+        XCTAssertTrue(fixture.delegate.quickAddPanelController?.isShown == true)
+        XCTAssertNotNil(fixture.state.availableProgress)
+    }
+
+    @MainActor
+    func testQuickAddShowsPanelWhileTheTodayWindowIsOpen() throws {
+        let fixture = try AppLifecycleFixture(context: .manual, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let window = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        fixture.hotKeys.simulatePress()
+        let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
+        XCTAssertTrue(panel.isShown)
+        XCTAssertTrue(window.isVisible)
+        panel.dismiss()
+        XCTAssertFalse(panel.isShown)
+        XCTAssertTrue(window.isVisible)
+    }
+
+    @MainActor
+    func testRefusedQuickAddRegistrationIsReportedAndRetriedByTogglingOffAndOn() throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        fixture.hotKeys.registerError = .alreadyInUse
+        fixture.launch()
+        let model = fixture.delegate.model
+        XCTAssertEqual(model.quickAddRegistrationFailure, .alreadyInUse)
+        XCTAssertFalse(model.isQuickAddRegistered)
+        XCTAssertTrue(model.preferences.quickAddEnabled)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+
+        fixture.hotKeys.registerError = nil
+        XCTAssertTrue(model.setQuickAddEnabled(false))
+        XCTAssertNil(model.quickAddRegistrationFailure)
+        XCTAssertTrue(model.setQuickAddEnabled(true))
+        XCTAssertTrue(model.isQuickAddRegistered)
+        XCTAssertNil(model.quickAddRegistrationFailure)
+        XCTAssertTrue(fixture.hotKeys.isRegistered)
+    }
+
+    @MainActor
+    func testTerminationUnregistersQuickAddAndClosesThePanel() throws {
+        let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        fixture.hotKeys.simulatePress()
+        let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
+        XCTAssertTrue(panel.isShown)
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        XCTAssertEqual(fixture.hotKeys.unregisterCount, 1)
+        XCTAssertFalse(fixture.hotKeys.isRegistered)
+        XCTAssertFalse(panel.isShown)
+        fixture.delegate.quickAddHotKeyPressed()
+        XCTAssertFalse(panel.isShown)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        // A saved change after termination no longer touches registration.
+        XCTAssertTrue(fixture.delegate.model.setQuickAddEnabled(false))
+        XCTAssertTrue(fixture.delegate.model.setQuickAddEnabled(true))
+        XCTAssertEqual(fixture.hotKeys.registerCount, 1)
+        XCTAssertEqual(fixture.hotKeys.unregisterCount, 1)
+    }
+
+    @MainActor
     private func waitForAppearance(_ name: NSAppearance.Name?) async {
         for _ in 0..<50 {
             if NSApplication.shared.appearance?.name == name { return }
@@ -601,6 +774,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     var deleteAttempts = 0
     var onDelete: (() -> Void)?
     var readAttempts = 0
+    var allowAdd = false
 
     func notes(for dayKey: String) throws -> [Note] {
         readAttempts += 1
@@ -612,7 +786,10 @@ private final class TaskWindowReadFixture: NoteRepository {
         saved.filter { $0.dayKey == dayKey && !$0.isCompleted }.count
     }
 
-    func add(_ note: Note) throws { throw CocoaError(.fileWriteNoPermission) }
+    func add(_ note: Note) throws {
+        guard allowAdd else { throw CocoaError(.fileWriteNoPermission) }
+        saved.append(note)
+    }
     func setCompleted(id: UUID, completedAt: Date?) throws { throw CocoaError(.fileWriteNoPermission) }
     func updateText(id: UUID, text: String) throws { throw CocoaError(.fileWriteNoPermission) }
     func delete(id: UUID) throws {
@@ -634,19 +811,25 @@ private final class AppLifecycleFixture {
     let notifications = NotificationCenter()
     let state: DailyNotesState
     let loginService = LifecycleLoginItemService()
+    let hotKeys = FakeHotKeyService()
     let delegate: AppDelegate
     private let previousMenu = NSApplication.shared.mainMenu
     private let previousWindowsMenu = NSApplication.shared.windowsMenu
     private let previousAppearance = NSApplication.shared.appearance
 
-    init(context: AppLaunchContext) throws {
+    init(context: AppLaunchContext, quickAddEnabled: Bool = false) throws {
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        if quickAddEnabled {
+            var preferences = AppPreferences.defaultValue
+            preferences.quickAddEnabled = true
+            _ = try PreferencesStore(userDefaults: defaults).save(preferences)
+        }
         onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
         let repository = repository
         state = DailyNotesState(repositoryFactory: { repository }, notificationCenter: notifications,
                                 workspaceNotificationCenter: NotificationCenter())
         delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults),
-                                              loginItemService: loginService),
+                                              loginItemService: loginService, hotKeyService: hotKeys),
                                dailyNotesState: state, onboardingStore: onboarding, launchContext: { context })
     }
 
