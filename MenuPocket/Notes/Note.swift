@@ -9,6 +9,18 @@ struct Note: Identifiable, Equatable, Sendable {
     let dayKey: String
     let createdAt: Date
     let completedAt: Date?
+    /// nil means the built-in General group, which has no saved category UUID.
+    let categoryID: UUID?
+
+    init(id: UUID, text: String, dayKey: String, createdAt: Date,
+         completedAt: Date?, categoryID: UUID? = nil) {
+        self.id = id
+        self.text = text
+        self.dayKey = dayKey
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.categoryID = categoryID
+    }
 
     var isCompleted: Bool { completedAt != nil }
 }

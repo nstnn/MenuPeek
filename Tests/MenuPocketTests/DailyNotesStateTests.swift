@@ -7,6 +7,67 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+    func testCategorizedTaskRetainsAssociationAndOrderAcrossCompletionEditingAndRefresh() throws {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let category = try TaskCategory(name: "Work", creationOrder: 7)
+        let original = Note(id: UUID(), text: "Categorized", dayKey: "2026-09-27",
+                            createdAt: current, completedAt: nil, categoryID: category.id)
+        let general = note("General task", day: original.dayKey, createdAt: 1)
+        let store = FakeNoteRepository(notes: [original, general])
+        let state = makeState(store: store, now: { current })
+        state.startup()
+
+        XCTAssertTrue(state.setCompleted(id: original.id, completed: true))
+        let completed = Note(id: original.id, text: original.text, dayKey: original.dayKey,
+                             createdAt: original.createdAt, completedAt: current,
+                             categoryID: category.id)
+        XCTAssertEqual(state.notes, [completed, general])
+        XCTAssertEqual(store.saved, state.notes)
+        XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 2))
+
+        XCTAssertTrue(state.setCompleted(id: original.id, completed: false))
+        XCTAssertEqual(state.notes, [original, general])
+        XCTAssertEqual(store.saved, state.notes)
+        state.beginEditing(id: original.id)
+        state.editDraft = "  Updated text  "
+        XCTAssertTrue(state.saveEdit())
+        let edited = Note(id: original.id, text: "Updated text", dayKey: original.dayKey,
+                          createdAt: original.createdAt, completedAt: nil,
+                          categoryID: category.id)
+        XCTAssertEqual(state.notes, [edited, general])
+        XCTAssertEqual(store.saved, state.notes)
+        XCTAssertEqual(state.progress, NoteProgress(completed: 0, total: 2))
+        state.refresh()
+        XCTAssertEqual(state.notes, [edited, general])
+        let reopened = makeState(store: store, now: { current })
+        reopened.startup()
+        XCTAssertEqual(reopened.notes, [edited, general])
+    }
+
+    func testRejectedCategorizedTaskWritesPreserveAssociationAndEditDraft() {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
+                            createdAt: current, completedAt: nil, categoryID: UUID())
+        let store = FakeNoteRepository(notes: [original])
+        let state = makeState(store: store, now: { current })
+        state.startup()
+
+        store.failWrite = .complete
+        XCTAssertFalse(state.setCompleted(id: original.id, completed: true))
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(store.saved, [original])
+
+        state.beginEditing(id: original.id)
+        state.editDraft = "Unsaved edit"
+        store.failWrite = .edit
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(store.saved, [original])
+        XCTAssertEqual(state.progress, NoteProgress(completed: 0, total: 1))
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editDraft, "Unsaved edit")
+    }
+
     func testStatusItemObservesSuccessiveSavedWritesWithoutAWindow() async throws {
         let store = FakeNoteRepository()
         let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
@@ -581,7 +642,8 @@ private final class FakeNoteRepository: NoteRepository {
         if failWrite == .complete { throw FakeFailure.failed }
         try mutate(id: id) { note in
             Note(id: note.id, text: note.text, dayKey: note.dayKey,
-                 createdAt: note.createdAt, completedAt: completedAt)
+                 createdAt: note.createdAt, completedAt: completedAt,
+                 categoryID: note.categoryID)
         }
     }
 
@@ -589,7 +651,8 @@ private final class FakeNoteRepository: NoteRepository {
         if failWrite == .edit { throw FakeFailure.failed }
         try mutate(id: id) { note in
             Note(id: note.id, text: text, dayKey: note.dayKey,
-                 createdAt: note.createdAt, completedAt: note.completedAt)
+                 createdAt: note.createdAt, completedAt: note.completedAt,
+                 categoryID: note.categoryID)
         }
     }
 

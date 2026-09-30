@@ -389,7 +389,8 @@ private struct DailyNotesPreview: View {
                 guard !text.isEmpty else { return false }
                 let note = notes[index]
                 notes[index] = Note(id: note.id, text: text, dayKey: note.dayKey,
-                                    createdAt: note.createdAt, completedAt: note.completedAt)
+                                    createdAt: note.createdAt, completedAt: note.completedAt,
+                                    categoryID: note.categoryID)
                 editingNoteID = nil
                 editDraft = ""
                 return true
@@ -404,7 +405,8 @@ private struct DailyNotesPreview: View {
                 let note = notes[index]
                 notes[index] = Note(id: note.id, text: note.text, dayKey: note.dayKey,
                                     createdAt: note.createdAt,
-                                    completedAt: isCompleted ? Date() : nil)
+                                    completedAt: isCompleted ? Date() : nil,
+                                    categoryID: note.categoryID)
             }
         )
     }

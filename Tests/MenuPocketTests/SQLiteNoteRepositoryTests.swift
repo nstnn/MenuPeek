@@ -155,7 +155,8 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
     func testDuplicateIDThrowsWithoutReplacingSavedNote() throws {
         let original = note("Original", day: "2026-09-27", createdAt: 10)
         let replacement = Note(id: original.id, text: "Replacement", dayKey: original.dayKey,
-                               createdAt: original.createdAt, completedAt: nil)
+                               createdAt: original.createdAt, completedAt: nil,
+                               categoryID: original.categoryID)
         let store = try SQLiteNoteRepository(databaseURL: databaseURL)
         try store.add(original)
 
@@ -192,7 +193,8 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
         XCTAssertEqual(try reopened.notes(for: first.dayKey), [
             Note(id: first.id, text: "Edited ' note 📝", dayKey: first.dayKey,
-                 createdAt: first.createdAt, completedAt: nil)
+                 createdAt: first.createdAt, completedAt: nil,
+                 categoryID: first.categoryID)
         ])
         XCTAssertEqual(try reopened.incompleteCount(for: first.dayKey), 1)
     }
