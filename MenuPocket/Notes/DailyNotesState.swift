@@ -163,7 +163,8 @@ final class DailyNotesState {
         do {
             try repository.setCompleted(id: id, completedAt: completedAt)
             notes[index] = Note(id: saved.id, text: saved.text, dayKey: saved.dayKey,
-                                createdAt: saved.createdAt, completedAt: completedAt)
+                                createdAt: saved.createdAt, completedAt: completedAt,
+                                categoryID: saved.categoryID)
             issue = nil
             return true
         } catch {
@@ -195,7 +196,8 @@ final class DailyNotesState {
         do {
             try repository.updateText(id: id, text: text)
             notes[index] = Note(id: saved.id, text: text, dayKey: saved.dayKey,
-                                createdAt: saved.createdAt, completedAt: saved.completedAt)
+                                createdAt: saved.createdAt, completedAt: saved.completedAt,
+                                categoryID: saved.categoryID)
             cancelEditing()
             issue = nil
             return true

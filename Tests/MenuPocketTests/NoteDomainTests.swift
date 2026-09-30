@@ -55,7 +55,8 @@ final class NoteDomainTests: XCTestCase {
     func testCompletionKeepsAssignedDayAndProgressCountsTodayOnly() {
         let today = note("Today", dayKey: "2026-09-27", createdAt: 2)
         let finished = Note(id: today.id, text: today.text, dayKey: today.dayKey,
-                            createdAt: today.createdAt, completedAt: Date(timeIntervalSince1970: 100))
+                            createdAt: today.createdAt, completedAt: Date(timeIntervalSince1970: 100),
+                            categoryID: today.categoryID)
         let yesterday = note("Yesterday", dayKey: "2026-09-26", createdAt: 1)
 
         XCTAssertEqual(finished.dayKey, today.dayKey)
@@ -65,6 +66,62 @@ final class NoteDomainTests: XCTestCase {
         XCTAssertEqual(NoteProgress(notes: [today, yesterday], for: "2026-09-27"),
                        NoteProgress(completed: 0, total: 1))
         XCTAssertEqual(yesterday.dayKey, "2026-09-26")
+    }
+
+    func testExistingTaskConstructionDefaultsToGeneralWithoutACategoryID() {
+        let task = note("Existing task", dayKey: "2026-09-27", createdAt: 1)
+        XCTAssertNil(task.categoryID)
+        XCTAssertEqual(TaskCategoryName.general, "General")
+        XCTAssertThrowsError(try TaskCategory(name: TaskCategoryName.general, creationOrder: 0)) {
+            XCTAssertEqual($0 as? TaskCategoryNameError, .reserved)
+        }
+    }
+
+    func testCategoryNameRulesTrimDisplaySpellingAndCompareCanonicalCaseFoldedKeys() throws {
+        let work = try TaskCategory(name: "  Work\t", creationOrder: 0)
+        let lower = try TaskCategory(name: "work", creationOrder: 1)
+        XCTAssertEqual(work.name, "Work")
+        XCTAssertEqual(work.nameKey, lower.nameKey)
+
+        let composed = try TaskCategory(name: "CAFÉ", creationOrder: 2)
+        let decomposed = try TaskCategory(name: "Cafe\u{301}", creationOrder: 3)
+        let unaccented = try TaskCategory(name: "Cafe", creationOrder: 4)
+        XCTAssertEqual(composed.nameKey, decomposed.nameKey)
+        XCTAssertNotEqual(composed.nameKey, unaccented.nameKey)
+        XCTAssertEqual(Array(decomposed.name.unicodeScalars), Array("Cafe\u{301}".unicodeScalars))
+        XCTAssertEqual(TaskCategoryName.key(for: "Straße"), TaskCategoryName.key(for: "STRASSE"))
+        XCTAssertEqual(TaskCategoryName.key(for: "I"), TaskCategoryName.key(for: "i"))
+    }
+
+    func testCategoryNamesRejectBlankMultilineAndReservedNames() {
+        for input in ["", " \t ", "\n\r"] {
+            XCTAssertThrowsError(try TaskCategory(name: input, creationOrder: 0)) {
+                XCTAssertEqual($0 as? TaskCategoryNameError, .blank)
+            }
+        }
+        for separator in ["\n", "\r", "\r\n", "\u{85}", "\u{2028}", "\u{2029}"] {
+            for input in ["Work\(separator)Home", "\(separator)Work", "Work\(separator)"] {
+                XCTAssertThrowsError(try TaskCategory(name: input, creationOrder: 0)) {
+                    XCTAssertEqual($0 as? TaskCategoryNameError, .multiline)
+                }
+            }
+        }
+        for input in ["General", "general", " GENERAL ", "gEnErAl"] {
+            XCTAssertThrowsError(try TaskCategory(name: input, creationOrder: 0)) {
+                XCTAssertEqual($0 as? TaskCategoryNameError, .reserved)
+            }
+        }
+    }
+
+    func testCategoryRenameRetainsIdentityAndSavedOrderWithoutANameLengthLimit() throws {
+        let original = try TaskCategory(name: "Work", creationOrder: 42)
+        let longName = String(repeating: "Exercise ", count: 100).trimmingCharacters(in: .whitespaces)
+        let renamed = try TaskCategory(id: original.id, name: longName,
+                                       creationOrder: original.creationOrder)
+        XCTAssertEqual(renamed.id, original.id)
+        XCTAssertEqual(renamed.creationOrder, original.creationOrder)
+        XCTAssertEqual(renamed.name, longName)
+        XCTAssertNotEqual(renamed.nameKey, original.nameKey)
     }
 
     private func calendar(in zone: TimeZone) -> Calendar {
