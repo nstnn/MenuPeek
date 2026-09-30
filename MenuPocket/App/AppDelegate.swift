@@ -1,5 +1,6 @@
 import AppKit
 import CoreServices
+import Observation
 
 enum AppLaunchContext: Equatable {
     case manual, login
@@ -52,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !hasFinishedLaunching, !isTerminating else { return }
         let context = launchContext()
         hasFinishedLaunching = true
+        // Apply the saved theme before the status item or any window exists.
+        applyThemeAndObserve()
         NSApplication.shared.setActivationPolicy(.regular)
         installApplicationMenu()
         dailyNotesState.startup()
@@ -120,6 +123,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 taskWindowController?.presentation.deletionTarget == nil
         }
         return true
+    }
+
+    static func appearance(for theme: AppTheme) -> NSAppearance? {
+        switch theme {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+
+    private func applyThemeAndObserve() {
+        guard !isTerminating else { return }
+        let theme = withObservationTracking {
+            model.preferences.theme
+        } onChange: { [weak self] in
+            // Observation fires before mutation. Apply the settled value and
+            // renew tracking on the main actor.
+            Task { @MainActor [weak self] in self?.applyThemeAndObserve() }
+        }
+        // App-wide, so every window and menu follows it; nil follows macOS.
+        NSApplication.shared.appearance = Self.appearance(for: theme)
     }
 
     private func completeOnboardingAfterPresentation() {
