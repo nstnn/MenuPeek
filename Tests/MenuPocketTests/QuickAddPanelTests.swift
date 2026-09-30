@@ -4,24 +4,16 @@ import XCTest
 
 @MainActor
 final class QuickAddPanelTests: XCTestCase {
-    private var controllers: [QuickAddPanelController] = []
-
-    override func tearDown() async throws {
-        await MainActor.run {
-            for controller in controllers {
-                controller.dismiss()
-                controller.panel.close()
-            }
-            controllers = []
-        }
-        try await super.tearDown()
-    }
-
     private func makeController(
         submit: @escaping (String) -> QuickAddSubmitResult = { _ in .added }
     ) -> QuickAddPanelController {
         let controller = QuickAddPanelController(submit: submit)
-        controllers.append(controller)
+        // Capture only the main-actor controller, never the test case: Swift 6.0
+        // (CI's Xcode 16.4) rejects sending a non-Sendable XCTestCase to the main actor.
+        addTeardownBlock { @MainActor in
+            controller.dismiss()
+            controller.panel.close()
+        }
         return controller
     }
 
