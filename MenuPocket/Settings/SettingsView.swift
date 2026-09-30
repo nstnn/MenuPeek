@@ -63,6 +63,30 @@ struct SettingsView: View {
                 .accessibilityIdentifier("themePicker")
             }
 
+            Section("Quick Add") {
+                // A label wider than "Open at Login" widens the label column and
+                // clips the other sections at the 500 × 380 pt minimum.
+                Toggle("Shortcut", isOn: Binding(
+                    get: { model.preferences.quickAddEnabled },
+                    set: { model.setQuickAddEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+                .disabled(!model.isPreferenceEditingAllowed)
+                .accessibilityLabel("Quick Add shortcut")
+                .accessibilityIdentifier("quickAddToggle")
+
+                // The shortcut is fixed; the text never claims it is free of conflicts.
+                Text("Press ⌃⌥N in any app to add a task for today.")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Press Control-Option-N in any app to add a task for today.")
+                    .accessibilityIdentifier("quickAddShortcut")
+
+                if let failure = model.quickAddRegistrationFailure {
+                    Label("\(failure.message) \(failure.retryGuidance)", systemImage: "exclamationmark.triangle")
+                        .accessibilityIdentifier("quickAddError")
+                }
+            }
+
             Section("App") {
                 LabeledContent("Name", value: "MenuPocket")
                     .accessibilityRepresentation {
@@ -88,6 +112,18 @@ private extension AppTheme {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
+        }
+    }
+}
+
+private extension HotKeyRegistrationError {
+    /// Registration is retried only at launch or when the setting is turned off and on.
+    var retryGuidance: String {
+        switch self {
+        case .alreadyInUse:
+            "Quit the app using it, then turn this off and on to try again."
+        case .systemError:
+            "Turn this off and on to try again."
         }
     }
 }
@@ -131,6 +167,45 @@ private func makeLoginItemPreview(
         status: .disabled,
         operationResult: .init(status: .disabled, failure: .registrationFailed)
     )
+}
+
+@MainActor
+private func makeQuickAddPreview(registrationError: HotKeyRegistrationError? = nil) -> SettingsView {
+    let model = AppModel(
+        store: PreviewPreferencesStore(),
+        providers: [],
+        loginItemService: PreviewLoginItemService(status: .disabled, operationResult: nil),
+        hotKeyService: PreviewHotKeyService(registrationError: registrationError)
+    )
+    model.startQuickAdd {}
+    model.setQuickAddEnabled(true)
+    return SettingsView(model: model, onQuit: {})
+}
+
+#Preview("Quick Add — On") {
+    makeQuickAddPreview()
+}
+
+#Preview("Quick Add — Shortcut in Use") {
+    makeQuickAddPreview(registrationError: .alreadyInUse)
+}
+
+// Never touches Carbon, so previews cannot claim a real global hotkey.
+private final class PreviewHotKeyService: HotKeyService {
+    private let registrationError: HotKeyRegistrationError?
+
+    init(registrationError: HotKeyRegistrationError?) {
+        self.registrationError = registrationError
+    }
+
+    func register(
+        _ combination: HotKeyCombination,
+        onPress: @escaping @MainActor () -> Void
+    ) throws(HotKeyRegistrationError) {
+        if let registrationError { throw registrationError }
+    }
+
+    func unregister() {}
 }
 
 private final class PreviewLoginItemService: LoginItemService {
