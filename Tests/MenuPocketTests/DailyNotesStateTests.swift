@@ -320,6 +320,112 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
     }
 
+    func testIndependentAddReportsOutcomesWithoutChangingWindowDraftOrIssue() {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Half-typed window task"
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.issue, .add)
+
+        XCTAssertEqual(state.add(text: "Rejected panel task"), .writeFailed)
+        XCTAssertTrue(state.notes.isEmpty)
+        XCTAssertTrue(store.saved.isEmpty)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 0))
+
+        store.failWrite = nil
+        XCTAssertEqual(state.add(text: "  \n "), .empty)
+        XCTAssertTrue(store.saved.isEmpty)
+        XCTAssertEqual(state.add(text: "  Panel task  "), .added)
+        XCTAssertEqual(state.notes.map(\.text), ["Panel task"])
+        XCTAssertEqual(state.notes.first?.dayKey, "2026-09-27")
+        XCTAssertNil(state.notes.first?.categoryID)
+        XCTAssertEqual(store.saved, state.notes)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+        XCTAssertEqual(state.draft, "Half-typed window task")
+        XCTAssertEqual(state.issue, .add)
+    }
+
+    func testIndependentAddIsUnavailableWhenSavedDataCannotBeRead() {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        store.failCount = true
+        state.refresh()
+        XCTAssertEqual(state.add(text: "Unavailable"), .unavailable)
+        XCTAssertTrue(store.saved.isEmpty)
+
+        let unopened = DailyNotesState(repositoryFactory: { throw FakeFailure.failed },
+                                       day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                                       notificationCenter: NotificationCenter(),
+                                       workspaceNotificationCenter: NotificationCenter())
+        XCTAssertEqual(unopened.add(text: "Never loaded"), .unavailable)
+        XCTAssertTrue(unopened.notes.isEmpty)
+
+        // An unloaded state becomes ready through the same one refresh as Add task.
+        store.failCount = false
+        let unloaded = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        XCTAssertEqual(unloaded.add(text: "Loads first"), .added)
+        XCTAssertEqual(store.saved.map(\.text), ["Loads first"])
+    }
+
+    func testIndependentAddKeepsEditTargetAndDeletionConfirmation() {
+        let edited = note("Being edited", day: "2026-09-27", createdAt: 1)
+        let target = note("Delete me", day: "2026-09-27", createdAt: 2)
+        let store = FakeNoteRepository(notes: [edited, target])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        let presentation = TaskWindowPresentation()
+        state.startup()
+        state.draft = "Window draft"
+        state.beginEditing(id: edited.id)
+        state.editDraft = "Unsaved edit"
+        presentation.requestDeletion(id: target.id, state: state)
+
+        XCTAssertEqual(state.add(text: "Captured"), .added)
+        XCTAssertEqual(state.editingNoteID, edited.id)
+        XCTAssertEqual(state.editDraft, "Unsaved edit")
+        XCTAssertEqual(state.draft, "Window draft")
+        XCTAssertNil(state.issue)
+        XCTAssertNil(state.refreshNotice)
+        presentation.validateDeletion(state: state)
+        XCTAssertEqual(presentation.deletionTarget?.id, target.id)
+
+        XCTAssertTrue(presentation.confirmDeletion(state: state))
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertEqual(state.notes.map(\.text), ["Unsaved edit", "Captured"])
+        XCTAssertEqual(store.saved, state.notes)
+    }
+
+    func testAddDraftAndIndependentAddSaveIdenticalNotes() {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.draft = "  Same task  "
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(state.add(text: "  Same task  "), .added)
+
+        XCTAssertEqual(store.saved.count, 2)
+        for saved in store.saved {
+            XCTAssertEqual(saved.text, "Same task")
+            XCTAssertEqual(saved.dayKey, "2026-09-27")
+            XCTAssertEqual(saved.createdAt, current)
+            XCTAssertNil(saved.completedAt)
+            XCTAssertNil(saved.categoryID)
+        }
+        XCTAssertNotEqual(store.saved[0].id, store.saved[1].id)
+
+        // Empty input keeps the window's earlier write error, as before.
+        store.failWrite = .add
+        state.draft = "Rejected"
+        XCTAssertFalse(state.addDraft())
+        state.draft = "   "
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.issue, .add)
+        XCTAssertEqual(state.draft, "   ")
+    }
+
     func testBlankEditAndCancellationKeepSavedTaskAndSeparateNewDraft() {
         let original = note("Original", day: "2026-09-27", createdAt: 1,
                             completedAt: Date(timeIntervalSince1970: 2))
