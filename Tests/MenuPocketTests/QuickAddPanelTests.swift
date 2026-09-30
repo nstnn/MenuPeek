@@ -124,7 +124,9 @@ final class QuickAddPanelTests: XCTestCase {
             controller.model.text = "Unsent"
             controller.submit()
             let undoManager = try XCTUnwrap(panel.undoManager)
-            undoManager.registerUndo(withTarget: controller.model) { $0.text = "Restored" }
+            // Any registered action proves history exists. The handler is @Sendable in the
+            // macOS 15 SDK (CI's Xcode 16.4), so it must not touch the main-actor model.
+            undoManager.registerUndo(withTarget: controller.model) { _ in }
             XCTAssertTrue(undoManager.canUndo)
             dismiss()
             XCTAssertFalse(panel.isVisible)
