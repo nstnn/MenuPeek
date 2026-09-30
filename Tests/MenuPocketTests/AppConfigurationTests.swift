@@ -500,6 +500,73 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLaunchAppliesSavedThemeToTheAppAndItsFirstWindow() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        XCTAssertTrue(fixture.delegate.model.setTheme(.dark))
+
+        fixture.launch()
+
+        XCTAssertEqual(NSApplication.shared.appearance?.name, .darkAqua)
+        let window = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+    }
+
+    @MainActor
+    func testLoginLaunchAppliesSavedThemeWithoutPresentingWindows() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        XCTAssertTrue(fixture.delegate.model.setTheme(.light))
+
+        fixture.launch()
+
+        XCTAssertEqual(NSApplication.shared.appearance?.name, .aqua)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+    }
+
+    @MainActor
+    func testThemeChangesApplyToOpenWindowsUntilTermination() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        fixture.delegate.showSettings()
+        let model = fixture.delegate.model
+        let windows = [
+            try XCTUnwrap(fixture.delegate.taskWindowController?.window),
+            try XCTUnwrap(fixture.delegate.settingsWindowController?.window),
+        ]
+        XCTAssertNil(NSApplication.shared.appearance)
+
+        XCTAssertTrue(model.setTheme(.dark))
+        await waitForAppearance(.darkAqua)
+        for window in windows {
+            XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+        }
+        XCTAssertTrue(model.setTheme(.light))
+        await waitForAppearance(.aqua)
+        for window in windows {
+            XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+        }
+        XCTAssertTrue(model.setTheme(.system))
+        await waitForAppearance(nil)
+
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        XCTAssertTrue(model.setTheme(.dark))
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertNil(NSApplication.shared.appearance)
+    }
+
+    @MainActor
+    private func waitForAppearance(_ name: NSAppearance.Name?) async {
+        for _ in 0..<50 {
+            if NSApplication.shared.appearance?.name == name { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(NSApplication.shared.appearance?.name, name)
+    }
+
+    @MainActor
     private func commandEvent(_ key: String, keyCode: UInt16) -> NSEvent {
         NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: NSApplication.shared.keyWindow?.windowNumber ?? 0,
@@ -570,6 +637,7 @@ private final class AppLifecycleFixture {
     let delegate: AppDelegate
     private let previousMenu = NSApplication.shared.mainMenu
     private let previousWindowsMenu = NSApplication.shared.windowsMenu
+    private let previousAppearance = NSApplication.shared.appearance
 
     init(context: AppLaunchContext) throws {
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -590,6 +658,7 @@ private final class AppLifecycleFixture {
         delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
         NSApplication.shared.mainMenu = previousMenu
         NSApplication.shared.windowsMenu = previousWindowsMenu
+        NSApplication.shared.appearance = previousAppearance
         defaults.removePersistentDomain(forName: suite)
     }
 }

@@ -85,3 +85,27 @@ Pass for the focused task-order interaction check. Computer Use exercised the un
 The actual Debug app was then quit, confirmed absent from the running-app inventory, and relaunched from `build/DerivedData/Build/Products/Debug/MenuPocket.app`. Its existing A, B, and C tasks changed from the former C/B/A display to A/B/C, retaining all three UUIDs, unchecked values, `0/3`, and the yesterday count of 2. The window was visually inspected; no production task was added, completed, edited, or deleted. The rebuilt app was left running.
 
 Source/artifact identity matches the [fixed-position regression record](DESKTOP_TASK_REGRESSION.md): `main` at `0c2833ec3d08426bfbc3b1dffb1cd41155c973eb` with the uncommitted ordering changes, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`, executable SHA-256 `d74b27d5d6d5d8197eb61b346be8b71798bb1cb5925ac071b86fe653e5164b63`. The running path/PID was confirmed at 17:02 EDT as PID `60085`. This Debug check does not establish Release, genuine login/day transitions, or the other earlier system acceptance gaps.
+
+## Settings theme — 2026-09-30
+
+This records the REQ-012 Theme choice. Source was `feat/settings-theme` at `29e13bde741d5283dbc06727de36ba30ef95cad2` (three commits on `main` `6d2f2bf`) plus these documentation updates. Xcode 27.0 (`27A266a`) built the shared `MenuPocket` Debug scheme.
+
+Automated: the hosted suite passed 119 tests with 0 failures on that source, up from 113. New checks cover schema-1 preferences without a theme loading with every saved field and System, an unrecognized theme reading as System, a theme round trip through a fresh store and the reconciler, write protection blocking a theme change, the saved theme applied on manual and login launch, and live changes reaching both open windows until termination. `git diff --check` passed.
+
+Rendered fixture: a temporary hosted test, not committed, opened the real Today and Settings windows with isolated defaults, three sample tasks in a fake repository, and a fake login service reporting enabled. The windows drew themselves to PNG for Dark, Light, and System; this Mac was in Dark. Both windows were legible in each theme, including the red yesterday reminder and focus outline. Settings showed Startup, then Appearance › Theme (System, Light, Dark), then App, with the existing rows unchanged. At the 500 × 380 pt minimum nothing was clipped. Screen Recording was not used, so these images show the app's own drawing rather than the screen, and the menu bar was not captured.
+
+Saved preferences: before the first launch, the user's value was schema 1 without a theme key; it was backed up outside the repository. The new Debug build loaded it without rewriting it. The previously running Release copy was quit for this check with the user's approval.
+
+Running app: `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`, launched by `run.sh` from that source as PID `14192` at 12:36:04 EDT. Its code, `MenuPocket.debug.dylib`, has SHA-256 `49b10f3bd1c257a53c64e23d07bfbb941e6d037d0f013418655d6ce601c48e5d`. The later test action re-signed only the stub executable, now `9ceaae603d6902e7da6f0968d41b3a8bd9d2877ee7f2af87053a007e4c36877e`.
+
+The user performed the hands-on checks below on PID `14192` and reported every one as passing. These are the user's observations; Claude did not see the screen.
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Existing preferences show Theme set to System | Pass (user-reported) | |
+| Light and Dark switch the Today and Settings windows immediately | Pass (user-reported) | |
+| Menu bar count readable in each theme | Pass (user-reported) | |
+| Theme kept after Quit and relaunch, without a flash | Pass reported; relaunch not corroborated | At 12:46 EDT PID `14192` was still the process launched at 12:36:04, so no relaunch appears in the process record. Persistence is covered by hosted tests and by the saved value below; the no-flash launch remains unobserved. |
+| System follows a macOS appearance change | Pass (user-reported) | |
+
+After the check, the saved value was `{"enabledModuleIDs":["demo.tasks","demo.status"],"menuBarDisplayMode":"iconAndInformation","moduleOrder":["demo.tasks","demo.status"],"schemaVersion":1,"theme":"system"}`: the first real save kept every earlier field and added only the theme. No task was added, completed, edited, or deleted. The Debug app was left running.

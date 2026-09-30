@@ -19,6 +19,7 @@ The behavior below is implemented in source. Dated verification results belong i
 | REQ-009 — Preservation | Keep existing SQLite tasks, preferences, onboarding state, app identity, and sandbox storage. This increment introduces no data migration. Reject unsupported newer schemas without overwriting their data. |
 | REQ-010 — Acceptance | Record automated build/test results separately from actual running-app menu bar, Dock, window, Settings, and system observations. Identify the final source and artifact. Record unavailable checks accurately. |
 | REQ-011 — Handoff | Current product/developer docs agree about behavior, scope, implementation, and verification status. Tracked evidence remains understandable without local ignored plans or build artifacts. |
+| REQ-012 — Theme | Settings offers System, Light, and Dark in an Appearance section between Startup and App. System is the default and follows the macOS appearance, so an existing install looks unchanged until a choice is made. A choice applies to every app window immediately, is saved with the other preferences, and is applied at launch before any window appears, including quiet login startup. Preferences saved before the theme existed keep every saved value and read as System. The menu bar count stays readable in every combination of app theme and macOS appearance. |
 
 ## Interaction and recovery rules
 
@@ -30,7 +31,7 @@ Deletion uses inline confirmation with Cancel initially focused. Cancel/Escape, 
 
 A day change cancels stale edit/deletion targets with an explanation and preserves unsaved edit text for recovery. Recovery text is selectable and never saved automatically to another task or day. A new task receives its day assignment when explicitly saved. Retry rereads through the shared daily state.
 
-All app-owned visible and accessibility copy is English, including dates independently of the Mac's language. User-entered text is preserved as entered. Settings provides Open at Login, app information, and Quit. First explicit presentation completes unfinished onboarding; quiet login startup does not. Existing onboarding completion is preserved.
+All app-owned visible and accessibility copy is English, including dates independently of the Mac's language. User-entered text is preserved as entered. Settings provides Open at Login, a Theme choice, app information, and Quit. First explicit presentation completes unfinished onboarding; quiet login startup does not. Existing onboarding completion is preserved.
 
 ## Storage and platform constraints
 
@@ -51,6 +52,8 @@ Renaming stored `Note` types/tables, unrelated legacy-demo cleanup, saved-task u
 The task window, CRUD/recovery rules, shared progress, closed-window refresh, native commands, manual/login launch classification, and preservation boundaries are implemented. Task 8's 2026-09-29 regression and local artifact results are retained in the [tracked regression record](DESKTOP_TASK_REGRESSION.md).
 
 Task 9's actual Release report records partial acceptance: window/text/cancellation/Settings/Quit and observed-row relaunch checks passed, while menu bar/Dock and safe-fixture access were blocked and several layout/system checks were not tested. [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) retains those scoped results and the exact remaining gate. Full feature acceptance remains open until the material observations pass against the final artifact.
+
+The Settings theme choice (REQ-012) is implemented with hosted tests for saving, legacy preferences, launch, and live changes. Its running-app results are recorded separately in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md).
 
 ## Historical Notes MVP
 

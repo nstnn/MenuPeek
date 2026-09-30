@@ -7,7 +7,7 @@ MenuPocket is a Swift 6 macOS application using SwiftUI for hosted views, AppKit
 | Owner | Responsibility |
 | --- | --- |
 | [MenuPocketApp](../MenuPocket/App/MenuPocketApp.swift) | Run `NSApplication` with one retained delegate. No SwiftUI scene independently creates or restores windows. |
-| [AppDelegate](../MenuPocket/App/AppDelegate.swift) | Own one daily state, the retained demo/preferences model, lazy task-window controller, retained status controller, and reusable Settings controller. Route startup, explicit presentation, Dock reopen, commands, activation, and termination. |
+| [AppDelegate](../MenuPocket/App/AppDelegate.swift) | Own one daily state, the retained demo/preferences model, lazy task-window controller, retained status controller, and reusable Settings controller. Route startup, explicit presentation, Dock reopen, commands, activation, and termination. Apply the saved theme app-wide. |
 | [TaskWindowController](../MenuPocket/Notes/TaskWindowController.swift) | Retain one AppKit window hosting `TaskWindowView`; refresh, restore minimization, activate, and bring it forward through `showTasks()`. Own transient `TaskWindowPresentation`. |
 | [TaskWindowView](../MenuPocket/Notes/TaskWindowView.swift) | Render Today and saved rows; bind drafts and actions to daily state. Own composer visibility/focus, not saved data. |
 | [TaskStatusItemController](../MenuPocket/MenuBar/TaskStatusItemController.swift) | Render the count without an icon, plus tooltip and accessibility label, from that same state. Primary click calls `showTasks()`. Create no repository or saved snapshot. |
@@ -70,6 +70,10 @@ The status controller uses re-armed Observation tracking of `availableProgress`.
 Manual launch shows tasks even after onboarding is complete. Login launch creates no task/Settings window and requests no activation; the regular Dock icon remains. Explicit task or Settings presentation completes unfinished onboarding only after an owned window is visible.
 
 [LoginItemService](../MenuPocket/Services/LoginItemService.swift) wraps `SMAppService.mainApp`. Settings rereads status and handles disabled, enabled, approval-required, and unavailable states. Startup classification itself does not register or unregister login items. Fake services isolate automated checks; real registration and a stable installed copy are needed for an intended genuine-login observation.
+
+The Settings Theme choice is the `theme` field of the schema-1 `AppPreferences` value in `UserDefaults`. `AppModel.setTheme` saves through the same commit path as other preferences, so write protection and save errors behave identically, and the reconciler carries the field through every load and save. Decoding treats a missing or unrecognized theme as System, so preferences saved by earlier builds keep every other field; earlier builds ignore the extra key. No schema version change or migration is involved.
+
+`AppDelegate` sets `NSApplication.appearance` from the saved theme at the start of launch, before the status item or any window exists, on both manual and login launch. It follows later changes through re-armed Observation tracking until termination. System clears the override so the app follows macOS. Views use semantic system colors and need no theme-specific code. Hosted lifecycle tests restore the process-wide appearance during cleanup.
 
 ## Retained legacy code and verification
 
