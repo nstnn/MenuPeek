@@ -232,6 +232,28 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testThemeChangeIsSavedWithOtherPreferencesAndRestored() throws {
+        let suiteName = "local.menupocket.tests.AppModelTheme.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertEqual(model.preferences.theme, .system)
+        XCTAssertTrue(model.setMenuBarDisplayMode(.iconOnly))
+        XCTAssertTrue(model.setTheme(.dark))
+        XCTAssertFalse(model.setTheme(.dark))
+
+        let restored = AppModel(store: PreferencesStore(userDefaults: defaults))
+        XCTAssertEqual(restored.preferences, model.preferences)
+        XCTAssertEqual(restored.preferences.theme, .dark)
+        XCTAssertEqual(restored.preferences.menuBarDisplayMode, .iconOnly)
+        XCTAssertNil(restored.preferenceWarning)
+
+        XCTAssertTrue(restored.setTheme(.system))
+        XCTAssertEqual(AppModel(store: PreferencesStore(userDefaults: defaults)).preferences.theme, .system)
+    }
+
+    @MainActor
     func testFutureSchemaBlocksChangesAndDoesNotCallSave() {
         let warning = PreferencesWarning.newerSchema(storedVersion: 2, supportedVersion: 1)
         let store = FakePreferencesStore(
@@ -243,6 +265,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.preferenceWarning, warning)
         XCTAssertFalse(model.setModuleEnabled(ModuleCatalog.tasksID, enabled: false))
         XCTAssertFalse(model.setMenuBarDisplayMode(.iconOnly))
+        XCTAssertFalse(model.setTheme(.dark))
         XCTAssertEqual(model.preferences, .defaultValue)
         XCTAssertTrue(store.savedPreferences.isEmpty)
     }

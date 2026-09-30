@@ -45,7 +45,8 @@ final class PreferencesStoreTests: XCTestCase {
             moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
             enabledModuleIDs: [ModuleCatalog.statusID],
             pinnedModuleID: ModuleCatalog.statusID,
-            menuBarDisplayMode: .iconOnly
+            menuBarDisplayMode: .iconOnly,
+            theme: .dark
         )
         let store = PreferencesStore(userDefaults: userDefaults)
 
@@ -63,7 +64,8 @@ final class PreferencesStoreTests: XCTestCase {
             moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
             enabledModuleIDs: [ModuleCatalog.statusID],
             pinnedModuleID: ModuleCatalog.statusID,
-            menuBarDisplayMode: .iconOnly
+            menuBarDisplayMode: .iconOnly,
+            theme: .light
         )
         let store = PreferencesStore(userDefaults: userDefaults)
 
@@ -83,7 +85,64 @@ final class PreferencesStoreTests: XCTestCase {
                 "enabledModuleIDs",
                 "pinnedModuleID",
                 "menuBarDisplayMode",
+                "theme",
             ]
+        )
+    }
+
+    func testSchemaOnePreferencesSavedBeforeThemeLoadWithAllFieldsAndSystemTheme() throws {
+        // The exact shape earlier builds wrote: schema 1 with no theme key.
+        let earlierBuildData = Data(
+            """
+            {"enabledModuleIDs":["demo.status"],"menuBarDisplayMode":"iconOnly",\
+            "moduleOrder":["demo.status","demo.tasks"],"pinnedModuleID":"demo.status","schemaVersion":1}
+            """.utf8
+        )
+        userDefaults.set(earlierBuildData, forKey: PreferencesStore.storageKey)
+
+        let outcome = try PreferencesStore(userDefaults: userDefaults).load()
+
+        XCTAssertEqual(
+            outcome,
+            .loaded(
+                AppPreferences(
+                    schemaVersion: 1,
+                    moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
+                    enabledModuleIDs: [ModuleCatalog.statusID],
+                    pinnedModuleID: ModuleCatalog.statusID,
+                    menuBarDisplayMode: .iconOnly,
+                    theme: .system
+                )
+            )
+        )
+        XCTAssertNil(outcome.warning)
+        XCTAssertEqual(userDefaults.data(forKey: PreferencesStore.storageKey), earlierBuildData)
+    }
+
+    func testUnrecognizedThemeUsesSystemWithoutDiscardingOtherFields() throws {
+        let data = Data(
+            """
+            {"enabledModuleIDs":["demo.tasks"],"menuBarDisplayMode":"iconOnly",\
+            "moduleOrder":["demo.status","demo.tasks"],"pinnedModuleID":null,\
+            "schemaVersion":1,"theme":"sepia"}
+            """.utf8
+        )
+        userDefaults.set(data, forKey: PreferencesStore.storageKey)
+
+        let outcome = try PreferencesStore(userDefaults: userDefaults).load()
+
+        XCTAssertEqual(
+            outcome,
+            .loaded(
+                AppPreferences(
+                    schemaVersion: 1,
+                    moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
+                    enabledModuleIDs: [ModuleCatalog.tasksID],
+                    pinnedModuleID: nil,
+                    menuBarDisplayMode: .iconOnly,
+                    theme: .system
+                )
+            )
         )
     }
 
@@ -102,7 +161,8 @@ final class PreferencesStoreTests: XCTestCase {
             moduleOrder: ["demo.removed", ModuleCatalog.statusID, ModuleCatalog.statusID],
             enabledModuleIDs: ["demo.removed", ModuleCatalog.statusID, "demo.new"],
             pinnedModuleID: "demo.removed",
-            menuBarDisplayMode: .iconOnly
+            menuBarDisplayMode: .iconOnly,
+            theme: .dark
         )
 
         XCTAssertEqual(
@@ -112,7 +172,8 @@ final class PreferencesStoreTests: XCTestCase {
                 moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID, "demo.new"],
                 enabledModuleIDs: [ModuleCatalog.statusID, "demo.new"],
                 pinnedModuleID: nil,
-                menuBarDisplayMode: .iconOnly
+                menuBarDisplayMode: .iconOnly,
+                theme: .dark
             )
         )
     }
@@ -135,7 +196,8 @@ final class PreferencesStoreTests: XCTestCase {
                     moduleOrder: [ModuleCatalog.tasksID, ModuleCatalog.statusID],
                     enabledModuleIDs: [ModuleCatalog.statusID],
                     pinnedModuleID: ModuleCatalog.tasksID,
-                    menuBarDisplayMode: .iconAndInformation
+                    menuBarDisplayMode: .iconAndInformation,
+                    theme: .system
                 )
             ),
             (
@@ -145,7 +207,8 @@ final class PreferencesStoreTests: XCTestCase {
                     moduleOrder: [ModuleCatalog.tasksID, ModuleCatalog.statusID, unpinnableModule.id],
                     enabledModuleIDs: [ModuleCatalog.tasksID, ModuleCatalog.statusID, unpinnableModule.id],
                     pinnedModuleID: unpinnableModule.id,
-                    menuBarDisplayMode: .iconAndInformation
+                    menuBarDisplayMode: .iconAndInformation,
+                    theme: .system
                 )
             ),
         ]
@@ -164,7 +227,8 @@ final class PreferencesStoreTests: XCTestCase {
             moduleOrder: ["demo.removed", ModuleCatalog.statusID],
             enabledModuleIDs: ["demo.removed", ModuleCatalog.statusID],
             pinnedModuleID: "demo.removed",
-            menuBarDisplayMode: .iconOnly
+            menuBarDisplayMode: .iconOnly,
+            theme: .light
         )
         userDefaults.set(try JSONEncoder().encode(stored), forKey: PreferencesStore.storageKey)
 
@@ -178,7 +242,8 @@ final class PreferencesStoreTests: XCTestCase {
                     moduleOrder: [ModuleCatalog.statusID, ModuleCatalog.tasksID],
                     enabledModuleIDs: [ModuleCatalog.statusID],
                     pinnedModuleID: nil,
-                    menuBarDisplayMode: .iconOnly
+                    menuBarDisplayMode: .iconOnly,
+                    theme: .light
                 )
             )
         )

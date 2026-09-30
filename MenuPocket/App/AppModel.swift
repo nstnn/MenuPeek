@@ -272,6 +272,11 @@ final class AppModel {
         commit { $0.menuBarDisplayMode = mode }
     }
 
+    @discardableResult
+    func setTheme(_ theme: AppTheme) -> Bool {
+        commit { $0.theme = theme }
+    }
+
     private func moveModule(_ id: ModuleDescriptor.ID, by offset: Int) -> Bool {
         guard let index = preferences.moduleOrder.firstIndex(of: id),
               preferences.moduleOrder.indices.contains(index + offset) else { return false }
