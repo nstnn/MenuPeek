@@ -163,3 +163,36 @@ Native-test reliability remains a separate limitation: the reviewer combined run
 The Debug bundle is `build/task-categories/task-003/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `ee02751deb81f443a702e0cad46203dda88f789c240f3bf8431c543c7a9307d3`; debug dylib SHA-256: `6dfcb3a19d76e7218f2aaea4358130711f9bcad518f5f1462cf33a01e9520b02`.
 
 Only temporary databases/defaults and fake system services are used. No production database/app launch, login/hotkey registration, full-suite/Release run, remote CI, commit, or push is claimed. Shared category catalog/commands and drafts, grouped presentation, manager/selector, and actual category interface acceptance remain later cards. The dated Task 1/2 and desktop evidence above retains its original scope.
+
+## Category shared state — Task 4, 2026-10-01
+
+Pass for Task 4's state-only handoff. The clean `main` baseline was `683f62d9e8c90750817978b6172e0f2d3b24b0d0`, containing the committed Task 3 operations. The existing `feat/task-categories` branch was fast-forwarded to that baseline before implementation. Work is uncommitted; the only changed Swift inputs are `DailyNotesState.swift` (SHA-256 `ec9e36cef8d4a74b8bdfd32f3a496f3a71d5588b17643e9be8bf1ba155aaa0d3`) and `DailyNotesStateTests.swift` (`e7929d318ba276db8700a52eb39f7950855d9727f13667c8ed0eb4cb7e47a7d5`). Architecture/requirements now describe the shared catalog; this section retains the dated evidence. Source hashes, identity, and raw review inputs are under ignored `build/task-categories/task-004/`.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app and hosted tests with the shared MenuPocket scheme. Final author verification at 00:05 EDT passed **65/65 tests, zero failures or skipped**: DailyNotesStateTests (37) and AppConfigurationTests (28). The exact command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-004/DerivedData \
+  -resultBundlePath build/task-categories/task-004/Final-state-tests.xcresult \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests test
+```
+
+Retained results: `Final-state-tests.xcresult`, `final-state-tests.log`, and `final-state-summary.json`. An earlier 97/97 run also covered SQLite/domain tests, but preceded the final rollover-error and assertion changes; its `Verified-tests.xcresult` is intermediate evidence, not final-source verification. Xcode test/report commands needed service/cache access beyond the filesystem sandbox. Existing weak-variable, metadata-extraction, hosted scene/connection, and QoS messages remain in the logs; no compiler or test failure occurred in the final author run.
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Coherent saved snapshot | Pass: isolated fake failures at catalog, task, or yesterday-count reads preserve the whole same-day saved snapshot and make progress/catalog unavailable. Initial read failures publish nothing; Retry publishes all changed values together. A fake that bypasses referential checking proves the state itself rejects an unknown category ID without relabeling it General. Unused categories remain in saved creation order. |
+| Committed category commands | Pass: create/rename return committed values; callbacks verify state has not changed before storage succeeds. Forced follow-up read failures cannot turn committed mutations into failure because commands do not reread. Failed create/rename/remove preserve saved categories/rows/progress and both task drafts, then successful retry publishes the result. |
+| All-days removal and usage | Pass: count includes earlier completed and yesterday unfinished assignments. Removal changes only the matching association, preserving tasks, fields, order, daily progress, and yesterday count. A real temporary SQLite-backed state regression creates/renames/removes through state, releases its connection, and verifies all three days plus the surviving category on reopen. Usage-read failure preserves daily availability. |
+| Scoped errors and recovery | Pass: blank/multiline/General/duplicate names, missing IDs, order exhaustion, command errors, and full-read errors have distinct boundaries. Category validation/commands and same-day read Retry retain pending task errors/text. Day rollover clears stale row-action errors/targets, keeps recoverable edit text and the independent new-task draft/add error, and loads only the new day's rows. |
+| Lifecycle and consumers | Pass in hosted fixtures: calendar, wake, clock, time-zone, startup/reopen, termination and observer cleanup remain covered. Each required read failure renders unavailable menu bar progress; Retry restores the count. Existing ordering, association preservation, Quick Add draft isolation, window and command regressions pass in the final selected run. These observations do not establish actual production-interface or physical lifecycle behavior. |
+
+Independent reviewer `/root/task4_review`, who did not author or change the implementation, returned **READY** for Task 4 continuation. It reviewed the four-file state/test/architecture/requirements diff with SHA-256 `df3032ab026269b8c3d37011afd5c247f5fe7733094559fc02497a464225f3e2`, verified 63 source/spec/config inputs before and after execution, and retained its report at `independent-review.md`. Its final fresh-host execution of the identical compiled patch passed **105/105 tests**: state (37), SQLite (23), domain (9), configuration (28), and Quick Add panel (8), using separate `review/DerivedData` and `review/focused-repeat.xcresult`.
+
+Native test repeatability remains unresolved: the reviewer's first run failed two assertions in the unchanged `testSettingsShortcutReusesWindowAndCloseDoesNotTerminate` after Command-W; clean-base AppConfiguration passed 28/28, and the identical-patch fresh-host repeat passed 105/105. No proven pre-existing defect or established cause is claimed. The failed run, baseline comparison, and repeat remain in `review/focused-tests.xcresult`, `review/baseline-app-config.xcresult`, and `review/focused-repeat.xcresult` with logs. The READY verdict covers state-only Task 4, not complete category UI, native-system acceptance, release, or merge readiness.
+
+The final author Debug bundle is `build/task-categories/task-004/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `b1997ddc2ef6c4bf0fbd1688f196f5eebd44a6187cf8d9dd6a2804605a04c751`; debug dylib SHA-256: `a7157692e2faf2b9d7b66785e7cb29b81183c73a176226f65c8305e116aa3445`. Reviewer artifacts have their own identity in `review/artifact-identity.json`.
+
+Only isolated databases/defaults and fake login/hotkey services were used. No production app/data upgrade, actual category interface check, real login/hotkey registration, full-suite/Release run, remote CI, commit, push, or PR was performed for Task 4. Category draft selection/recovery, grouping/preferences, manager/selector, and actual-interface acceptance remain later cards. Historical results above retain their original scope.
