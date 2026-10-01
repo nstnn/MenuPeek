@@ -19,6 +19,40 @@ enum DailyNotesIssue: Equatable {
     }
 }
 
+enum CategoryNameIssue: Equatable {
+    case invalid(TaskCategoryNameError)
+    case duplicate
+
+    var message: String {
+        switch self {
+        case .invalid(.blank): "Enter a category name."
+        case .invalid(.multiline): "Category names must use one line."
+        case .invalid(.reserved): "General is reserved for tasks without a category."
+        case .duplicate: "A category with this name already exists."
+        }
+    }
+}
+
+enum CategoryCommandIssue: Equatable {
+    case create
+    case rename
+    case remove
+    case usage
+    case notFound
+    case orderExhausted
+
+    var message: String {
+        switch self {
+        case .create: "Could not create category. Try again."
+        case .rename: "Could not rename category. Try again."
+        case .remove: "Could not remove category. Try again."
+        case .usage: "Could not count this category's tasks. Try again."
+        case .notFound: "This category is no longer available."
+        case .orderExhausted: "No more categories can be created."
+        }
+    }
+}
+
 /// The app's single source of saved daily data. Drafts remain local until a
 /// repository write succeeds; a failed read never publishes a partial snapshot.
 @MainActor
@@ -32,10 +66,18 @@ final class DailyNotesState {
     }
 
     private(set) var todayKey: String?
+    private(set) var categories: [TaskCategory] = []
     private(set) var notes: [Note] = []
     private(set) var yesterdayIncompleteCount = 0
     private(set) var hasLoadedToday = false
-    private(set) var issue: DailyNotesIssue?
+    private(set) var readIssue: DailyNotesIssue?
+    private(set) var taskIssue: DailyNotesIssue?
+    private(set) var categoryNameIssue: CategoryNameIssue?
+    private(set) var categoryIssue: CategoryCommandIssue?
+
+    /// Keep task-write errors through a failed read and its successful retry.
+    /// Existing views still consume the load error first through this property.
+    var issue: DailyNotesIssue? { readIssue ?? taskIssue }
 
     var draft = ""
     private(set) var editingNoteID: UUID?
@@ -46,6 +88,7 @@ final class DailyNotesState {
     /// nil means unloaded or the latest read failed; successful empty is 0/0.
     /// Write failures leave this last saved progress available.
     var availableProgress: NoteProgress? { hasLoadedToday ? progress : nil }
+    var availableCategories: [TaskCategory]? { hasLoadedToday ? categories : nil }
 
     @ObservationIgnored private let repositoryFactory: () throws -> any NoteRepository
     @ObservationIgnored private var repository: (any NoteRepository)?
@@ -111,15 +154,22 @@ final class DailyNotesState {
             yesterdayIncompleteCount = 0
             hasLoadedToday = false
             invalidateEditing()
+            if taskIssue != .add { taskIssue = nil }
             if hadPreviousDay {
                 refreshNotice = "The date changed. Previous task actions were cancelled; unsaved text is still available."
             }
         }
         do {
             let store = try openRepository()
+            let savedCategories = try store.categories()
             let savedNotes = try store.notes(for: keys.today)
             let previousCount = try store.incompleteCount(for: keys.yesterday)
+            let categoryIDs = Set(savedCategories.map(\.id))
+            guard savedNotes.allSatisfy({ note in
+                note.categoryID.map { categoryIDs.contains($0) } ?? true
+            }) else { throw TaskCategoryRepositoryError.invalidRow }
             todayKey = keys.today
+            categories = savedCategories
             notes = savedNotes.filter { $0.dayKey == keys.today }
             if let editingNoteID, !notes.contains(where: { $0.id == editingNoteID }) {
                 invalidateEditing()
@@ -127,16 +177,115 @@ final class DailyNotesState {
             }
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
-            issue = nil
+            readIssue = nil
         } catch {
             hasLoadedToday = false
-            issue = .load
+            readIssue = .load
+        }
+    }
+
+    @discardableResult
+    func createCategory(name: String) -> TaskCategory? {
+        categoryIssue = nil
+        guard let name = validatedCategoryName(name),
+              readyForWrite(on: day.keys().today), let repository else { return nil }
+        do {
+            let saved = try repository.createCategory(name: name)
+            categories.append(saved)
+            return saved
+        } catch {
+            recordCategoryError(error, fallback: .create)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func renameCategory(id: UUID, name: String) -> TaskCategory? {
+        categoryIssue = nil
+        guard let name = validatedCategoryName(name),
+              readyForWrite(on: day.keys().today), let repository else { return nil }
+        guard let index = categories.firstIndex(where: { $0.id == id }) else {
+            categoryIssue = .notFound
+            return nil
+        }
+        do {
+            let saved = try repository.renameCategory(id: id, name: name)
+            categories[index] = saved
+            return saved
+        } catch {
+            recordCategoryError(error, fallback: .rename)
+            return nil
+        }
+    }
+
+    /// Counts completed and incomplete assignments across every saved day.
+    /// A failed usage read does not invalidate the already loaded daily snapshot.
+    func categoryUsageCount(id: UUID) -> Int? {
+        categoryIssue = nil
+        guard readyForWrite(on: day.keys().today), let repository else { return nil }
+        do {
+            return try repository.categoryUsageCount(id: id)
+        } catch {
+            recordCategoryError(error, fallback: .usage)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func removeCategory(id: UUID) -> Bool {
+        categoryIssue = nil
+        guard readyForWrite(on: day.keys().today), let repository else { return false }
+        guard categories.contains(where: { $0.id == id }) else {
+            categoryIssue = .notFound
+            return false
+        }
+        do {
+            try repository.removeCategory(id: id)
+            notes = notes.map { note in
+                guard note.categoryID == id else { return note }
+                return Note(id: note.id, text: note.text, dayKey: note.dayKey,
+                            createdAt: note.createdAt, completedAt: note.completedAt,
+                            categoryID: nil)
+            }
+            categories.removeAll { $0.id == id }
+            return true
+        } catch {
+            recordCategoryError(error, fallback: .remove)
+            return false
+        }
+    }
+
+    private func validatedCategoryName(_ name: String) -> String? {
+        do {
+            let validated = try TaskCategoryName.validate(name)
+            categoryNameIssue = nil
+            return validated
+        } catch let error as TaskCategoryNameError {
+            categoryNameIssue = .invalid(error)
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func recordCategoryError(_ error: Error, fallback: CategoryCommandIssue) {
+        switch error {
+        case let nameError as TaskCategoryNameError:
+            categoryNameIssue = .invalid(nameError)
+        case TaskCategoryRepositoryError.duplicateName:
+            categoryNameIssue = .duplicate
+        case TaskCategoryRepositoryError.notFound:
+            categoryIssue = .notFound
+        case TaskCategoryRepositoryError.orderExhausted:
+            categoryIssue = .orderExhausted
+        default:
+            categoryIssue = fallback
         }
     }
 
     func cancelDraft() {
         draft = ""
-        if issue == .add { issue = nil }
+        if taskIssue == .add { taskIssue = nil }
     }
 
     @discardableResult
@@ -144,10 +293,10 @@ final class DailyNotesState {
         switch add(text: draft) {
         case .added:
             draft = ""
-            issue = nil
+            taskIssue = nil
             return true
         case .writeFailed:
-            issue = .add
+            taskIssue = .add
             return false
         case .empty, .unavailable:
             return false
@@ -185,10 +334,10 @@ final class DailyNotesState {
             notes[index] = Note(id: saved.id, text: saved.text, dayKey: saved.dayKey,
                                 createdAt: saved.createdAt, completedAt: completedAt,
                                 categoryID: saved.categoryID)
-            issue = nil
+            taskIssue = nil
             return true
         } catch {
-            issue = .complete
+            taskIssue = .complete
             return false
         }
     }
@@ -203,7 +352,7 @@ final class DailyNotesState {
     func cancelEditing() {
         editingNoteID = nil
         editDraft = ""
-        if issue == .edit { issue = nil }
+        if taskIssue == .edit { taskIssue = nil }
     }
 
     @discardableResult
@@ -219,10 +368,10 @@ final class DailyNotesState {
                                 createdAt: saved.createdAt, completedAt: saved.completedAt,
                                 categoryID: saved.categoryID)
             cancelEditing()
-            issue = nil
+            taskIssue = nil
             return true
         } catch {
-            issue = .edit
+            taskIssue = .edit
             return false
         }
     }
@@ -235,10 +384,10 @@ final class DailyNotesState {
             try repository.delete(id: id)
             notes.removeAll { $0.id == id }
             if editingNoteID == id { cancelEditing() }
-            issue = nil
+            taskIssue = nil
             return true
         } catch {
-            issue = .delete
+            taskIssue = .delete
             return false
         }
     }
