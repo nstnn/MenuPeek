@@ -104,9 +104,12 @@ final class AppConfigurationTests: XCTestCase {
         let store = TaskWindowReadFixture()
         let instant = Date(timeIntervalSince1970: 1_790_000_000)
         let day = NoteDay(now: { instant })
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
         let note = Note(id: UUID(), text: "Original task", dayKey: day.keys().today,
-                        createdAt: instant, completedAt: nil)
+                        createdAt: instant, completedAt: nil, categoryID: work.id)
         store.saved = [note]
+        store.savedCategories = [work, home]
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
                                    notificationCenter: NotificationCenter(),
                                    workspaceNotificationCenter: NotificationCenter())
@@ -114,8 +117,11 @@ final class AppConfigurationTests: XCTestCase {
         defer { controller.window?.close() }
         controller.showTasks()
         state.draft = "Separate new draft"
+        state.draftCategoryID = home.id
         state.beginEditing(id: note.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
         state.editDraft = "Retain this edit"
+        state.editCategoryID = nil
         controller.presentation.requestDeletion(id: note.id, state: state)
         XCTAssertNotNil(controller.presentation.deletionTarget)
         controller.window?.close()
@@ -124,7 +130,10 @@ final class AppConfigurationTests: XCTestCase {
         controller.showTasks()
         XCTAssertEqual(state.editingNoteID, note.id)
         XCTAssertEqual(state.editDraft, "Retain this edit")
+        XCTAssertNil(state.editCategoryID)
         XCTAssertEqual(state.draft, "Separate new draft")
+        XCTAssertEqual(state.draftCategoryID, home.id)
+        XCTAssertNil(state.refreshNotice)
         XCTAssertEqual(store.saved, [note])
         XCTAssertEqual(store.deleteAttempts, 0)
     }
@@ -591,15 +600,19 @@ final class AppConfigurationTests: XCTestCase {
     func testQuickAddPanelSavesTaskWithoutChangingTheWindowsDraftEditOrError() async throws {
         let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
         defer { fixture.cleanup() }
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
         let note = Note(id: UUID(), text: "Original", dayKey: NoteDay().keys().today,
                         createdAt: Date(), completedAt: nil)
         fixture.repository.saved = [note]
+        fixture.repository.savedCategories = [work]
         fixture.repository.allowAdd = true
         fixture.launch()
         await waitForStatusTitle("0/1", fixture: fixture)
         fixture.state.draft = "Window draft"
+        fixture.state.draftCategoryID = work.id
         fixture.state.beginEditing(id: note.id)
         fixture.state.editDraft = "Unsaved edit"
+        fixture.state.editCategoryID = work.id
 
         fixture.hotKeys.simulatePress()
         let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
@@ -609,12 +622,15 @@ final class AppConfigurationTests: XCTestCase {
         panel.submit()
 
         XCTAssertFalse(panel.isShown)
+        // The fixture rejects any category on add, so this also proves General.
         XCTAssertEqual(fixture.repository.saved.map(\.text), ["Original", "Captured task"])
         XCTAssertNil(fixture.repository.saved.last?.categoryID)
         await waitForStatusTitle("0/2", fixture: fixture)
         XCTAssertEqual(fixture.state.draft, "Window draft")
+        XCTAssertEqual(fixture.state.draftCategoryID, work.id)
         XCTAssertEqual(fixture.state.editingNoteID, note.id)
         XCTAssertEqual(fixture.state.editDraft, "Unsaved edit")
+        XCTAssertEqual(fixture.state.editCategoryID, work.id)
         XCTAssertNil(fixture.state.issue)
         XCTAssertNil(fixture.delegate.taskWindowController)
 
@@ -769,6 +785,7 @@ final class AppConfigurationTests: XCTestCase {
 
 private final class TaskWindowReadFixture: NoteRepository {
     var saved: [Note] = []
+    var savedCategories: [TaskCategory] = []
     var failRead = false
     var failDelete = false
     var deleteAttempts = 0
@@ -778,7 +795,7 @@ private final class TaskWindowReadFixture: NoteRepository {
 
     func categories() throws -> [TaskCategory] {
         if failRead { throw CocoaError(.fileReadUnknown) }
-        return []
+        return savedCategories
     }
     func createCategory(name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }
     func renameCategory(id: UUID, name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }

@@ -61,8 +61,19 @@ final class DailyNotesState {
     enum AddOutcome: Equatable {
         case added
         case empty
+        /// Saved data, or the chosen category, is not in the loaded snapshot.
         case unavailable
         case writeFailed
+    }
+
+    /// Unsaved edit text and the category selected for it when the edit was
+    /// cancelled. The name is captured then, so it survives category removal.
+    struct RecoveredEdit: Equatable {
+        let text: String
+        /// nil is General.
+        let categoryID: UUID?
+        /// nil for General, or for an ID the catalog did not contain.
+        let categoryName: String?
     }
 
     private(set) var todayKey: String?
@@ -80,10 +91,16 @@ final class DailyNotesState {
     var issue: DailyNotesIssue? { readIssue ?? taskIssue }
 
     var draft = ""
+    /// The new task's category; nil is General. Independent of the edit draft.
+    var draftCategoryID: UUID?
     private(set) var editingNoteID: UUID?
     var editDraft = ""
-    private(set) var recoveredEditDraft: String?
+    /// The edited task's category; begins as its saved association.
+    var editCategoryID: UUID?
+    private(set) var recoveredEdit: RecoveredEdit?
     private(set) var refreshNotice: String?
+
+    var recoveredEditDraft: String? { recoveredEdit?.text }
 
     /// nil means unloaded or the latest read failed; successful empty is 0/0.
     /// Write failures leave this last saved progress available.
@@ -168,13 +185,17 @@ final class DailyNotesState {
             guard savedNotes.allSatisfy({ note in
                 note.categoryID.map { categoryIDs.contains($0) } ?? true
             }) else { throw TaskCategoryRepositoryError.invalidRow }
-            todayKey = keys.today
-            categories = savedCategories
-            notes = savedNotes.filter { $0.dayKey == keys.today }
-            if let editingNoteID, !notes.contains(where: { $0.id == editingNoteID }) {
+            let dailyNotes = savedNotes.filter { $0.dayKey == keys.today }
+            // Cancel stale edits before replacing the catalog, which can still
+            // name a removed category for recovery.
+            if let editingNoteID, !dailyNotes.contains(where: { $0.id == editingNoteID }) {
                 invalidateEditing()
                 refreshNotice = "The edited task is no longer available. Unsaved text was kept for recovery."
             }
+            reconcileSelections(available: categoryIDs)
+            todayKey = keys.today
+            categories = savedCategories
+            notes = dailyNotes
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
             readIssue = nil
@@ -247,6 +268,7 @@ final class DailyNotesState {
                             createdAt: note.createdAt, completedAt: note.completedAt,
                             categoryID: nil)
             }
+            reconcileSelections(available: Set(categories.map(\.id)).subtracting([id]))
             categories.removeAll { $0.id == id }
             return true
         } catch {
@@ -285,34 +307,42 @@ final class DailyNotesState {
 
     func cancelDraft() {
         draft = ""
+        draftCategoryID = nil
         if taskIssue == .add { taskIssue = nil }
     }
 
     @discardableResult
     func addDraft() -> Bool {
-        switch add(text: draft) {
+        switch add(text: draft, categoryID: draftCategoryID) {
         case .added:
             draft = ""
+            draftCategoryID = nil
             taskIssue = nil
             return true
         case .writeFailed:
             taskIssue = .add
             return false
-        case .empty, .unavailable:
+        case .unavailable:
+            // A selection missing from the loaded catalog falls back visibly.
+            if hasLoadedToday { reconcileSelections(available: Set(categories.map(\.id))) }
+            return false
+        case .empty:
             return false
         }
     }
 
     /// Saves a task for the current local day without reading or changing the
     /// window's draft or issue. A readiness refresh may still update shared state.
-    func add(text rawText: String) -> AddOutcome {
+    /// A nil category is General, which the capture panel always uses.
+    func add(text rawText: String, categoryID: UUID? = nil) -> AddOutcome {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return .empty }
         let instant = day.now()
         let key = day.key(for: instant)
-        guard readyForWrite(on: key), let repository else { return .unavailable }
+        guard readyForWrite(on: key), let repository,
+              isAvailable(categoryID) else { return .unavailable }
         let note = Note(id: UUID(), text: text, dayKey: key,
-                        createdAt: instant, completedAt: nil)
+                        createdAt: instant, completedAt: nil, categoryID: categoryID)
         do {
             try repository.add(note)
             notes.append(note)
@@ -347,26 +377,36 @@ final class DailyNotesState {
               let note = notes.first(where: { $0.id == id }) else { return }
         editingNoteID = id
         editDraft = note.text
+        editCategoryID = note.categoryID
     }
 
     func cancelEditing() {
         editingNoteID = nil
         editDraft = ""
+        editCategoryID = nil
         if taskIssue == .edit { taskIssue = nil }
     }
 
+    /// Saves text and category in one write; a category-only change is an edit.
     @discardableResult
     func saveEdit() -> Bool {
         let text = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A readiness refresh can cancel the edit while its task still exists.
         guard !text.isEmpty, let id = editingNoteID,
               readyForExistingTask(on: day.keys().today), let repository,
+              editingNoteID == id,
               let index = notes.firstIndex(where: { $0.id == id }) else { return false }
+        let categoryID = editCategoryID
+        guard isAvailable(categoryID) else {
+            reconcileSelections(available: Set(categories.map(\.id)))
+            return false
+        }
         let saved = notes[index]
         do {
-            try repository.update(id: id, text: text, categoryID: saved.categoryID)
+            try repository.update(id: id, text: text, categoryID: categoryID)
             notes[index] = Note(id: saved.id, text: text, dayKey: saved.dayKey,
                                 createdAt: saved.createdAt, completedAt: saved.completedAt,
-                                categoryID: saved.categoryID)
+                                categoryID: categoryID)
             cancelEditing()
             taskIssue = nil
             return true
@@ -392,9 +432,40 @@ final class DailyNotesState {
         }
     }
 
+    /// Call before replacing `categories`, so a removed category keeps its name.
     private func invalidateEditing() {
-        if editingNoteID != nil { recoveredEditDraft = editDraft }
+        if editingNoteID != nil {
+            recoveredEdit = RecoveredEdit(
+                text: editDraft, categoryID: editCategoryID,
+                categoryName: editCategoryID.flatMap { id in categories.first { $0.id == id }?.name }
+            )
+        }
         cancelEditing()
+    }
+
+    /// Applies a published catalog to draft selections. A missing new-task
+    /// category becomes General and keeps the text; a missing edit category
+    /// cancels the edit for recovery rather than saving it as General. Renames
+    /// keep the same ID and change nothing here.
+    private func reconcileSelections(available ids: Set<UUID>) {
+        let editLost = editingNoteID != nil && editCategoryID.map { !ids.contains($0) } == true
+        let draftLost = draftCategoryID.map { !ids.contains($0) } == true
+        if editLost { invalidateEditing() }
+        if draftLost { draftCategoryID = nil }
+        switch (draftLost, editLost) {
+        case (true, true):
+            refreshNotice = "A selected category is no longer available. The new task will use General, and unsaved edit text was kept for recovery."
+        case (true, false):
+            refreshNotice = "The selected category is no longer available. The new task will use General."
+        case (false, true):
+            refreshNotice = "The selected category is no longer available. Unsaved edit text was kept for recovery."
+        case (false, false):
+            break
+        }
+    }
+
+    private func isAvailable(_ categoryID: UUID?) -> Bool {
+        categoryID.map { id in categories.contains { $0.id == id } } ?? true
     }
 
     /// Existing-row actions belong to the displayed day. A rollover refresh
