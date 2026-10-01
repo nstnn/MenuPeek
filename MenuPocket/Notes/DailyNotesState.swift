@@ -107,6 +107,13 @@ final class DailyNotesState {
     var availableProgress: NoteProgress? { hasLoadedToday ? progress : nil }
     var availableCategories: [TaskCategory]? { hasLoadedToday ? categories : nil }
 
+    /// Today's tasks grouped for display. Group counts include collapsed rows
+    /// and always sum to `progress`.
+    var groups: [TaskGroup] { TaskGroup.groups(categories: categories, notes: notes) }
+
+    /// Last-used category and collapsed groups; never a source of saved categories.
+    let categoryPreferences: TaskCategoryPreferences
+
     @ObservationIgnored private let repositoryFactory: () throws -> any NoteRepository
     @ObservationIgnored private var repository: (any NoteRepository)?
     @ObservationIgnored private let day: NoteDay
@@ -123,10 +130,12 @@ final class DailyNotesState {
         repositoryFactory: @escaping () throws -> any NoteRepository = { try SQLiteNoteRepository() },
         day: NoteDay = NoteDay(),
         notificationCenter: NotificationCenter = .default,
-        workspaceNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
+        workspaceNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        categoryPreferences: TaskCategoryPreferences = TaskCategoryPreferences()
     ) {
         self.repositoryFactory = repositoryFactory
         self.day = day
+        self.categoryPreferences = categoryPreferences
         for name in [Notification.Name.NSCalendarDayChanged,
                      .NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
             observe(name, on: notificationCenter)
@@ -199,6 +208,7 @@ final class DailyNotesState {
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
             readIssue = nil
+            categoryPreferences.prune(keeping: categoryIDs)
         } catch {
             hasLoadedToday = false
             readIssue = .load
@@ -270,6 +280,7 @@ final class DailyNotesState {
             }
             reconcileSelections(available: Set(categories.map(\.id)).subtracting([id]))
             categories.removeAll { $0.id == id }
+            categoryPreferences.prune(keeping: Set(categories.map(\.id)))
             return true
         } catch {
             recordCategoryError(error, fallback: .remove)
@@ -313,8 +324,11 @@ final class DailyNotesState {
 
     @discardableResult
     func addDraft() -> Bool {
-        switch add(text: draft, categoryID: draftCategoryID) {
+        let categoryID = draftCategoryID
+        switch add(text: draft, categoryID: categoryID) {
         case .added:
+            // Only a saved new task from Today sets the last-used category.
+            categoryPreferences.rememberLastUsed(categoryID)
             draft = ""
             draftCategoryID = nil
             taskIssue = nil
