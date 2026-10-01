@@ -6,6 +6,7 @@ import SQLite3
 enum SQLiteNoteStoreError: Error {
     case openFailed(String)
     case unsupportedSchemaVersion(Int)
+    case incompatibleSchema(String)
     case databaseError(operation: String, code: Int32, message: String)
     case invalidNoteRow
     case noteNotFound(UUID)
@@ -14,7 +15,7 @@ enum SQLiteNoteStoreError: Error {
 /// One connection to the app's local notes database. SQLite stores dates as
 /// seconds since the Unix epoch and keeps the assigned local day separately.
 final class SQLiteNoteRepository: NoteRepository {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     private let database: OpaquePointer
 
@@ -181,38 +182,187 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     private static func bootstrap(_ database: OpaquePointer) throws {
-        let version: Int = try {
-            let statement = try prepare("PRAGMA user_version", in: database)
-            defer { sqlite3_finalize(statement) }
-            try check(sqlite3_step(statement), expected: SQLITE_ROW,
-                      operation: "read schema version", in: database)
-            return Int(sqlite3_column_int(statement, 0))
-        }()
+        let versionRows = try schemaRows("PRAGMA user_version", in: database)
+        guard let value = versionRows.first?.first, let value, let version = Int(value) else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Missing schema version")
+        }
         guard (0...schemaVersion).contains(version) else {
             throw SQLiteNoteStoreError.unsupportedSchemaVersion(version)
         }
-        guard version == 0 else { return }
+
+        // This setting is connection-local and has no effect inside a transaction.
+        try execute("PRAGMA foreign_keys = ON", in: database)
+        guard try schemaRows("PRAGMA foreign_keys", in: database) == [["1"]] else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Foreign keys are unavailable")
+        }
+
+        let objects = try schemaRows(
+            """
+            SELECT type, name FROM sqlite_master
+            WHERE type IN ('table', 'view') AND name NOT GLOB 'sqlite_*'
+            ORDER BY name
+            """, in: database
+        )
+        let isFresh = version == 0 && objects.isEmpty
+        if !isFresh {
+            let expected: [[String?]] = version == 2
+                ? [["table", "categories"], ["table", "notes"]] : [["table", "notes"]]
+            guard objects == expected else {
+                throw SQLiteNoteStoreError.incompatibleSchema("Unexpected tables or views")
+            }
+            try validateSchema(version: version, in: database)
+        }
+        if version == schemaVersion {
+            try validateIntegrity(in: database)
+            return
+        }
 
         try execute("BEGIN IMMEDIATE", in: database)
         do {
             try execute(
                 """
-                CREATE TABLE IF NOT EXISTS notes (
+                CREATE TABLE categories (
                     id TEXT PRIMARY KEY NOT NULL,
-                    text TEXT NOT NULL,
-                    day_key TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    completed_at REAL
+                    name TEXT NOT NULL,
+                    name_key TEXT NOT NULL UNIQUE,
+                    creation_order INTEGER NOT NULL UNIQUE CHECK(typeof(creation_order) = 'integer')
                 )
                 """, in: database
             )
+            if isFresh {
+                try execute(
+                    """
+                    CREATE TABLE notes (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        text TEXT NOT NULL,
+                        day_key TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        completed_at REAL,
+                        category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL
+                    )
+                    """, in: database
+                )
+            } else {
+                // Keep the original table and rowids; rebuilding would risk task order.
+                try execute(
+                    "ALTER TABLE notes ADD COLUMN category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL",
+                    in: database
+                )
+            }
             try execute("CREATE INDEX IF NOT EXISTS notes_day_key_idx ON notes(day_key)",
                         in: database)
-            try execute("PRAGMA user_version = 1", in: database)
+            try execute("CREATE INDEX notes_category_id_idx ON notes(category_id)", in: database)
+            try validateSchema(version: schemaVersion, in: database)
+            try validateIntegrity(in: database)
+            try execute("PRAGMA user_version = \(schemaVersion)", in: database)
             try execute("COMMIT", in: database)
         } catch {
             try? execute("ROLLBACK", in: database)
             throw error
+        }
+    }
+
+    private static func validateSchema(version: Int, in database: OpaquePointer) throws {
+        // Defaults, nullability, primary keys, and hidden/generated columns are part
+        // of the known format. Do not interpret an unknown v0 file as an empty store.
+        var noteColumns: [[String?]] = [
+            ["id", "TEXT", "1", nil, "1", "0"],
+            ["text", "TEXT", "1", nil, "0", "0"],
+            ["day_key", "TEXT", "1", nil, "0", "0"],
+            ["created_at", "REAL", "1", nil, "0", "0"],
+            ["completed_at", "REAL", "0", nil, "0", "0"]
+        ]
+        if version == 2 {
+            noteColumns.append(["category_id", "TEXT", "0", "NULL", "0", "0"])
+        }
+        try validateColumns("notes", expected: noteColumns, in: database)
+        // WITHOUT ROWID is incompatible with the saved insertion-order contract.
+        let rowidRead = try prepare("SELECT rowid FROM notes LIMIT 0", in: database)
+        sqlite3_finalize(rowidRead)
+        try validateIndex("notes_day_key_idx", table: "notes", column: "day_key",
+                          required: version == 2, in: database)
+
+        let foreignKeys = try schemaRows(
+            """
+            SELECT "table", "from", "to", on_update, on_delete, "match"
+            FROM pragma_foreign_key_list('notes') ORDER BY id, seq
+            """, in: database
+        )
+        let expectedForeignKeys: [[String?]] = version == 2
+            ? [["categories", "category_id", "id", "NO ACTION", "SET NULL", "NONE"]] : []
+        guard foreignKeys == expectedForeignKeys else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected task relationships")
+        }
+        guard version == 2 else { return }
+
+        try validateColumns("categories", expected: [
+            ["id", "TEXT", "1", nil, "1", "0"],
+            ["name", "TEXT", "1", nil, "0", "0"],
+            ["name_key", "TEXT", "1", nil, "0", "0"],
+            ["creation_order", "INTEGER", "1", nil, "0", "0"]
+        ], in: database)
+        let indexes = try schemaRows("PRAGMA index_list(categories)", in: database)
+        for column in ["name_key", "creation_order"] {
+            var hasUniqueIndex = false
+            for index in indexes where index[2] == "1" && index[4] == "0" {
+                guard let name = index[1] else { continue }
+                // Index names come from the file, so quote them as SQL string literals.
+                let quoted = name.replacingOccurrences(of: "'", with: "''")
+                let columns = try schemaRows("SELECT name FROM pragma_index_info('\(quoted)') ORDER BY seqno",
+                                             in: database)
+                if columns == [[column]] { hasUniqueIndex = true }
+            }
+            guard hasUniqueIndex else {
+                throw SQLiteNoteStoreError.incompatibleSchema("Missing category uniqueness: \(column)")
+            }
+        }
+        try validateIndex("notes_category_id_idx", table: "notes", column: "category_id",
+                          required: true, in: database)
+    }
+
+    private static func validateColumns(_ table: String, expected: [[String?]],
+                                        in database: OpaquePointer) throws {
+        let columns = try schemaRows(
+            "SELECT name, upper(type), \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo('\(table)') ORDER BY cid",
+            in: database
+        )
+        guard columns == expected else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected \(table) columns")
+        }
+    }
+
+    private static func validateIndex(_ name: String, table: String, column: String,
+                                      required: Bool, in database: OpaquePointer) throws {
+        let indexes = try schemaRows("PRAGMA index_list(\(table))", in: database)
+        guard let index = indexes.first(where: { $0[1] == name }) else {
+            if required { throw SQLiteNoteStoreError.incompatibleSchema("Missing \(name)") }
+            return
+        }
+        let columns = try schemaRows("SELECT name FROM pragma_index_info('\(name)') ORDER BY seqno",
+                                     in: database)
+        guard index[2] == "0", index[4] == "0", columns == [[column]] else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected \(name) definition")
+        }
+    }
+
+    private static func validateIntegrity(in database: OpaquePointer) throws {
+        guard try schemaRows("PRAGMA integrity_check", in: database) == [["ok"]],
+              try schemaRows("PRAGMA foreign_key_check", in: database).isEmpty else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Database integrity check failed")
+        }
+    }
+
+    private static func schemaRows(_ sql: String, in database: OpaquePointer) throws -> [[String?]] {
+        let statement = try prepare(sql, in: database)
+        defer { sqlite3_finalize(statement) }
+        var rows: [[String?]] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return rows }
+            try check(step, expected: SQLITE_ROW, operation: "inspect schema", in: database)
+            rows.append((0..<sqlite3_column_count(statement)).map { column in
+                sqlite3_column_text(statement, column).map { String(cString: $0) }
+            })
         }
     }
 

@@ -47,45 +47,27 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
     }
 
     func testUnversionedExistingTableKeepsItsRows() throws {
-        try executeRaw(
-            """
-            CREATE TABLE notes (
-                id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL,
-                day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL
-            );
-            INSERT INTO notes VALUES (
-                '00000000-0000-0000-0000-000000000001', 'Existing',
-                '2026-09-27', 10, NULL
-            );
-            """
-        )
+        try seedLegacy(version: 0)
+        let before = try legacyRows()
 
-        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-        XCTAssertEqual(try store.notes(for: "2026-09-27").map(\.text), ["Existing"])
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.notes(for: "2026-09-27").map(\.text),
+                           ["Today ' quote 📝", "Today completed"])
+            XCTAssertEqual(try store.incompleteCount(for: "2026-09-27"), 1)
+            XCTAssertEqual(try store.incompleteCount(for: "2026-09-26"), 1)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try legacyRows(), before)
+        XCTAssertTrue(try reopened.notes(for: "2026-09-27").allSatisfy { $0.categoryID == nil })
+        XCTAssertTrue(try reopened.notes(for: "2026-09-26").allSatisfy { $0.categoryID == nil })
         XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
     }
 
     func testExistingVersionOneTodayAndYesterdayRowsSurviveOpenWriteAndReopen() throws {
         // Seed the existing format directly, independently of repository bootstrap.
-        try executeRaw(
-            """
-            CREATE TABLE notes (
-                id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL,
-                day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL
-            );
-            CREATE INDEX notes_day_key_idx ON notes(day_key);
-            INSERT INTO notes VALUES
-                ('00000000-0000-0000-0000-000000000001', 'Today '' quote 📝',
-                 '2026-09-27', 10, NULL),
-                ('00000000-0000-0000-0000-000000000002', 'Today completed',
-                 '2026-09-27', 20, 25),
-                ('00000000-0000-0000-0000-000000000003', 'Yesterday unfinished',
-                 '2026-09-26', 30, NULL),
-                ('00000000-0000-0000-0000-000000000004', 'Yesterday completed',
-                 '2026-09-26', 40, 45);
-            PRAGMA user_version = 1;
-            """
-        )
+        try seedLegacy(version: 1)
+        let before = try legacyRows()
         let today = [
             Note(id: try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001")),
                  text: "Today ' quote 📝", dayKey: "2026-09-27",
@@ -110,6 +92,9 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             XCTAssertEqual(try store.notes(for: "2026-09-27"), today)
             XCTAssertEqual(try store.notes(for: "2026-09-26"), yesterday)
+            XCTAssertEqual(try legacyRows(), before)
+            XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                           [[nil], [nil], [nil], [nil]])
             try store.add(added)
         }
 
@@ -118,7 +103,8 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try reopened.notes(for: "2026-09-26"), yesterday)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-27"), 2)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
-        XCTAssertEqual(try schemaVersion(), 1)
+        XCTAssertEqual(Array(try legacyRows().prefix(before.count)), before)
+        XCTAssertEqual(try schemaVersion(), 2)
     }
 
     func testNewerSchemaIsRejectedWithoutChangingDatabase() throws {
@@ -126,18 +112,174 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             """
             CREATE TABLE future_data (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
             INSERT INTO future_data VALUES (1, 'Preserve unknown future data 📝');
-            PRAGMA user_version = 2;
+            PRAGMA user_version = 3;
             """
         )
         let originalBytes = try Data(contentsOf: databaseURL)
 
         XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
-            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(2) = error else {
+            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(3) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(try schemaVersion(), 3)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
+    }
+
+    func testFreshSchemaEnforcesCategoryConstraintsAndRemovalPreservesTasksAcrossDays() throws {
+        let today = note("Today", day: "2026-09-27", createdAt: 10)
+        let yesterday = note("Yesterday", day: "2026-09-26", createdAt: 20)
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try schemaVersion(), 2)
+            XCTAssertEqual(try rawRows("SELECT * FROM categories"), [])
+            try store.add(today)
+            try store.add(yesterday)
+        }
+        let before = try legacyRows()
+        try executeRaw("INSERT INTO categories VALUES ('work-id', 'Work', 'work', 7)")
+        for invalidInsert in [
+            "INSERT INTO categories VALUES ('duplicate-name', 'work', 'work', 8)",
+            "INSERT INTO categories VALUES ('duplicate-order', 'Fitness', 'fitness', 7)",
+            "INSERT INTO categories VALUES ('fractional-order', 'Fitness', 'fitness', 8.5)",
+            "INSERT INTO categories VALUES ('missing-name', NULL, 'fitness', 8)"
+        ] {
+            XCTAssertEqual(try rawResult(invalidInsert), SQLITE_CONSTRAINT)
+        }
+        XCTAssertEqual(try rawResult("UPDATE notes SET category_id = 'missing-id'"), SQLITE_CONSTRAINT)
+        try executeRaw("UPDATE notes SET category_id = 'work-id'")
+        XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                       [["work-id"], ["work-id"]])
+        try executeRaw("DELETE FROM categories WHERE id = 'work-id'")
+        XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"), [[nil], [nil]])
+        XCTAssertEqual(try legacyRows(), before)
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: today.dayKey), [today])
+        XCTAssertEqual(try reopened.notes(for: yesterday.dayKey), [yesterday])
+        XCTAssertEqual(try reopened.incompleteCount(for: today.dayKey), 1)
+        XCTAssertEqual(try reopened.incompleteCount(for: yesterday.dayKey), 1)
+    }
+
+    func testForeignKeysAreEnforcedOnEveryRepositoryConnection() throws {
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10)
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.add(saved)
+        }
+        // The trigger runs on the repository's connection, not the fixture writer's.
+        try executeRaw(
+            """
+            CREATE TRIGGER invalid_assignment BEFORE UPDATE OF text ON notes
+            BEGIN UPDATE notes SET category_id = 'missing-id' WHERE id = NEW.id; END;
+            """
+        )
+        for _ in 0..<2 {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertThrowsError(try store.updateText(id: saved.id, text: "Rejected")) { error in
+                guard case SQLiteNoteStoreError.databaseError(_, let code, _) = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+                XCTAssertEqual(code, SQLITE_CONSTRAINT)
+            }
+            XCTAssertEqual(try store.notes(for: saved.dayKey), [saved])
+            XCTAssertEqual(try rawRows("SELECT category_id FROM notes"), [[nil]])
+        }
+    }
+
+    func testVersionTwoReopenDoesNotChangeSchemaDataOrDatabaseBytes() throws {
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.add(note("Keep 📝", day: "2026-09-27", createdAt: 10))
+        }
+        let schema = try schemaSnapshot()
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let bytes = try Data(contentsOf: databaseURL)
+        for _ in 0..<2 {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.notes(for: "2026-09-27").count, 1)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+        }
+    }
+
+    func testIncompatibleLegacySchemasAreRejectedWithoutChangingDatabase() throws {
+        let knownColumns = "id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL, day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL"
+        let schemas = [
+            "CREATE TABLE unrelated (payload TEXT); INSERT INTO unrelated VALUES ('Keep');",
+            "CREATE TABLE sqlitex_unknown (payload TEXT); INSERT INTO sqlitex_unknown VALUES ('Keep');",
+            "CREATE TABLE notes (id TEXT PRIMARY KEY NOT NULL, text TEXT);",
+            "CREATE TABLE notes (id TEXT NOT NULL, text TEXT NOT NULL, day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL);",
+            "CREATE TABLE notes (\(knownColumns), extra TEXT);",
+            "CREATE TABLE notes (\(knownColumns)) WITHOUT ROWID;",
+            "CREATE TABLE notes (\(knownColumns)); CREATE INDEX notes_day_key_idx ON notes(text);",
+            "CREATE TABLE notes (\(knownColumns)); CREATE TABLE future_data (payload TEXT);"
+        ]
+        for version in [0, 1] {
+            for schema in schemas {
+                try executeRaw(schema + " PRAGMA user_version = \(version);")
+                let bytes = try Data(contentsOf: databaseURL)
+                XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
+                    XCTAssertTrue(error is SQLiteNoteStoreError, "Unexpected error: \(error)")
+                }
+                XCTAssertEqual(try schemaVersion(), version)
+                XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+                try FileManager.default.removeItem(at: databaseURL)
+            }
+        }
+    }
+
+    func testIncompleteVersionTwoIsRejectedWithoutRepairingDatabase() throws {
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.add(note("Keep", day: "2026-09-27", createdAt: 10))
+        }
+        try executeRaw("DROP INDEX notes_category_id_idx")
+        let bytes = try Data(contentsOf: databaseURL)
+        XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
+            guard case SQLiteNoteStoreError.incompatibleSchema = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
         }
         XCTAssertEqual(try schemaVersion(), 2)
-        XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+    }
+
+    func testFailedMigrationRollsBackSchemaDataAndVersionThenRetriesSafely() throws {
+        for version in [0, 1] {
+            try seedLegacy(version: version)
+            // A valid extra legacy index collides with the new index name. This fails
+            // after categories and category_id were added, exercising real DDL rollback.
+            try executeRaw("CREATE INDEX notes_category_id_idx ON notes(text)")
+            let beforeSchema = try schemaSnapshot()
+            let beforeRows = try legacyRows()
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
+                guard case SQLiteNoteStoreError.databaseError = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+            XCTAssertEqual(try schemaSnapshot(), beforeSchema)
+            XCTAssertEqual(try legacyRows(), beforeRows)
+            XCTAssertEqual(try schemaVersion(), version)
+
+            try executeRaw("DROP INDEX notes_category_id_idx")
+            do {
+                let retried = try SQLiteNoteRepository(databaseURL: databaseURL)
+                XCTAssertEqual(try schemaVersion(), 2)
+                XCTAssertEqual(try legacyRows(), beforeRows)
+                XCTAssertEqual(try retried.incompleteCount(for: "2026-09-27"), 1)
+                XCTAssertEqual(try retried.incompleteCount(for: "2026-09-26"), 1)
+                XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                               [[nil], [nil], [nil], [nil]])
+            }
+            do {
+                let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+                XCTAssertEqual(try reopened.notes(for: "2026-09-27").count, 2)
+                XCTAssertEqual(try legacyRows(), beforeRows)
+            }
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+        print("Migration fixtures used system SQLite \(String(cString: sqlite3_libversion()))")
     }
 
     func testOpenFailureIsReported() throws {
@@ -258,11 +400,65 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
     }
 
     private func executeRaw(_ sql: String) throws {
+        XCTAssertEqual(try rawResult(sql), SQLITE_OK, sql)
+    }
+
+    private func rawResult(_ sql: String) throws -> Int32 {
         var connection: OpaquePointer?
         XCTAssertEqual(sqlite3_open(databaseURL.path, &connection), SQLITE_OK)
         let database = try XCTUnwrap(connection)
         defer { sqlite3_close(database) }
-        XCTAssertEqual(sqlite3_exec(database, sql, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, "PRAGMA foreign_keys = ON", nil, nil, nil), SQLITE_OK)
+        return sqlite3_exec(database, sql, nil, nil, nil)
+    }
+
+    private func rawRows(_ sql: String) throws -> [[String?]] {
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &connection), SQLITE_OK)
+        let database = try XCTUnwrap(connection)
+        defer { sqlite3_close(database) }
+        var prepared: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(database, sql, -1, &prepared, nil), SQLITE_OK)
+        let statement = try XCTUnwrap(prepared)
+        defer { sqlite3_finalize(statement) }
+        var rows: [[String?]] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return rows }
+            XCTAssertEqual(step, SQLITE_ROW)
+            guard step == SQLITE_ROW else { return rows }
+            rows.append((0..<sqlite3_column_count(statement)).map { column in
+                sqlite3_column_text(statement, column).map { String(cString: $0) }
+            })
+        }
+    }
+
+    private func legacyRows() throws -> [[String?]] {
+        try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at FROM notes ORDER BY rowid")
+    }
+
+    private func schemaSnapshot() throws -> [[String?]] {
+        try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
+    }
+
+    private func seedLegacy(version: Int) throws {
+        try executeRaw(
+            """
+            CREATE TABLE notes (
+                id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL,
+                day_key TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL
+            );
+            INSERT INTO notes (rowid, id, text, day_key, created_at, completed_at) VALUES
+                (7, '00000000-0000-0000-0000-000000000001', 'Today '' quote 📝', '2026-09-27', 10, NULL),
+                (21, '00000000-0000-0000-0000-000000000002', 'Today completed', '2026-09-27', 20, 25),
+                (35, '00000000-0000-0000-0000-000000000003', 'Yesterday unfinished', '2026-09-26', 30, NULL),
+                (80, '00000000-0000-0000-0000-000000000004', 'Yesterday completed', '2026-09-26', 40, 45);
+            PRAGMA user_version = \(version);
+            """
+        )
+        if version == 1 {
+            try executeRaw("CREATE INDEX notes_day_key_idx ON notes(day_key)")
+        }
     }
 
     private func schemaVersion() throws -> Int {

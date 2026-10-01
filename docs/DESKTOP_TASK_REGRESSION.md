@@ -95,3 +95,35 @@ Xcode 27.0 (`27A266a`) compiled the Debug app and hosted test bundle using the s
 Coverage establishes legacy nil-category construction, General-name reservation, trimmed display spelling, canonical/case-folded comparison with significant accents, multiline/blank rejection, stable category identity/order, and association preservation across completion, uncompletion, editing, rejected writes, refresh, and fresh state instances using an in-memory fake. Existing SQLite preservation and newer-schema protection checks passed on isolated databases. General is a nil association, not a seeded category row.
 
 Category persistence, schema migration, category commands, and interface controls remain unimplemented. This result does not establish category persistence across an actual process restart or real-interface acceptance. No full-suite run, Release build, remote CI, or actual-interface check was performed for Task 1. Historical results above remain separate.
+
+## Category schema migration — Task 2, 2026-09-30
+
+Pass for Task 2's isolated storage preparation. Work is uncommitted on `feat/task-categories` at `4a0a5fc80d0c857723754c00f4ba1f7f32ad219c`; the existing category branch was fast-forwarded to current `main` before implementation, preserving the intervening Quick Add changes. The only changed app/test inputs are `SQLiteNoteRepository.swift` and `SQLiteNoteRepositoryTests.swift`. Their manifest SHA-256 is `84438de90b6ba0e510ae72d55da12621c1572ce34187f5c29311b34dedaf4afd`; their diff SHA-256 is `200f305bffe7de8a2d9ba5760d9366456deca9bc3d6d544d844c57f41e44f67a`. Both are retained under ignored `build/task-categories/task-002/` with `identity.json`.
+
+Xcode 27.0 (`27A266a`) built the Debug app and hosted tests on arm64 macOS 26.6.2 (`25G83`). The tests themselves reported **system SQLite 3.51.0**. The final shared-scheme run finished at **17:58:25 EDT** and passed **51 tests, zero failures, zero skipped**: SQLiteNoteRepositoryTests (15), NoteDomainTests (9), and DailyNotesStateTests (27). The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-002/DerivedData \
+  -resultBundlePath build/task-categories/task-002/Verified-tests.xcresult \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests test
+```
+
+| Claim | Outcome and retained comparison |
+| --- | --- |
+| Fresh v2 bootstrap | Pass: empty category catalog, optional association, unique name keys and integer creation order, foreign-key rejection, and `ON DELETE SET NULL` preserving fixture tasks across days. These schema checks use direct fixture SQL; category repository commands remain unimplemented. |
+| Known unversioned/v1 upgrade | Pass: independently seeded today/yesterday rows with noncontiguous rowids `7, 21, 35, 80` retain `rowid`, UUID, text (including quote/emoji), day key, creation/completion timestamps, relative order, and unfinished counts. Every original association is null. The v1 fixture also adds a task after migration and reopens successfully. |
+| Migration rollback/retry | Pass for v0 and v1: an extra legacy index named `notes_category_id_idx` makes creation of the new index fail after the category table and association have been added. Exact `sqlite_master` and original task-row snapshots plus `user_version` equal their pre-upgrade values after rollback. Dropping only the fixture fault permits migration and reopen with preserved rows/counts. No production test hook or validation bypass was added. |
+| Connection-level foreign keys | Pass: a trigger attempts an invalid assignment during the repository's text write on each of two opened connections. Both writes are rejected, preserving saved text and null assignment. |
+| v2 idempotent reopen | Pass: repeated opens preserve schema snapshot, all saved task values, and database bytes. |
+| Incompatible/future protection | Pass: malformed/unknown v0/v1 tables, extra columns, missing primary key, WITHOUT ROWID, wrong day index, unknown SQLite-like table names, incomplete v2, and future version 3 produce storage errors without changing fixture bytes/version. |
+| Existing task behavior | Pass: existing CRUD/error/reopen checks and SQLite-backed state ordering, availability, draft/failure, and day-refresh regressions remain passing. |
+
+Results/logs are `Verified-tests.xcresult`, `verified-tests.log`, and `test-summary.json` under that task directory. The first focused run also passed; diff review then tightened the internal-table name filter and added its unknown-table preservation fixture before the final rerun. Review covered schema guards, additive DDL, transaction rollback, rowid preservation, and connection-level enforcement; `git diff --check` passed.
+
+The final Debug bundle is `build/task-categories/task-002/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Its executable SHA-256 is `ef8d8cfe2fcbc7d0ada90d6a1e795f5fb82efc2e9ed49d658c0e17652612c7a6`; `MenuPocket.debug.dylib` SHA-256 is `fb90ce6bb4ad03d1f70b27e6cdd06573e38d2d3d8aeab2e4f7b259377c3250dc`.
+
+Fixtures use per-test temporary databases and are removed by teardown; the Debug XCTest host skips production delegate/storage initialization. No user database was upgraded, no real login/hotkey registration was changed, and no production backup/app launch was performed. Category repository operations, associated-task reads/writes, and interface controls remain later work. No full-suite run, Release build, remote CI, actual-interface acceptance, commit, or push was performed for this card. Before a first real-data launch, follow [upgrade preparation](WORKFLOW.md#schema-v2-upgrade-preparation); a v1 binary cannot reopen v2.
