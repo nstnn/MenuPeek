@@ -180,10 +180,17 @@ final class DailyNotesStateTests: XCTestCase {
         store.failCategoryCommand = nil
         XCTAssertNotNil(state.createCategory(name: "Fitness"))
         XCTAssertNotNil(state.renameCategory(id: category.id, name: "Office"))
-        XCTAssertTrue(state.removeCategory(id: category.id))
-        XCTAssertNil(state.categoryIssue)
         XCTAssertEqual(state.taskIssue, .edit)
         XCTAssertEqual(state.editDraft, "Unsaved edit")
+        // Removing the edit's own selected category cancels that edit for recovery.
+        XCTAssertTrue(state.removeCategory(id: category.id))
+        XCTAssertNil(state.categoryIssue)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertNil(state.taskIssue)
+        XCTAssertEqual(state.recoveredEdit,
+                       DailyNotesState.RecoveredEdit(text: "Unsaved edit", categoryID: category.id,
+                                                     categoryName: "Office"))
+        XCTAssertEqual(state.draft, "New task draft")
     }
 
     func testNameValidationAndUsageErrorsHaveIndependentBoundaries() throws {
@@ -413,6 +420,290 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.progress, NoteProgress(completed: 0, total: 1))
         XCTAssertEqual(state.editingNoteID, original.id)
         XCTAssertEqual(state.editDraft, "Unsaved edit")
+    }
+
+    func testNewAndEditCategoryDraftsStayIndependentAndSaveAtomically() throws {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
+                            createdAt: Date(timeIntervalSince1970: 1), completedAt: current,
+                            categoryID: work.id)
+        let later = note("Later", day: original.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [original, later], categories: [work, home])
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        XCTAssertNil(state.draftCategoryID)
+        state.draft = "New task"
+        state.draftCategoryID = home.id
+        state.beginEditing(id: original.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+
+        // Same-day window reuse keeps both drafts and both selections.
+        state.windowWillOpen()
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertEqual(state.draftCategoryID, home.id)
+
+        // A category-only edit saves; identity, completion, day, and order stay.
+        state.editCategoryID = nil
+        XCTAssertTrue(state.saveEdit())
+        let reassigned = Note(id: original.id, text: original.text, dayKey: original.dayKey,
+                              createdAt: original.createdAt, completedAt: current)
+        XCTAssertEqual(state.notes, [reassigned, later])
+        XCTAssertEqual(store.saved, state.notes)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertNil(state.editCategoryID)
+        XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 2))
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertEqual(state.draftCategoryID, home.id)
+
+        // The capture panel's add path stays General and leaves the window draft alone.
+        XCTAssertEqual(state.add(text: "Captured"), .added)
+        XCTAssertNil(store.saved.last?.categoryID)
+        XCTAssertEqual(state.draftCategoryID, home.id)
+
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(store.saved.last?.text, "New task")
+        XCTAssertEqual(store.saved.last?.categoryID, home.id)
+        XCTAssertEqual(state.notes, store.saved)
+        XCTAssertEqual(state.draft, "")
+        XCTAssertNil(state.draftCategoryID)
+    }
+
+    func testFailedCategorizedSavesKeepTextAndSelectionAndCancelClearsOnlyItsDraft() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let original = note("Original", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [original], categories: [work, home])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "New task"
+        state.draftCategoryID = work.id
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.taskIssue, .add)
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+
+        state.beginEditing(id: original.id)
+        XCTAssertNil(state.editCategoryID)
+        state.editDraft = "Edited"
+        state.editCategoryID = home.id
+        store.failWrite = .edit
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(state.taskIssue, .edit)
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editDraft, "Edited")
+        XCTAssertEqual(state.editCategoryID, home.id)
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(store.saved, [original])
+
+        state.cancelEditing()
+        XCTAssertNil(state.editCategoryID)
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        state.cancelDraft()
+        XCTAssertEqual(state.draft, "")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.taskIssue)
+        XCTAssertNil(state.refreshNotice)
+        XCTAssertEqual(store.saved, [original])
+    }
+
+    func testSelectionOutsideTheCatalogIsNeverSavedOrPublished() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let original = note("Original", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [original], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let unknown = UUID()
+        state.draft = "Keep me"
+        state.draftCategoryID = unknown
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(store.saved, [original])
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(state.draft, "Keep me")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.taskIssue)
+        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertEqual(state.add(text: "Panel", categoryID: unknown), .unavailable)
+        XCTAssertEqual(store.saved, [original])
+
+        state.beginEditing(id: original.id)
+        state.editDraft = "Edited"
+        state.editCategoryID = unknown
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(store.saved, [original])
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEdit,
+                       DailyNotesState.RecoveredEdit(text: "Edited", categoryID: unknown, categoryName: nil))
+
+        // Storage that no longer has a loaded category rejects the write; nothing is published.
+        store.savedCategories = []
+        state.draftCategoryID = work.id
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(state.taskIssue, .add)
+        XCTAssertEqual(state.draft, "Keep me")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        state.beginEditing(id: original.id)
+        state.editCategoryID = work.id
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(state.taskIssue, .edit)
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(store.saved, [original])
+    }
+
+    func testRemovingSelectedCategoriesFallsBackNewDraftAndRecoversEdit() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let categorized = Note(id: UUID(), text: "Categorized", dayKey: "2026-09-27",
+                               createdAt: Date(timeIntervalSince1970: 1), completedAt: nil,
+                               categoryID: work.id)
+        let general = note("General", day: categorized.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [categorized, general], categories: [work, home])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "New task"
+        state.draftCategoryID = work.id
+        state.beginEditing(id: general.id)
+        state.editDraft = "Edited"
+        state.editCategoryID = work.id
+
+        // An unrelated removal and a rename keep both drafts intact.
+        XCTAssertTrue(state.removeCategory(id: home.id))
+        XCTAssertNotNil(state.renameCategory(id: work.id, name: "Office"))
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.editingNoteID, general.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertNil(state.refreshNotice)
+
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEdit,
+                       DailyNotesState.RecoveredEdit(text: "Edited", categoryID: work.id, categoryName: "Office"))
+        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertEqual(store.saved.map(\.text), ["Categorized", "General"])
+        XCTAssertTrue(store.saved.allSatisfy { $0.categoryID == nil })
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
+        XCTAssertTrue(state.addDraft())
+        XCTAssertNil(store.saved.last?.categoryID)
+    }
+
+    func testRefreshAppliesRemovedCategoryOnlyAfterACompleteRead() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
+                            createdAt: Date(), completedAt: nil, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [original], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "New task"
+        state.draftCategoryID = work.id
+        state.beginEditing(id: original.id)
+        state.editDraft = "Edited"
+        // Storage changes outside this state; a failed read must not guess.
+        try store.removeCategory(id: work.id)
+        store.failSnapshotRead = .count
+        state.refresh()
+        XCTAssertNil(state.availableCategories)
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(store.saved.map(\.text), ["Original"])
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.editingNoteID, original.id)
+
+        store.failSnapshotRead = nil
+        state.refresh()
+        XCTAssertEqual(state.availableCategories, [])
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEdit,
+                       DailyNotesState.RecoveredEdit(text: "Edited", categoryID: work.id, categoryName: "Work"))
+        XCTAssertNotNil(state.refreshNotice)
+    }
+
+    func testRolloverRecoversEditCategoryAndKeepsNewDraftSelection() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let old = Note(id: UUID(), text: "Old", dayKey: "2026-09-27",
+                       createdAt: Date(), completedAt: nil, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [old], categories: [work, home])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.draft = "Tomorrow"
+        state.draftCategoryID = home.id
+        state.beginEditing(id: old.id)
+        state.editDraft = "Unsaved"
+        state.editCategoryID = home.id
+        current = instant("2026-09-28T00:01:00-04:00")
+        store.failCount = true
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertNil(state.editCategoryID)
+        XCTAssertEqual(state.recoveredEdit,
+                       DailyNotesState.RecoveredEdit(text: "Unsaved", categoryID: home.id, categoryName: "Home"))
+        XCTAssertEqual(store.saved, [old])
+        XCTAssertEqual(state.draftCategoryID, home.id)
+
+        store.failCount = false
+        XCTAssertTrue(state.addDraft())
+        let added = try XCTUnwrap(store.saved.last)
+        XCTAssertEqual(added.text, "Tomorrow")
+        XCTAssertEqual(added.dayKey, "2026-09-28")
+        XCTAssertEqual(added.categoryID, home.id)
+        XCTAssertEqual(store.saved.first, old)
+    }
+
+    func testSQLiteBackedCategorizedAddAndCategoryOnlyEditSurviveReopen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DailyCategoryDrafts-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { current }), notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter())
+        }
+        let state = makeState()
+        state.startup()
+        let work = try XCTUnwrap(state.createCategory(name: "Work"))
+        let home = try XCTUnwrap(state.createCategory(name: "Home"))
+        state.draft = "First"
+        state.draftCategoryID = work.id
+        XCTAssertTrue(state.addDraft())
+        // A successful add resets the selection, so this task is General.
+        state.draft = "Second"
+        XCTAssertTrue(state.addDraft())
+        let first = try XCTUnwrap(state.notes.first)
+        XCTAssertTrue(state.setCompleted(id: first.id, completed: true))
+        state.beginEditing(id: first.id)
+        XCTAssertEqual(state.editCategoryID, work.id)
+        state.editCategoryID = home.id
+        XCTAssertTrue(state.saveEdit())
+        let expected = state.notes
+        XCTAssertEqual(expected.map(\.text), ["First", "Second"])
+        XCTAssertEqual(expected.map(\.categoryID), [home.id, nil])
+        XCTAssertEqual(expected.first?.id, first.id)
+        XCTAssertEqual(expected.first?.createdAt, first.createdAt)
+        XCTAssertEqual(expected.first?.completedAt, current)
+        state.stopForTermination()
+
+        let reopened = makeState()
+        reopened.startup()
+        XCTAssertEqual(reopened.notes, expected)
+        XCTAssertEqual(reopened.availableCategories, [work, home])
+        XCTAssertEqual(reopened.progress, NoteProgress(completed: 1, total: 2))
     }
 
     func testStatusItemObservesSuccessiveSavedWritesWithoutAWindow() async throws {

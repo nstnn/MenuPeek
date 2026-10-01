@@ -196,3 +196,36 @@ Native test repeatability remains unresolved: the reviewer's first run failed tw
 The final author Debug bundle is `build/task-categories/task-004/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `b1997ddc2ef6c4bf0fbd1688f196f5eebd44a6187cf8d9dd6a2804605a04c751`; debug dylib SHA-256: `a7157692e2faf2b9d7b66785e7cb29b81183c73a176226f65c8305e116aa3445`. Reviewer artifacts have their own identity in `review/artifact-identity.json`.
 
 Only isolated databases/defaults and fake login/hotkey services were used. No production app/data upgrade, actual category interface check, real login/hotkey registration, full-suite/Release run, remote CI, commit, push, or PR was performed for Task 4. Category draft selection/recovery, grouping/preferences, manager/selector, and actual-interface acceptance remain later cards. Historical results above retain their original scope.
+
+## Category drafts and recovery — Task 5, 2026-10-01
+
+Pass for Task 5's state-only automated verification. The baseline was clean `main` at `c7dd4a2bf339829ededcb22bb780b05f26422397`, which merges Task 4 (PR #37). It was verified as uncommitted changes, then committed unchanged on `feat/task-categories`, fast-forwarded to that baseline, for a pull request. Changed Swift inputs and their SHA-256 values: `DailyNotesState.swift` (`0e0d471f607d38d6b7f891a538789bb557f3f20efd11e6dde9582bd43766a4ed`), `DailyNotesStateTests.swift` (`2786258a8ce80a133170d5ba22cbec499a02256d2c489b74c9f5bd517a43fcba`), and `AppConfigurationTests.swift` (`cddf0b6b6794cf39ef258e6dcd9deefdd80405a0165c83ade25ac4fa7967b331`). Architecture and requirements describe the draft contract; this section keeps the dated evidence.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app and hosted tests with the shared MenuPocket scheme. The final run at 13:21 EDT passed **112/112 tests, zero failures or skipped**: DailyNotesStateTests (44), AppConfigurationTests (28), SQLiteNoteRepositoryTests (23), NoteDomainTests (9), and QuickAddPanelTests (8). The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-005/DerivedData \
+  -resultBundlePath build/task-categories/task-005/Verified-tests.xcresult \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+The first run on the initial source failed 2 assertions in Task 4's `testFailedCategoryWritesPreserveSavedSnapshotTaskErrorsAndBothDrafts`, which expected an edit to survive removal of its own selected category. Task 5's contract cancels that edit for recovery, so the test's final assertions now check the recovery context; its failed-write preservation assertions are unchanged. That run is kept as `Initial-failed-tests.xcresult` with its log.
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Independent drafts and atomic save | Pass: new and edit selections are separate; an edit starts from the saved association; one `update(id:text:categoryID:)` call saves text and category, including a category-only edit that keeps ID, order, completion, and day. A successful add resets its selection to General. |
+| Failure and cancellation | Pass: rejected adds/edits keep text and selection with their task error; cancelling an edit leaves the new draft intact, and cancelling the new draft clears only it. |
+| Invalid selections | Pass: a selection outside the loaded catalog is never written or published; storage rejecting a loaded category publishes nothing and keeps both drafts. |
+| Removal, refresh, and rename | Pass: removing a new draft's category keeps text, selects General, and shows a notice; removing an active edit's category cancels it with recovered text, ID, and the pre-removal name. A failed read changes no selection; a rename changes none. |
+| Rollover and window reuse | Pass: rollover recovers edit text and category context even when the next read fails, and the new draft keeps its selection for the new day. Real `TaskWindowController` close/reopen keeps both selections. |
+| Persistence and Quick Add | Pass: a temporary SQLite-backed state keeps categorized adds and a category-only edit across reopen. Quick Add still saves General and leaves the window's selections unchanged. |
+
+Retained under ignored `build/task-categories/task-005/`: `Verified-tests.xcresult`, `verified-tests.log`, `source-hashes.txt`, and the initial failed run. The Debug bundle is `DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `d2e8a73732c449b3403a325beadaacfd63687f723186a96c364ae5b44ac36bbd`; debug dylib SHA-256: `4bc3b2fffbe033ee45ead004174df9938febf369ae21fb89c4fc4f7a18fd3c7c`.
+
+Only isolated databases/defaults and fake login/hotkey services were used. No view changed, so no running-interface check was made. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed for Task 5. The selector control, grouping/preferences, manager, and actual-interface acceptance remain later cards.
