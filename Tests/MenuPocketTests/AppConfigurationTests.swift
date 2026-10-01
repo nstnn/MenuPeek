@@ -776,6 +776,15 @@ private final class TaskWindowReadFixture: NoteRepository {
     var readAttempts = 0
     var allowAdd = false
 
+    func categories() throws -> [TaskCategory] {
+        if failRead { throw CocoaError(.fileReadUnknown) }
+        return []
+    }
+    func createCategory(name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }
+    func renameCategory(id: UUID, name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }
+    func categoryUsageCount(id: UUID) throws -> Int { throw TaskCategoryRepositoryError.notFound(id) }
+    func removeCategory(id: UUID) throws { throw CocoaError(.fileWriteNoPermission) }
+
     func notes(for dayKey: String) throws -> [Note] {
         readAttempts += 1
         if failRead { throw CocoaError(.fileReadUnknown) }
@@ -788,10 +797,12 @@ private final class TaskWindowReadFixture: NoteRepository {
 
     func add(_ note: Note) throws {
         guard allowAdd else { throw CocoaError(.fileWriteNoPermission) }
+        if let id = note.categoryID { throw TaskCategoryRepositoryError.notFound(id) }
+        guard !saved.contains(where: { $0.id == note.id }) else { throw CocoaError(.fileWriteUnknown) }
         saved.append(note)
     }
     func setCompleted(id: UUID, completedAt: Date?) throws { throw CocoaError(.fileWriteNoPermission) }
-    func updateText(id: UUID, text: String) throws { throw CocoaError(.fileWriteNoPermission) }
+    func update(id: UUID, text: String, categoryID: UUID?) throws { throw CocoaError(.fileWriteNoPermission) }
     func delete(id: UUID) throws {
         deleteAttempts += 1
         onDelete?()

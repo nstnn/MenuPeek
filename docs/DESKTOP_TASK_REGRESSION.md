@@ -127,3 +127,39 @@ Results/logs are `Verified-tests.xcresult`, `verified-tests.log`, and `test-summ
 The final Debug bundle is `build/task-categories/task-002/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Its executable SHA-256 is `ef8d8cfe2fcbc7d0ada90d6a1e795f5fb82efc2e9ed49d658c0e17652612c7a6`; `MenuPocket.debug.dylib` SHA-256 is `fb90ce6bb4ad03d1f70b27e6cdd06573e38d2d3d8aeab2e4f7b259377c3250dc`.
 
 Fixtures use per-test temporary databases and are removed by teardown; the Debug XCTest host skips production delegate/storage initialization. No user database was upgraded, no real login/hotkey registration was changed, and no production backup/app launch was performed. Category repository operations, associated-task reads/writes, and interface controls remain later work. No full-suite run, Release build, remote CI, actual-interface acceptance, commit, or push was performed for this card. Before a first real-data launch, follow [upgrade preparation](WORKFLOW.md#schema-v2-upgrade-preparation); a v1 binary cannot reopen v2.
+
+## Category repository operations — Task 3, 2026-09-30
+
+Pass for Task 3's focused automated verification. The changes are uncommitted on `feat/task-categories`, based on `847cea88f1af36adeb0e59edd3572726f0ddab33`. Six Swift inputs changed: the repository protocol/implementation, the daily state's text-edit caller, and the SQLite/state/configuration tests. The SHA-256 of the sorted source-input hash manifest is `fbf87db327513f69353942435323b69d8d98201db0095cee32352aa19389b792`; per-file hashes and identity are retained under ignored `build/task-categories/task-003/` in `source-inputs.json` and `identity.json`.
+
+Xcode 27.0 (`27A266a`) built the Debug app and hosted suite on arm64 macOS 26.6.2 (`25G83`). The result bundle reports **88 passed, zero failed, zero skipped**: SQLiteNoteRepositoryTests (23), DailyNotesStateTests (28), AppConfigurationTests (28), and NoteDomainTests (9). The final command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-003/DerivedData \
+  -resultBundlePath build/task-categories/task-003/Verified-tests.xcresult \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/NoteDomainTests test
+```
+
+| Claim | Outcome and retained comparison |
+| --- | --- |
+| Category catalog and naming | Pass through repository APIs: create/rename/reopen preserve UUID/order; names are trimmed and canonically case-folded; duplicate, blank, multiline, reserved, missing-target, and order-overflow errors preserve records. Removing a category does not renumber survivors. |
+| Task association and atomic edit | Pass: categorized and General adds/readbacks, text+category edits, category-only reassignment, explicit null selection, completion/uncompletion, and reopen preserve task identity, rowid/order, assigned day, and creation/completion fields as applicable. |
+| Failed writes and retry | Pass: fixture AFTER INSERT/UPDATE triggers raise FAIL after category/task changes have begun. Transactions restore the original category catalog and complete task-row snapshots; retry persists successfully without consuming category order on failed creation. |
+| All-days usage and removal | Pass: usage includes completed/unfinished tasks from today, yesterday, and an older day. An AFTER association-update failure on an older row rolls back removal and every assignment. Retry clears only the removed ID, retaining all task fields/rowids, other associations, progress, and unfinished counts across reopen. |
+| Invalid reads | Pass: malformed category UUIDs, reserved/untrimmed names, mismatched name keys, malformed task references, and orphan references throw without silently falling back to General or repairing the fixture. |
+| Caller/fake integration | Pass: both protocol conformers build; the daily state passes the saved category during a text edit. A SQLite-backed state regression preserves association through completion, editing, refresh, connection release/reopen, and uncompletion; existing draft/failure, ordering, availability, lifecycle, and Quick Add configuration regressions pass. |
+
+Results are retained as `Verified-tests.xcresult`, `verified-tests.log`, and `test-summary.json`. The initial restricted-sandbox attempt could not run Xcode compiler plugins; the successful run allowed the required Xcode services. Existing weak-variable compiler warnings and one internal hosted-test QoS warning are retained in the logs/result bundle. Independent acceptance review returned READY for TASK-003.
+
+Independent reviewer `/root/task3_review` did not author or modify the reviewed implementation. The reviewed diff SHA-256 was `7b53c3896daa8953d9d55f6b820ef1c247ed3270893c8ac0fcbd8c36d5e93c57`, with the same six Swift source hashes above. Fresh SQLite (23), state (28), and domain (9) tests passed. An isolated probe held a reader through each of seven mutations, verified a `SQLITE_BUSY` COMMIT failure restored the full raw category/task snapshot, and verified successful retry; writer contention and reopen passed too. Report and probe inputs/logs are retained in `independent-review.md` and `review/` under the Task 3 directory.
+
+Native-test reliability remains a separate limitation: the reviewer combined run passed 87/88 tests, failing one select/copy/cut test (three assertions); a same-environment base run passed 78/79 with a different Settings-close failure (two assertions). Both native tests passed in matched isolated runs on base and patch, 2/2 each. The author's 88/88 run above remains a distinct observation. No identical baseline failure, established environmental cause, or blanket green reviewer suite is claimed. No material Task 3 repository defect was found. Final completion/evidence metadata does not change the reviewed Swift inputs.
+
+The Debug bundle is `build/task-categories/task-003/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `ee02751deb81f443a702e0cad46203dda88f789c240f3bf8431c543c7a9307d3`; debug dylib SHA-256: `6dfcb3a19d76e7218f2aaea4358130711f9bcad518f5f1462cf33a01e9520b02`.
+
+Only temporary databases/defaults and fake system services are used. No production database/app launch, login/hotkey registration, full-suite/Release run, remote CI, commit, or push is claimed. Shared category catalog/commands and drafts, grouped presentation, manager/selector, and actual category interface acceptance remain later cards. The dated Task 1/2 and desktop evidence above retains its original scope.

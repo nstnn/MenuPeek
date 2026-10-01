@@ -38,7 +38,7 @@ All app-owned visible and accessibility copy is English, including dates indepen
 
 ## Storage and platform constraints
 
-- Preserve bundle identifier `local.menupocket.app` and the sandbox's Application Support `MenuPocket/notes.sqlite`. Use schema v2 with a validated additive upgrade from the known unversioned/v1 task format; never rebuild or vacuum the notes table for this upgrade. Category repository operations and interface controls remain a later increment.
+- Preserve bundle identifier `local.menupocket.app` and the sandbox's Application Support `MenuPocket/notes.sqlite`. Use schema v2 with a validated additive upgrade from the known unversioned/v1 task format; never rebuild or vacuum the notes table for this upgrade. Category repository operations now persist stable identities/order, normalized unique names, optional task assignments, atomic text/category edits, and all-days removal that preserves tasks and counts. Shared category state and interface controls remain a later increment.
 - Keep preferences and onboarding markers in their existing `UserDefaults` storage, separate from tasks.
 - Retain macOS 14+, SwiftUI/AppKit, App Sandbox, system SQLite, and no account, network service, or third-party dependency.
 - Use one app-owned daily state and repository connection. Window presentation and menu bar rendering are consumers, not additional saved-data authorities.

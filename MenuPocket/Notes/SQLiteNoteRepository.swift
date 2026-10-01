@@ -75,22 +75,117 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    func add(_ note: Note) throws {
+    func categories() throws -> [TaskCategory] {
         let statement = try prepare(
-            "INSERT INTO notes (id, text, day_key, created_at, completed_at) VALUES (?, ?, ?, ?, ?)"
+            "SELECT id, name, name_key, creation_order FROM categories ORDER BY creation_order ASC"
         )
         defer { sqlite3_finalize(statement) }
+        var result: [TaskCategory] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return result }
+            try check(step, expected: SQLITE_ROW, operation: "read categories")
+            result.append(try category(from: statement))
+        }
+    }
 
-        try bind(note.id.uuidString, at: 1, to: statement)
-        try bind(note.text, at: 2, to: statement)
-        try bind(note.dayKey, at: 3, to: statement)
-        try check(sqlite3_bind_double(statement, 4, note.createdAt.timeIntervalSince1970),
-                  operation: "bind created_at")
-        let completedResult = note.completedAt.map {
-            sqlite3_bind_double(statement, 5, $0.timeIntervalSince1970)
-        } ?? sqlite3_bind_null(statement, 5)
-        try check(completedResult, operation: "bind completed_at")
-        try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "insert note")
+    func createCategory(name: String) throws -> TaskCategory {
+        let name = try TaskCategoryName.validate(name)
+        return try transaction {
+            try checkCategoryNameAvailable(name)
+            let orderStatement = try prepare("SELECT MAX(creation_order) FROM categories")
+            defer { sqlite3_finalize(orderStatement) }
+            try check(sqlite3_step(orderStatement), expected: SQLITE_ROW, operation: "read category order")
+            let order: Int64
+            if sqlite3_column_type(orderStatement, 0) == SQLITE_NULL {
+                order = 0
+            } else {
+                guard sqlite3_column_type(orderStatement, 0) == SQLITE_INTEGER else {
+                    throw TaskCategoryRepositoryError.invalidRow
+                }
+                let next = sqlite3_column_int64(orderStatement, 0).addingReportingOverflow(1)
+                guard !next.overflow else { throw TaskCategoryRepositoryError.orderExhausted }
+                order = next.partialValue
+            }
+            let saved = try TaskCategory(name: name, creationOrder: order)
+            let statement = try prepare(
+                "INSERT INTO categories (id, name, name_key, creation_order) VALUES (?, ?, ?, ?)"
+            )
+            defer { sqlite3_finalize(statement) }
+            try bind(saved.id.uuidString, at: 1, to: statement)
+            try bind(saved.name, at: 2, to: statement)
+            try bind(saved.nameKey, at: 3, to: statement)
+            try check(sqlite3_bind_int64(statement, 4, saved.creationOrder), operation: "bind category order")
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "create category")
+            return saved
+        }
+    }
+
+    func renameCategory(id: UUID, name: String) throws -> TaskCategory {
+        let name = try TaskCategoryName.validate(name)
+        return try transaction {
+            let original = try requireCategory(id)
+            try checkCategoryNameAvailable(name, excluding: id)
+            let saved = try TaskCategory(id: id, name: name, creationOrder: original.creationOrder)
+            let statement = try prepare("UPDATE categories SET name = ?, name_key = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(saved.name, at: 1, to: statement)
+            try bind(saved.nameKey, at: 2, to: statement)
+            try bind(id.uuidString, at: 3, to: statement)
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "rename category")
+            guard sqlite3_changes(database) == 1 else { throw TaskCategoryRepositoryError.notFound(id) }
+            return saved
+        }
+    }
+
+    func categoryUsageCount(id: UUID) throws -> Int {
+        // One statement distinguishes a missing category from an existing unused one.
+        let statement = try prepare(
+            """
+            SELECT (SELECT COUNT(*) FROM notes WHERE category_id = categories.id)
+            FROM categories WHERE id = ?
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, at: 1, to: statement)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { throw TaskCategoryRepositoryError.notFound(id) }
+        try check(step, expected: SQLITE_ROW, operation: "count category usage")
+        return Int(sqlite3_column_int64(statement, 0))
+    }
+
+    func removeCategory(id: UUID) throws {
+        try transaction {
+            _ = try requireCategory(id)
+            let statement = try prepare("DELETE FROM categories WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, at: 1, to: statement)
+            // The connection's ON DELETE SET NULL relationship clears every day's assignments.
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "remove category")
+            guard sqlite3_changes(database) == 1 else { throw TaskCategoryRepositoryError.notFound(id) }
+        }
+    }
+
+    func add(_ note: Note) throws {
+        try transaction {
+            if let id = note.categoryID { _ = try requireCategory(id) }
+            let statement = try prepare(
+                "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id) VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(note.id.uuidString, at: 1, to: statement)
+            try bind(note.text, at: 2, to: statement)
+            try bind(note.dayKey, at: 3, to: statement)
+            try check(sqlite3_bind_double(statement, 4, note.createdAt.timeIntervalSince1970),
+                      operation: "bind created_at")
+            let completedResult = note.completedAt.map {
+                sqlite3_bind_double(statement, 5, $0.timeIntervalSince1970)
+            } ?? sqlite3_bind_null(statement, 5)
+            try check(completedResult, operation: "bind completed_at")
+            try bindCategoryID(note.categoryID, at: 6, to: statement)
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "insert note")
+        }
     }
 
     func notes(for dayKey: String) throws -> [Note] {
@@ -98,9 +193,10 @@ final class SQLiteNoteRepository: NoteRepository {
         // Do not rebuild this table without preserving that relative order.
         let statement = try prepare(
             """
-            SELECT id, text, day_key, created_at, completed_at
-            FROM notes WHERE day_key = ?
-            ORDER BY rowid ASC
+            SELECT notes.id, text, day_key, created_at, completed_at, category_id,
+                   categories.id, name, name_key, creation_order
+            FROM notes LEFT JOIN categories ON categories.id = notes.category_id
+            WHERE day_key = ? ORDER BY notes.rowid ASC
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -130,10 +226,23 @@ final class SQLiteNoteRepository: NoteRepository {
                 guard value.isFinite else { throw SQLiteNoteStoreError.invalidNoteRow }
                 completedAt = Date(timeIntervalSince1970: value)
             }
+            let categoryID: UUID?
+            if sqlite3_column_type(statement, 5) == SQLITE_NULL {
+                categoryID = nil
+            } else {
+                guard let reference = UUID(uuidString: try text(at: 5, from: statement)),
+                      sqlite3_column_type(statement, 6) != SQLITE_NULL else {
+                    throw SQLiteNoteStoreError.invalidNoteRow
+                }
+                guard try category(from: statement, offset: 6).id == reference else {
+                    throw SQLiteNoteStoreError.invalidNoteRow
+                }
+                categoryID = reference
+            }
             result.append(Note(id: id, text: try text(at: 1, from: statement),
                                dayKey: try text(at: 2, from: statement),
                                createdAt: Date(timeIntervalSince1970: createdAt),
-                               completedAt: completedAt))
+                               completedAt: completedAt, categoryID: categoryID))
         }
     }
 
@@ -148,29 +257,99 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     func setCompleted(id: UUID, completedAt: Date?) throws {
-        let statement = try prepare("UPDATE notes SET completed_at = ? WHERE id = ?")
-        defer { sqlite3_finalize(statement) }
-        let timestampResult = completedAt.map {
-            sqlite3_bind_double(statement, 1, $0.timeIntervalSince1970)
-        } ?? sqlite3_bind_null(statement, 1)
-        try check(timestampResult, operation: "bind completed_at")
-        try bind(id.uuidString, at: 2, to: statement)
-        try executeWrite(statement, id: id, operation: "set completion")
+        try transaction {
+            let statement = try prepare("UPDATE notes SET completed_at = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            let timestampResult = completedAt.map {
+                sqlite3_bind_double(statement, 1, $0.timeIntervalSince1970)
+            } ?? sqlite3_bind_null(statement, 1)
+            try check(timestampResult, operation: "bind completed_at")
+            try bind(id.uuidString, at: 2, to: statement)
+            try executeWrite(statement, id: id, operation: "set completion")
+        }
     }
 
-    func updateText(id: UUID, text: String) throws {
-        let statement = try prepare("UPDATE notes SET text = ? WHERE id = ?")
-        defer { sqlite3_finalize(statement) }
-        try bind(text, at: 1, to: statement)
-        try bind(id.uuidString, at: 2, to: statement)
-        try executeWrite(statement, id: id, operation: "update note text")
+    func update(id: UUID, text: String, categoryID: UUID?) throws {
+        try transaction {
+            if let categoryID { _ = try requireCategory(categoryID) }
+            let statement = try prepare("UPDATE notes SET text = ?, category_id = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(text, at: 1, to: statement)
+            try bindCategoryID(categoryID, at: 2, to: statement)
+            try bind(id.uuidString, at: 3, to: statement)
+            try executeWrite(statement, id: id, operation: "update note text and category")
+        }
     }
 
     func delete(id: UUID) throws {
-        let statement = try prepare("DELETE FROM notes WHERE id = ?")
+        try transaction {
+            let statement = try prepare("DELETE FROM notes WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, at: 1, to: statement)
+            try executeWrite(statement, id: id, operation: "delete note")
+        }
+    }
+
+    private func transaction<Result>(_ body: () throws -> Result) throws -> Result {
+        try Self.execute("BEGIN IMMEDIATE", in: database)
+        do {
+            let result = try body()
+            try Self.execute("COMMIT", in: database)
+            return result
+        } catch {
+            try? Self.execute("ROLLBACK", in: database)
+            throw error
+        }
+    }
+
+    private func category(from statement: OpaquePointer, offset: Int32 = 0) throws -> TaskCategory {
+        do {
+            guard let id = UUID(uuidString: try text(at: offset, from: statement)),
+                  sqlite3_column_type(statement, offset + 3) == SQLITE_INTEGER else {
+                throw TaskCategoryRepositoryError.invalidRow
+            }
+            let name = try text(at: offset + 1, from: statement)
+            let saved = try TaskCategory(id: id, name: name,
+                                         creationOrder: sqlite3_column_int64(statement, offset + 3))
+            guard saved.name == name,
+                  saved.nameKey == (try text(at: offset + 2, from: statement)) else {
+                throw TaskCategoryRepositoryError.invalidRow
+            }
+            return saved
+        } catch {
+            throw TaskCategoryRepositoryError.invalidRow
+        }
+    }
+
+    private func requireCategory(_ id: UUID) throws -> TaskCategory {
+        let statement = try prepare("SELECT id, name, name_key, creation_order FROM categories WHERE id = ?")
         defer { sqlite3_finalize(statement) }
         try bind(id.uuidString, at: 1, to: statement)
-        try executeWrite(statement, id: id, operation: "delete note")
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { throw TaskCategoryRepositoryError.notFound(id) }
+        try check(step, expected: SQLITE_ROW, operation: "read category")
+        return try category(from: statement)
+    }
+
+    private func checkCategoryNameAvailable(_ name: String, excluding id: UUID? = nil) throws {
+        let statement = try prepare("SELECT id FROM categories WHERE name_key = ?")
+        defer { sqlite3_finalize(statement) }
+        try bind(TaskCategoryName.key(for: name), at: 1, to: statement)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return }
+        try check(step, expected: SQLITE_ROW, operation: "check category name")
+        guard let existingID = UUID(uuidString: try text(at: 0, from: statement)) else {
+            throw TaskCategoryRepositoryError.invalidRow
+        }
+        if existingID != id { throw TaskCategoryRepositoryError.duplicateName }
+    }
+
+    private func bindCategoryID(_ id: UUID?, at index: Int32, to statement: OpaquePointer) throws {
+        if let id {
+            try bind(id.uuidString, at: index, to: statement)
+        } else {
+            try check(sqlite3_bind_null(statement, index), operation: "bind category_id")
+        }
     }
 
     private func executeWrite(_ statement: OpaquePointer, id: UUID,

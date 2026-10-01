@@ -13,7 +13,7 @@ final class DailyNotesStateTests: XCTestCase {
         let original = Note(id: UUID(), text: "Categorized", dayKey: "2026-09-27",
                             createdAt: current, completedAt: nil, categoryID: category.id)
         let general = note("General task", day: original.dayKey, createdAt: 1)
-        let store = FakeNoteRepository(notes: [original, general])
+        let store = FakeNoteRepository(notes: [original, general], categories: [category])
         let state = makeState(store: store, now: { current })
         state.startup()
 
@@ -44,11 +44,12 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(reopened.notes, [edited, general])
     }
 
-    func testRejectedCategorizedTaskWritesPreserveAssociationAndEditDraft() {
+    func testRejectedCategorizedTaskWritesPreserveAssociationAndEditDraft() throws {
         let current = instant("2026-09-27T12:00:00-04:00")
+        let category = try TaskCategory(name: "Work", creationOrder: 0)
         let original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
-                            createdAt: current, completedAt: nil, categoryID: UUID())
-        let store = FakeNoteRepository(notes: [original])
+                            createdAt: current, completedAt: nil, categoryID: category.id)
+        let store = FakeNoteRepository(notes: [original], categories: [category])
         let state = makeState(store: store, now: { current })
         state.startup()
 
@@ -552,6 +553,51 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(fourthSession.notes.first?.id, firstID)
     }
 
+    func testSQLiteBackedTextEditPreservesCategoryThroughCompletionRefreshAndReopen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DailyNotesStateCategories-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("notes.sqlite")
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let original: Note
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
+                            createdAt: current, completedAt: nil, categoryID: category.id)
+            try store.add(original)
+        }
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: databaseURL) },
+                            day: self.makeDay(now: { current }),
+                            notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter())
+        }
+        do {
+            let state = makeState()
+            state.startup()
+            XCTAssertEqual(state.notes, [original])
+            XCTAssertTrue(state.setCompleted(id: original.id, completed: true))
+            state.beginEditing(id: original.id)
+            state.editDraft = "  Updated  "
+            XCTAssertTrue(state.saveEdit())
+            state.refresh()
+            XCTAssertEqual(state.notes.first?.categoryID, original.categoryID)
+            XCTAssertEqual(state.notes.first?.text, "Updated")
+            XCTAssertEqual(state.progress, NoteProgress(completed: 1, total: 1))
+        }
+        let reopened = makeState()
+        reopened.startup()
+        XCTAssertEqual(reopened.notes, [
+            Note(id: original.id, text: "Updated", dayKey: original.dayKey,
+                 createdAt: original.createdAt, completedAt: current, categoryID: original.categoryID)
+        ])
+        XCTAssertTrue(reopened.setCompleted(id: original.id, completed: false))
+        reopened.refresh()
+        XCTAssertEqual(reopened.notes.first?.categoryID, original.categoryID)
+        XCTAssertEqual(reopened.progress, NoteProgress(completed: 0, total: 1))
+    }
+
     func testAvailabilityDistinguishesEmptyReadFailureAndRejectedWrite() {
         let store = FakeNoteRepository()
         let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
@@ -723,15 +769,65 @@ private enum FakeFailure: Error { case failed }
 
 private final class FakeNoteRepository: NoteRepository {
     var saved: [Note]
+    var savedCategories: [TaskCategory]
     var onRead: ((String) -> Void)?
     var failCount = false
     var failWrite: DailyNotesIssue?
 
-    init(notes: [Note] = []) { saved = notes }
+    init(notes: [Note] = [], categories: [TaskCategory] = []) {
+        saved = notes
+        savedCategories = categories
+    }
+
+    func categories() throws -> [TaskCategory] {
+        savedCategories.sorted { $0.creationOrder < $1.creationOrder }
+    }
+
+    func createCategory(name: String) throws -> TaskCategory {
+        let name = try TaskCategoryName.validate(name)
+        guard !savedCategories.contains(where: { $0.nameKey == TaskCategoryName.key(for: name) }) else {
+            throw TaskCategoryRepositoryError.duplicateName
+        }
+        let next = (savedCategories.map(\.creationOrder).max() ?? -1).addingReportingOverflow(1)
+        guard !next.overflow else { throw TaskCategoryRepositoryError.orderExhausted }
+        let category = try TaskCategory(name: name, creationOrder: next.partialValue)
+        savedCategories.append(category)
+        return category
+    }
+
+    func renameCategory(id: UUID, name: String) throws -> TaskCategory {
+        let name = try TaskCategoryName.validate(name)
+        let original = try requireCategory(id)
+        guard !savedCategories.contains(where: { $0.id != id && $0.nameKey == TaskCategoryName.key(for: name) }) else {
+            throw TaskCategoryRepositoryError.duplicateName
+        }
+        let category = try TaskCategory(id: id, name: name, creationOrder: original.creationOrder)
+        savedCategories[savedCategories.firstIndex(where: { $0.id == id })!] = category
+        return category
+    }
+
+    func categoryUsageCount(id: UUID) throws -> Int {
+        _ = try requireCategory(id)
+        return saved.count { $0.categoryID == id }
+    }
+
+    func removeCategory(id: UUID) throws {
+        _ = try requireCategory(id)
+        saved = saved.map { note in
+            Note(id: note.id, text: note.text, dayKey: note.dayKey,
+                 createdAt: note.createdAt, completedAt: note.completedAt,
+                 categoryID: note.categoryID == id ? nil : note.categoryID)
+        }
+        savedCategories.removeAll { $0.id == id }
+    }
 
     func notes(for dayKey: String) throws -> [Note] {
         onRead?(dayKey)
-        return saved.filter { $0.dayKey == dayKey }
+        let notes = saved.filter { $0.dayKey == dayKey }
+        for note in notes {
+            if let id = note.categoryID { _ = try requireCategory(id) }
+        }
+        return notes
     }
 
     func incompleteCount(for dayKey: String) throws -> Int {
@@ -741,6 +837,8 @@ private final class FakeNoteRepository: NoteRepository {
 
     func add(_ note: Note) throws {
         if failWrite == .add { throw FakeFailure.failed }
+        if let id = note.categoryID { _ = try requireCategory(id) }
+        guard !saved.contains(where: { $0.id == note.id }) else { throw FakeFailure.failed }
         saved.append(note)
     }
 
@@ -753,13 +851,21 @@ private final class FakeNoteRepository: NoteRepository {
         }
     }
 
-    func updateText(id: UUID, text: String) throws {
+    func update(id: UUID, text: String, categoryID: UUID?) throws {
         if failWrite == .edit { throw FakeFailure.failed }
+        if let categoryID { _ = try requireCategory(categoryID) }
         try mutate(id: id) { note in
             Note(id: note.id, text: text, dayKey: note.dayKey,
                  createdAt: note.createdAt, completedAt: note.completedAt,
-                 categoryID: note.categoryID)
+                 categoryID: categoryID)
         }
+    }
+
+    private func requireCategory(_ id: UUID) throws -> TaskCategory {
+        guard let category = savedCategories.first(where: { $0.id == id }) else {
+            throw TaskCategoryRepositoryError.notFound(id)
+        }
+        return category
     }
 
     func delete(id: UUID) throws {

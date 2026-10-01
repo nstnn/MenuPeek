@@ -214,7 +214,7 @@ final class DailyNotesState {
               let index = notes.firstIndex(where: { $0.id == id }) else { return false }
         let saved = notes[index]
         do {
-            try repository.updateText(id: id, text: text)
+            try repository.update(id: id, text: text, categoryID: saved.categoryID)
             notes[index] = Note(id: saved.id, text: text, dayKey: saved.dayKey,
                                 createdAt: saved.createdAt, completedAt: saved.completedAt,
                                 categoryID: saved.categoryID)

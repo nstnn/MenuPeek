@@ -175,7 +175,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         )
         for _ in 0..<2 {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-            XCTAssertThrowsError(try store.updateText(id: saved.id, text: "Rejected")) { error in
+            XCTAssertThrowsError(try store.update(id: saved.id, text: "Rejected", categoryID: saved.categoryID)) { error in
                 guard case SQLiteNoteStoreError.databaseError(_, let code, _) = error else {
                     return XCTFail("Unexpected error: \(error)")
                 }
@@ -328,7 +328,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             XCTAssertEqual(try store.notes(for: first.dayKey)[1].completedAt, completedAt)
             try store.setCompleted(id: second.id, completedAt: nil)
-            try store.updateText(id: first.id, text: "Edited ' note 📝")
+            try store.update(id: first.id, text: "Edited ' note 📝", categoryID: first.categoryID)
             try store.delete(id: second.id)
         }
 
@@ -349,7 +349,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
 
         let writes: [() throws -> Void] = [
             { try store.setCompleted(id: missing, completedAt: Date()) },
-            { try store.updateText(id: missing, text: "Missing") },
+            { try store.update(id: missing, text: "Missing", categoryID: nil) },
             { try store.delete(id: missing) }
         ]
         for write in writes {
@@ -379,7 +379,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
 
         let writes: [() throws -> Void] = [
             { try store.setCompleted(id: saved.id, completedAt: Date()) },
-            { try store.updateText(id: saved.id, text: "Unsaved") },
+            { try store.update(id: saved.id, text: "Unsaved", categoryID: saved.categoryID) },
             { try store.delete(id: saved.id) }
         ]
         for write in writes {
@@ -394,9 +394,260 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try reopened.notes(for: saved.dayKey), [saved])
     }
 
-    private func note(_ text: String, day: String, createdAt: TimeInterval) -> Note {
+    func testCategoryCatalogValidationRenameAndCreationOrderSurviveReopen() throws {
+        var expected: [TaskCategory] = []
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.categories(), [])
+            let work = try store.createCategory(name: "  Work ' 📝  ")
+            let cafe = try store.createCategory(name: "CAFÉ")
+            let fitness = try store.createCategory(name: "Fitness")
+            XCTAssertEqual(work.name, "Work ' 📝")
+            XCTAssertEqual([work.creationOrder, cafe.creationOrder, fitness.creationOrder], [0, 1, 2])
+            for name in ["work ' 📝", "Cafe\u{301}"] {
+                XCTAssertThrowsError(try store.createCategory(name: name)) {
+                    XCTAssertEqual($0 as? TaskCategoryRepositoryError, .duplicateName)
+                }
+            }
+            for name in ["", " \t ", "Work\nHome", " general "] {
+                XCTAssertThrowsError(try store.createCategory(name: name))
+                XCTAssertThrowsError(try store.renameCategory(id: work.id, name: name))
+            }
+            XCTAssertThrowsError(try store.renameCategory(id: work.id, name: "café")) {
+                XCTAssertEqual($0 as? TaskCategoryRepositoryError, .duplicateName)
+            }
+            let renamed = try store.renameCategory(id: work.id, name: "  School  ")
+            XCTAssertEqual(renamed.id, work.id)
+            XCTAssertEqual(renamed.creationOrder, work.creationOrder)
+            XCTAssertEqual(try store.renameCategory(id: work.id, name: "School"), renamed)
+            XCTAssertEqual(try store.categoryUsageCount(id: cafe.id), 0)
+            try store.removeCategory(id: cafe.id)
+            let later = try store.createCategory(name: "Later")
+            XCTAssertEqual(later.creationOrder, 3)
+            expected = [renamed, fitness, later]
+            XCTAssertEqual(try store.categories(), expected)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.categories(), expected)
+    }
+
+    func testCategoryWriteFailuresRollBackThenRetryWithoutConsumingOrder() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let before = try rawRows("SELECT * FROM categories ORDER BY creation_order")
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_category_create AFTER INSERT ON categories
+            BEGIN SELECT RAISE(FAIL, 'write rejected after insert'); END;
+            CREATE TRIGGER reject_category_rename AFTER UPDATE OF name ON categories
+            BEGIN SELECT RAISE(FAIL, 'write rejected after rename'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.createCategory(name: "School"))
+        XCTAssertThrowsError(try store.renameCategory(id: work.id, name: "Changed"))
+        XCTAssertEqual(try rawRows("SELECT * FROM categories ORDER BY creation_order"), before)
+        XCTAssertEqual(try store.categories(), [work])
+        try executeRaw("DROP TRIGGER reject_category_create; DROP TRIGGER reject_category_rename")
+        let school = try store.createCategory(name: "School")
+        XCTAssertEqual(school.creationOrder, 1)
+        let renamed = try store.renameCategory(id: work.id, name: "Changed")
+        XCTAssertEqual(try store.categories(), [renamed, school])
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.categories(), [renamed, school])
+    }
+
+    func testCategorizedAddsAndAtomicEditsPreserveTaskIdentityOrderAndCounts() throws {
+        var expected: [Note] = []
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let work = try store.createCategory(name: "Work")
+            let school = try store.createCategory(name: "School")
+            let first = note("First", day: "2026-09-27", createdAt: 100, categoryID: work.id)
+            let second = note("Second", day: first.dayKey, createdAt: 10)
+            let third = note("Third", day: first.dayKey, createdAt: 10, categoryID: school.id)
+            for task in [first, second, third] { try store.add(task) }
+            XCTAssertEqual(try store.notes(for: first.dayKey), [first, second, third])
+            XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                           [[work.id.uuidString], [nil], [school.id.uuidString]])
+            let protectedFields = try rawRows("SELECT rowid, id, day_key, created_at, completed_at FROM notes ORDER BY rowid")
+            try store.update(id: first.id, text: "Edited ' 📝", categoryID: school.id)
+            try store.update(id: second.id, text: second.text, categoryID: work.id)
+            try store.update(id: third.id, text: third.text, categoryID: nil)
+            expected = [
+                Note(id: first.id, text: "Edited ' 📝", dayKey: first.dayKey,
+                     createdAt: first.createdAt, completedAt: nil, categoryID: school.id),
+                Note(id: second.id, text: second.text, dayKey: second.dayKey,
+                     createdAt: second.createdAt, completedAt: nil, categoryID: work.id),
+                Note(id: third.id, text: third.text, dayKey: third.dayKey,
+                     createdAt: third.createdAt, completedAt: nil)
+            ]
+            XCTAssertEqual(try store.notes(for: first.dayKey), expected)
+            XCTAssertEqual(try rawRows("SELECT rowid, id, day_key, created_at, completed_at FROM notes ORDER BY rowid"), protectedFields)
+            let completion = Date(timeIntervalSince1970: 200)
+            try store.setCompleted(id: first.id, completedAt: completion)
+            XCTAssertEqual(try store.notes(for: first.dayKey).first?.categoryID, school.id)
+            XCTAssertEqual(try store.incompleteCount(for: first.dayKey), 2)
+            try store.setCompleted(id: first.id, completedAt: nil)
+            XCTAssertEqual(try store.notes(for: first.dayKey), expected)
+            XCTAssertEqual(try store.incompleteCount(for: first.dayKey), 3)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), expected)
+    }
+
+    func testMissingCategoryAndTaskTargetsThrowWithoutChangingSavedRows() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10, categoryID: category.id)
+        try store.add(saved)
+        let missing = UUID()
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let operations: [() throws -> Void] = [
+            { _ = try store.renameCategory(id: missing, name: "Missing") },
+            { _ = try store.categoryUsageCount(id: missing) },
+            { try store.removeCategory(id: missing) },
+            { try store.add(self.note("Rejected", day: saved.dayKey, createdAt: 20, categoryID: missing)) },
+            { try store.update(id: saved.id, text: "Rejected", categoryID: missing) }
+        ]
+        for operation in operations {
+            XCTAssertThrowsError(try operation()) {
+                XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(missing))
+            }
+        }
+        XCTAssertThrowsError(try store.update(id: missing, text: "Missing", categoryID: category.id)) {
+            guard case SQLiteNoteStoreError.noteNotFound(missing) = $0 else {
+                return XCTFail("Unexpected error: \($0)")
+            }
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+        XCTAssertEqual(try store.categories(), [category])
+        XCTAssertEqual(try store.notes(for: saved.dayKey), [saved])
+    }
+
+    func testFailedCategorizedAddAndEditRollBackBothFieldsIncludingAfterWriteFailure() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let school = try store.createCategory(name: "School")
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10,
+                         completedAt: Date(timeIntervalSince1970: 20), categoryID: work.id)
+        try store.add(saved)
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_task_add AFTER INSERT ON notes
+            BEGIN SELECT RAISE(FAIL, 'write rejected after insert'); END;
+            CREATE TRIGGER reject_task_edit AFTER UPDATE OF text ON notes
+            BEGIN SELECT RAISE(FAIL, 'write rejected after edit'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.add(note("Unsaved", day: saved.dayKey, createdAt: 30, categoryID: school.id)))
+        XCTAssertThrowsError(try store.update(id: saved.id, text: "Unsaved", categoryID: school.id))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+        XCTAssertEqual(try store.notes(for: saved.dayKey), [saved])
+        XCTAssertEqual(try store.incompleteCount(for: saved.dayKey), 0)
+        try executeRaw("DROP TRIGGER reject_task_add; DROP TRIGGER reject_task_edit")
+        try store.update(id: saved.id, text: "Retry", categoryID: school.id)
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: saved.dayKey), [
+            Note(id: saved.id, text: "Retry", dayKey: saved.dayKey,
+                 createdAt: saved.createdAt, completedAt: saved.completedAt, categoryID: school.id)
+        ])
+    }
+
+    func testCategoryRemovalRollsBackAcrossAllDaysThenPreservesTasksAndCountsOnRetry() throws {
+        let days = ["2026-09-27", "2026-09-26", "2026-09-25"]
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let other = try store.createCategory(name: "Other")
+        for (index, day) in days.enumerated() {
+            try store.add(note("Unfinished", day: day, createdAt: Double(index), categoryID: work.id))
+            try store.add(note("Finished", day: day, createdAt: Double(index),
+                               completedAt: Date(timeIntervalSince1970: 30), categoryID: work.id))
+            try store.add(note("Other", day: day, createdAt: Double(index), categoryID: other.id))
+            try store.add(note("General", day: day, createdAt: Double(index)))
+        }
+        XCTAssertEqual(try store.categoryUsageCount(id: work.id), 6)
+        XCTAssertEqual(try store.categoryUsageCount(id: other.id), 3)
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let fields = try legacyRows()
+        let progress = try days.map { NoteProgress(notes: try store.notes(for: $0), for: $0) }
+        let counts = try days.map { try store.incompleteCount(for: $0) }
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_old_assignment AFTER UPDATE OF category_id ON notes
+            WHEN NEW.day_key = '2026-09-25'
+            BEGIN SELECT RAISE(FAIL, 'write rejected after reassignment'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.removeCategory(id: work.id))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        XCTAssertEqual(try store.categories(), [work, other])
+        XCTAssertEqual(try store.categoryUsageCount(id: work.id), 6)
+        try executeRaw("DROP TRIGGER reject_old_assignment")
+        try store.removeCategory(id: work.id)
+        XCTAssertEqual(try legacyRows(), fields)
+        XCTAssertEqual(try store.categories(), [other])
+        XCTAssertEqual(try days.map { NoteProgress(notes: try store.notes(for: $0), for: $0) }, progress)
+        XCTAssertEqual(try days.map { try store.incompleteCount(for: $0) }, counts)
+        XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                       Array(repeating: [[nil], [nil], [other.id.uuidString], [nil]], count: 3).flatMap { $0 })
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.categories(), [other])
+        XCTAssertEqual(try reopened.categoryUsageCount(id: other.id), 3)
+        XCTAssertEqual(try legacyRows(), fields)
+        for day in days {
+            XCTAssertEqual(try reopened.notes(for: day).map(\.categoryID), [nil, nil, other.id, nil])
+        }
+        XCTAssertThrowsError(try reopened.removeCategory(id: work.id)) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(work.id))
+        }
+    }
+
+    func testInvalidCategoryRowsAndAssociationsAreReadErrorsWithoutRepair() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        let saved = note("Saved", day: "2026-09-27", createdAt: 10, categoryID: category.id)
+        try store.add(saved)
+        for invalidChange in ["name = 'General'", "name_key = 'wrong-key'", "name = ' Work '"] {
+            try executeRaw("UPDATE categories SET \(invalidChange)")
+            let before = try rawRows("SELECT * FROM categories")
+            XCTAssertThrowsError(try store.categories()) {
+                XCTAssertEqual($0 as? TaskCategoryRepositoryError, .invalidRow)
+            }
+            XCTAssertThrowsError(try store.notes(for: saved.dayKey))
+            XCTAssertEqual(try rawRows("SELECT * FROM categories"), before)
+            try executeRaw("UPDATE categories SET name = 'Work', name_key = 'work'")
+        }
+        for invalidID in ["not-a-uuid", UUID().uuidString] {
+            // Only the isolated fixture writer disables its own connection's enforcement.
+            try executeRaw("PRAGMA foreign_keys = OFF; UPDATE notes SET category_id = '\(invalidID)'")
+            let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            XCTAssertThrowsError(try store.notes(for: saved.dayKey))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        }
+        try executeRaw("UPDATE notes SET category_id = NULL; UPDATE categories SET id = 'not-a-uuid'")
+        XCTAssertThrowsError(try store.categories()) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .invalidRow)
+        }
+    }
+
+    func testCategoryOrderOverflowThrowsWithoutReplacingCatalog() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        try executeRaw("UPDATE categories SET creation_order = \(Int64.max)")
+        let before = try rawRows("SELECT * FROM categories")
+        XCTAssertThrowsError(try store.createCategory(name: "School")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .orderExhausted)
+        }
+        XCTAssertEqual(try rawRows("SELECT * FROM categories"), before)
+        XCTAssertEqual(try store.categories().first?.id, category.id)
+    }
+
+    private func note(_ text: String, day: String, createdAt: TimeInterval,
+                      completedAt: Date? = nil, categoryID: UUID? = nil) -> Note {
         Note(id: UUID(), text: text, dayKey: day,
-             createdAt: Date(timeIntervalSince1970: createdAt), completedAt: nil)
+             createdAt: Date(timeIntervalSince1970: createdAt), completedAt: completedAt,
+             categoryID: categoryID)
     }
 
     private func executeRaw(_ sql: String) throws {
