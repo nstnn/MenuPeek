@@ -229,3 +229,36 @@ The first run on the initial source failed 2 assertions in Task 4's `testFailedC
 Retained under ignored `build/task-categories/task-005/`: `Verified-tests.xcresult`, `verified-tests.log`, `source-hashes.txt`, and the initial failed run. The Debug bundle is `DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `d2e8a73732c449b3403a325beadaacfd63687f723186a96c364ae5b44ac36bbd`; debug dylib SHA-256: `4bc3b2fffbe033ee45ead004174df9938febf369ae21fb89c4fc4f7a18fd3c7c`.
 
 Only isolated databases/defaults and fake login/hotkey services were used. No view changed, so no running-interface check was made. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed for Task 5. The selector control, grouping/preferences, manager, and actual-interface acceptance remain later cards.
+
+## Category grouping and presentation preferences — Task 6, 2026-10-01
+
+Pass for Task 6's state-only automated verification. The baseline was clean `main` at `5e6a27a3e500c6e70c536658e7cdabab163906e0`, which merges Task 5 (PR #38); `feat/task-categories` was fast-forwarded to it and the changes were verified uncommitted. Changed Swift inputs and their SHA-256 values: `DailyNotesState.swift` (`d0f4bbcaee458931da11dfb3dce25af546eec78478581df77d84194775363fb5`), new `TaskGrouping.swift` (`c57dc713c07e6a88237ae4826df40866ac85198d97fe4a39542e6bedcd7e339d`), new `TaskCategoryPreferences.swift` (`5fe4cab582aaaa93f068944fa81c6b5bcca1bf42750d5b0f8ab5e63d1389f826`), `DailyNotesStateTests.swift` (`b0de129f0e2f85360ddf9a46fff44fe0290c33cc26e6642500ea19e4c339df4e`), `AppConfigurationTests.swift` (`5a9aef486bd6e16ba3b7c9ae78ea2b345ad131178cfebd9663e98dee2a06b4a5`), new `TaskGroupingTests.swift` (`a16ea7e110c76158b0fcb9688302e462d23b2be959c697145081a4fc93128b44`), and new `TaskCategoryPreferencesTests.swift` (`fca28b86346c7389de966cdaed3b1c71b9d536f4f4f5b47a65bcfb6ed6b6ce19`). `project.pbxproj` (`0eeda1470b19af88c090211523a73cfcccace92ac69b0fe9a83929b802ee7c97`) registers the four new files. Architecture and requirements describe the grouping and preferences contract; this section keeps the dated evidence.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app and hosted tests with the shared MenuPocket scheme. The single run at 19:14 EDT passed **125/125 tests, zero failures or skipped**: DailyNotesStateTests (47), AppConfigurationTests (28), SQLiteNoteRepositoryTests (23), NoteDomainTests (9), QuickAddPanelTests (8), TaskGroupingTests (5), and TaskCategoryPreferencesTests (5). The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-006/DerivedData \
+  -resultBundlePath build/task-categories/task-006/Verified-tests.xcresult \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Group and task order | Pass: groups follow saved creation order regardless of catalog input order or order gaps, then General; tasks keep saved insertion order, and a reassigned task takes its original relative position in its new group. |
+| Populated groups only | Pass: an empty day has no groups; an unused category has no group but stays in the catalog; General appears last only when populated and needs no category row. |
+| Counts | Pass: group counts include completed and collapsed rows and sum to the daily progress through collapse, reassignment, rename, and removal; rename keeps the group identity and its collapsed state. |
+| Last-used category | Pass: only a saved new task from Today records it (including General); cancelled, rejected, and unavailable drafts, edits, and Quick Add leave it unchanged. It survives a new owner. |
+| Pruning | Pass: a failed read prunes nothing; a complete read or committed removal forgets missing categories and keeps unused categories and General; a failed removal changes nothing. |
+| Defaults safety | Pass: missing and malformed values read as General or expanded without being rewritten; the preferences envelope and onboarding keys are unchanged. Collapse changes are observable. |
+
+Retained under ignored `build/task-categories/task-006/`: `Verified-tests.xcresult`, `verified-tests.log`, `build-for-testing.log`, and `source-hashes.txt`. The Debug bundle is `DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `0e2e08e5ec14186efa9646869c3be004e54cf9d792ef9e2e0077a28fc99cf6d5`; debug dylib SHA-256: `8527b8db2857f6f9dfc65224ec596712525283ca6116113b1c4fdd5604be321e`.
+
+Hosted tests share the app's sandbox container, so `UserDefaults.standard` there is the user's real domain. Every test state with a successful read used an isolated defaults suite; after the run, the real domain still held only its preferences and onboarding keys. Only isolated databases/defaults and fake login/hotkey services were used. No view changed, so no running-interface check was made. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed for Task 6. The grouped checklist, selector control, manager, and actual-interface acceptance remain later cards.

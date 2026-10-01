@@ -78,7 +78,8 @@ final class AppConfigurationTests: XCTestCase {
         let day = NoteDay(now: { instant })
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
                                    notificationCenter: NotificationCenter(),
-                                   workspaceNotificationCenter: NotificationCenter())
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
         let controller = TaskWindowController(state: state, onSettings: {})
         defer { controller.window?.close() }
         controller.showTasks()
@@ -112,7 +113,8 @@ final class AppConfigurationTests: XCTestCase {
         store.savedCategories = [work, home]
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
                                    notificationCenter: NotificationCenter(),
-                                   workspaceNotificationCenter: NotificationCenter())
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
         let controller = TaskWindowController(state: state, onSettings: {})
         defer { controller.window?.close() }
         controller.showTasks()
@@ -148,7 +150,8 @@ final class AppConfigurationTests: XCTestCase {
         store.saved = [note]
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
                                    notificationCenter: NotificationCenter(),
-                                   workspaceNotificationCenter: NotificationCenter())
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         let presentation = TaskWindowPresentation()
         store.onDelete = { XCTAssertNil(presentation.deletionTarget) }
@@ -183,7 +186,8 @@ final class AppConfigurationTests: XCTestCase {
         store.saved = [note]
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
                                    notificationCenter: NotificationCenter(),
-                                   workspaceNotificationCenter: NotificationCenter())
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         let presentation = TaskWindowPresentation()
         presentation.requestDeletion(id: note.id, state: state)
@@ -292,7 +296,8 @@ final class AppConfigurationTests: XCTestCase {
 
         let second = AppDelegate(model: fixture.delegate.model,
             dailyNotesState: DailyNotesState(repositoryFactory: { fixture.repository },
-                notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter()),
+                notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+                categoryPreferences: TaskCategoryPreferences(userDefaults: fixture.defaults)),
             onboardingStore: UserDefaultsOnboardingStore(userDefaults: fixture.defaults), launchContext: { .manual })
         defer { second.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
         second.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
@@ -855,7 +860,8 @@ private final class AppLifecycleFixture {
         onboarding = UserDefaultsOnboardingStore(userDefaults: defaults)
         let repository = repository
         state = DailyNotesState(repositoryFactory: { repository }, notificationCenter: notifications,
-                                workspaceNotificationCenter: NotificationCenter())
+                                workspaceNotificationCenter: NotificationCenter(),
+                                categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
         delegate = AppDelegate(model: AppModel(store: PreferencesStore(userDefaults: defaults),
                                               loginItemService: loginService, hotKeyService: hotKeys),
                                dailyNotesState: state, onboardingStore: onboarding, launchContext: { context })

@@ -338,7 +338,8 @@ final class DailyNotesStateTests: XCTestCase {
         }
         let state = DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
                                    day: makeDay(now: { current }), notificationCenter: NotificationCenter(),
-                                   workspaceNotificationCenter: NotificationCenter())
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         XCTAssertEqual(state.categories, [category])
         let survivor = try XCTUnwrap(state.createCategory(name: "Unused"))
@@ -673,7 +674,8 @@ final class DailyNotesStateTests: XCTestCase {
         let makeState = {
             DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
                             day: self.makeDay(now: { current }), notificationCenter: NotificationCenter(),
-                            workspaceNotificationCenter: NotificationCenter())
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: self.isolatedCategoryPreferences())
         }
         let state = makeState()
         state.startup()
@@ -704,6 +706,145 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(reopened.notes, expected)
         XCTAssertEqual(reopened.availableCategories, [work, home])
         XCTAssertEqual(reopened.progress, NoteProgress(completed: 1, total: 2))
+    }
+
+    func testGroupsFollowSavedSnapshotAndKeepDailyProgressThroughCategoryChanges() throws {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let report = Note(id: UUID(), text: "Report", dayKey: "2026-09-27",
+                          createdAt: Date(timeIntervalSince1970: 1), completedAt: current, categoryID: work.id)
+        let groceries = note("Groceries", day: report.dayKey, createdAt: 2)
+        let reply = Note(id: UUID(), text: "Reply", dayKey: report.dayKey,
+                         createdAt: Date(timeIntervalSince1970: 3), completedAt: nil, categoryID: work.id)
+        let desk = note("Desk", day: report.dayKey, createdAt: 4, completedAt: current)
+        let store = FakeNoteRepository(notes: [report, groceries, reply, desk], categories: [work, home])
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        let daily = NoteProgress(completed: 2, total: 4)
+
+        // Home has no tasks today, so only Work and then General appear.
+        XCTAssertEqual(state.availableCategories, [work, home])
+        XCTAssertEqual(state.groups.map(\.id), [.category(work.id), .general])
+        XCTAssertEqual(groupTexts(state), [["Report", "Reply"], ["Groceries", "Desk"]])
+        assertGroupCounts(state, equal: daily)
+
+        // Collapsing changes no group or daily count.
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        XCTAssertEqual(state.groups.map(\.progress), [NoteProgress(completed: 1, total: 2),
+                                                      NoteProgress(completed: 1, total: 2)])
+        assertGroupCounts(state, equal: daily)
+
+        // A reassigned task joins General at its original relative position.
+        state.beginEditing(id: reply.id)
+        state.editCategoryID = nil
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertEqual(groupTexts(state), [["Report"], ["Groceries", "Reply", "Desk"]])
+        assertGroupCounts(state, equal: daily)
+
+        XCTAssertNotNil(state.renameCategory(id: work.id, name: "Office"))
+        XCTAssertEqual(state.groups.first?.id, .category(work.id))
+        XCTAssertEqual(state.groups.first?.name, "Office")
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertEqual(state.groups.map(\.id), [.general])
+        XCTAssertEqual(groupTexts(state), [["Report", "Groceries", "Reply", "Desk"]])
+        assertGroupCounts(state, equal: daily)
+
+        state.refresh()
+        XCTAssertEqual(groupTexts(state), [["Report", "Groceries", "Reply", "Desk"]])
+    }
+
+    func testOnlyASavedNewTaskFromTodaySetsTheLastUsedCategory() throws {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let original = note("Original", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [original], categories: [work, home])
+        let defaults = isolatedDefaults()
+        let state = makeState(store: store, now: { current },
+                              preferences: TaskCategoryPreferences(userDefaults: defaults))
+        state.startup()
+        let preferences = state.categoryPreferences
+        XCTAssertNil(preferences.lastUsedCategoryID)
+
+        state.draft = "First"
+        state.draftCategoryID = home.id
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+        XCTAssertNil(state.draftCategoryID)
+
+        // Cancelled, rejected, and unavailable drafts leave it unchanged.
+        state.draft = "Cancelled"
+        state.draftCategoryID = work.id
+        state.cancelDraft()
+        state.draft = "Rejected"
+        state.draftCategoryID = work.id
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        store.failWrite = nil
+        state.draftCategoryID = UUID()
+        XCTAssertFalse(state.addDraft())
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+
+        // Edits and Quick Add's General saves are not new-task choices.
+        state.cancelDraft()
+        state.beginEditing(id: original.id)
+        state.editCategoryID = work.id
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertEqual(state.add(text: "Captured"), .added)
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+
+        state.draft = "General task"
+        XCTAssertTrue(state.addDraft())
+        XCTAssertNil(preferences.lastUsedCategoryID)
+        XCTAssertNil(defaults.object(forKey: TaskCategoryPreferences.lastUsedCategoryIDKey))
+
+        state.draft = "Work task"
+        state.draftCategoryID = work.id
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(TaskCategoryPreferences(userDefaults: defaults).lastUsedCategoryID, work.id)
+    }
+
+    func testCategoryPreferencesForgetCategoriesOnlyAfterACompleteReadOrCommittedRemoval() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let missing = UUID()
+        let defaults = isolatedDefaults()
+        let preferences = TaskCategoryPreferences(userDefaults: defaults)
+        preferences.rememberLastUsed(missing)
+        let collapsed: Set<TaskGroupID> = [.category(work.id), .category(home.id), .category(missing), .general]
+        for group in collapsed { preferences.setCollapsed(true, for: group) }
+        let store = FakeNoteRepository(categories: [work, home])
+        store.failSnapshotRead = .categories
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") },
+                              preferences: preferences)
+
+        // A failed read cannot tell which categories are gone.
+        state.startup()
+        XCTAssertNil(state.availableCategories)
+        XCTAssertEqual(preferences.lastUsedCategoryID, missing)
+        XCTAssertEqual(preferences.collapsedGroupIDs, collapsed)
+
+        // A complete read keeps every saved category and General, even with no tasks today.
+        store.failSnapshotRead = nil
+        state.refresh()
+        XCTAssertEqual(state.groups, [])
+        XCTAssertNil(preferences.lastUsedCategoryID)
+        XCTAssertEqual(preferences.collapsedGroupIDs, [.category(work.id), .category(home.id), .general])
+
+        // Removal forgets a category only after storage commits it.
+        preferences.rememberLastUsed(home.id)
+        store.failCategoryCommand = .remove
+        XCTAssertFalse(state.removeCategory(id: home.id))
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+        XCTAssertTrue(preferences.isCollapsed(.category(home.id)))
+        store.failCategoryCommand = nil
+        XCTAssertTrue(state.removeCategory(id: home.id))
+        let reopened = TaskCategoryPreferences(userDefaults: defaults)
+        XCTAssertNil(reopened.lastUsedCategoryID)
+        XCTAssertEqual(reopened.collapsedGroupIDs, [.category(work.id), .general])
     }
 
     func testStatusItemObservesSuccessiveSavedWritesWithoutAWindow() async throws {
@@ -774,7 +915,8 @@ final class DailyNotesStateTests: XCTestCase {
         var current = instant("2026-09-27T23:59:00-04:00")
         let center = NotificationCenter()
         let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
-                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter())
+                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter(),
+                                    categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         let controller = TaskStatusItemController(state: state, showTasks: {})
         defer { controller.remove() }
@@ -862,7 +1004,7 @@ final class DailyNotesStateTests: XCTestCase {
         let center = NotificationCenter()
         var current = instant("2026-09-27T23:59:00-04:00")
         let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
-                                    notificationCenter: center)
+                                    notificationCenter: center, categoryPreferences: isolatedCategoryPreferences())
         state.windowWillOpen()
         let changed = expectation(description: "Observable day changed")
         withObservationTracking {
@@ -913,7 +1055,8 @@ final class DailyNotesStateTests: XCTestCase {
             if shouldFail { throw FakeFailure.failed }
             return store
         }, day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
-        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter())
+        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+        categoryPreferences: isolatedCategoryPreferences())
 
         state.windowWillOpen()
         XCTAssertEqual(state.issue, .load)
@@ -1144,7 +1287,8 @@ final class DailyNotesStateTests: XCTestCase {
             DailyNotesState(
                 repositoryFactory: { try SQLiteNoteRepository(databaseURL: databaseURL) },
                 day: self.makeDay(now: { current }),
-                notificationCenter: NotificationCenter()
+                notificationCenter: NotificationCenter(),
+                categoryPreferences: self.isolatedCategoryPreferences()
             )
         }
 
@@ -1216,7 +1360,8 @@ final class DailyNotesStateTests: XCTestCase {
             DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: databaseURL) },
                             day: self.makeDay(now: { current }),
                             notificationCenter: NotificationCenter(),
-                            workspaceNotificationCenter: NotificationCenter())
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: self.isolatedCategoryPreferences())
         }
         do {
             let state = makeState()
@@ -1274,7 +1419,8 @@ final class DailyNotesStateTests: XCTestCase {
         let workspace = NotificationCenter()
         var current = instant("2026-09-27T23:59:00-04:00")
         let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
-                                    notificationCenter: center, workspaceNotificationCenter: workspace)
+                                    notificationCenter: center, workspaceNotificationCenter: workspace,
+                                    categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         for (eventCenter, name) in [(workspace, NSWorkspace.didWakeNotification),
                                     (center, Notification.Name.NSSystemClockDidChange)] {
@@ -1299,7 +1445,8 @@ final class DailyNotesStateTests: XCTestCase {
         var zone = TimeZone(identifier: "America/Toronto")!
         let day = NoteDay(now: { self.instant("2026-09-27T00:30:00Z") }, timeZone: { zone })
         let state = DailyNotesState(repositoryFactory: { store }, day: day,
-                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter())
+                                    notificationCenter: center, workspaceNotificationCenter: NotificationCenter(),
+                                    categoryPreferences: isolatedCategoryPreferences())
         state.startup()
         XCTAssertEqual(state.notes, [saved])
         let changed = expectation(description: "Time-zone refresh")
@@ -1383,7 +1530,8 @@ final class DailyNotesStateTests: XCTestCase {
         let workspace = NotificationCenter()
         var state: DailyNotesState? = DailyNotesState(repositoryFactory: { store },
             day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
-            notificationCenter: center, workspaceNotificationCenter: workspace)
+            notificationCenter: center, workspaceNotificationCenter: workspace,
+            categoryPreferences: isolatedCategoryPreferences())
         state?.startup()
         weak var released = state
         state = nil
@@ -1394,9 +1542,24 @@ final class DailyNotesStateTests: XCTestCase {
         await Task.yield()
     }
 
-    private func makeState(store: FakeNoteRepository, now: @escaping () -> Date) -> DailyNotesState {
+    private func makeState(store: FakeNoteRepository, now: @escaping () -> Date,
+                           preferences: TaskCategoryPreferences? = nil) -> DailyNotesState {
         DailyNotesState(repositoryFactory: { store }, day: makeDay(now: now),
-                        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter())
+                        notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+                        categoryPreferences: preferences ?? isolatedCategoryPreferences())
+    }
+
+    private func groupTexts(_ state: DailyNotesState) -> [[String]] {
+        state.groups.map { $0.notes.map(\.text) }
+    }
+
+    private func assertGroupCounts(_ state: DailyNotesState, equal daily: NoteProgress,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        let groups = state.groups
+        XCTAssertEqual(state.availableProgress, daily, file: file, line: line)
+        XCTAssertEqual(NoteProgress(completed: groups.map(\.progress.completed).reduce(0, +),
+                                    total: groups.map(\.progress.total).reduce(0, +)),
+                       daily, file: file, line: line)
     }
 
     private func makeDay(now: @escaping () -> Date) -> NoteDay {
