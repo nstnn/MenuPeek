@@ -109,3 +109,27 @@ The user performed the hands-on checks below on PID `14192` and reported every o
 | System follows a macOS appearance change | Pass (user-reported) | |
 
 After the check, the saved value was `{"enabledModuleIDs":["demo.tasks","demo.status"],"menuBarDisplayMode":"iconAndInformation","moduleOrder":["demo.tasks","demo.status"],"schemaVersion":1,"theme":"system"}`: the first real save kept every earlier field and added only the theme. No task was added, completed, edited, or deleted. The Debug app was left running.
+
+## Grouped Today checklist — Task 7, 2026-10-02
+
+Pass, as reported by the user from direct manual observation of the isolated fixture: "Đã check và mọi thứ đúng như kịch bản. PASSED ALL". Claude did not observe or drive the interface; the user declined the Screen Recording grant needed for Computer Use. No screenshots were retained.
+
+The fixture was `build/task-categories/task-007/GroupedChecklistFixture.app`, bundle ID `local.menupocket.task007.fixture`, executable SHA-256 `b5762422b917fc30d5fcf2cc3a1e5278f2fb539903faba81b049780b747f0bb9`. It is compiled from the unchanged production `DailyNotesState`, `TaskWindowController`, and `TaskWindowView` (`TaskWindowView.swift` SHA-256 `5d88e12e2b86b579fdd48666dee965cffbb0a035840d9d9e86099a8162b6982f`), with an in-memory repository and the defaults suite `local.menupocket.task007.fixture.categories`. Source/build identity matches the [Task 7 regression record](DESKTOP_TASK_REGRESSION.md#grouped-today-checklist--task-7-2026-10-01).
+
+The user reported all 13 scripted checks as passing:
+
+1. Group order, counts, and General last.
+2. Mouse collapse and expand without changing counts.
+3. Keyboard header toggling, with collapsed rows skipped by Tab.
+4. Focus moving to the header when a group collapses around a focused row.
+5. Focus returning to a collapsed header after a cancelled edit.
+6. Completion and text edits keeping rows in place and other groups' disclosure states unchanged.
+7. Deleting a group's last row removing that group, with focus on Add and headers disabled during confirmation.
+8. Collapse state surviving close/reopen and fixture quit/relaunch.
+9. Category removal moving tasks into General in creation order.
+10. Empty, only-General, all-completed, and many-group layouts.
+11. Unavailable state with Retry, then recovery.
+12. Minimum-size layout with long names and text, in dark and light appearance.
+13. The optional VoiceOver header announcement.
+
+The user deleted the fixture's defaults suite after checking. The fixture is non-sandboxed and in-memory, so it does not establish production sandbox identity, SQLite persistence across relaunch, menu bar or Dock behavior, or Release behavior. It does not close the earlier acceptance gaps above. Final integrated category acceptance remains TASK-011.
