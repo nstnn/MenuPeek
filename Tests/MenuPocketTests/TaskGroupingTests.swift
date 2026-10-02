@@ -81,6 +81,8 @@ final class TaskGroupingTests: XCTestCase {
         let after = try XCTUnwrap(TaskGroup.groups(categories: [renamed], notes: saved).first)
         XCTAssertEqual(before.id, after.id)
         XCTAssertEqual(after.name, "Office")
+        XCTAssertEqual(TaskGroupID(categoryID: work.id), before.id)
+        XCTAssertEqual(TaskGroupID(categoryID: nil), .general)
 
         for id in [TaskGroupID.general, .category(work.id)] {
             XCTAssertEqual(TaskGroupID(storageKey: id.storageKey), id)

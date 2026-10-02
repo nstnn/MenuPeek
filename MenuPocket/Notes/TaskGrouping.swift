@@ -8,6 +8,11 @@ enum TaskGroupID: Hashable, Sendable {
 
     private static let generalKey = "general"
 
+    /// The group a task with this category belongs to; nil is General.
+    init(categoryID: UUID?) {
+        self = categoryID.map(Self.category) ?? .general
+    }
+
     /// Stable text for presentation preferences. General's key never parses as a UUID.
     var storageKey: String {
         switch self {

@@ -133,3 +133,32 @@ The user reported all 13 scripted checks as passing:
 13. The optional VoiceOver header announcement.
 
 The user deleted the fixture's defaults suite after checking. The fixture is non-sandboxed and in-memory, so it does not establish production sandbox identity, SQLite persistence across relaunch, menu bar or Dock behavior, or Release behavior. It does not close the earlier acceptance gaps above. Final integrated category acceptance remains TASK-011.
+
+## Category composer selector — Task 8, 2026-10-02
+
+Pass, as reported by the user from direct manual observation of the isolated fixture: "ok mọi test đều pass". Claude did not observe or drive the interface; per the user's standing preference, no Computer Use or Screen Recording was used. No screenshots were retained, apart from the two the user shared during the first pass, described below.
+
+The fixture was `build/task-categories/task-008/CategoryComposerFixture.app`, bundle ID `local.menupocket.task008.fixture`, executable SHA-256 `c902138fe87ab903ba819bae49df899d89e39cab2ea7aeb2d6e261ceca93f0da`. It is compiled from the production `MenuPocket/Notes` sources (`TaskWindowView.swift` SHA-256 `3c1c347acfc2ae2d274e594cc930fbb2f5fc0084142d2ae79992891d7bdfbcc1`), with an in-memory repository and the defaults suite `local.menupocket.task008.fixture.categories`. Source and build identity match the [Task 8 regression record](DESKTOP_TASK_REGRESSION.md#category-composer-selector--task-8-2026-10-02).
+
+The first fixture build was defective: Command-X removed a category instead of cutting text, and the simulated write failure had no visible state. During that first pass, the user saw an edit save fail with "Could not save edit. Try again." while keeping its text and Fitness selection, because the simulated write failure was still on. A reseed then moved the edit into recovery with "Category: Fitness". Both are designed behavior. Only the fixture was rebuilt, with Option-Command fixture commands and a status title, and the user then reran every check on the rebuilt fixture.
+
+The user reported all 16 scripted checks as passing:
+
+1. A fresh draft starts in General; the picker lists saved categories in creation order, then General.
+2. Return saves the text with the chosen category at the end of that group, updating group and daily counts.
+3. The next new draft starts from the last-used category.
+4. A pending draft keeps its text and selection through repeated Command-N and window close/reopen.
+5. Escape discards the draft without changing the remembered category.
+6. Choosing a menu item with the keyboard or dismissing the open menu with Escape never saves or cancels the draft.
+7. Tab reaches the picker, Up/Down change it, Return there does not save, Escape cancels, and native text editing still works.
+8. A failed add keeps text, selection, and the remembered category; a retry saves.
+9. Reassigning a task into a collapsed group saves it, expands that group in original order, returns focus to the row's Edit button, and leaves the remembered category unchanged.
+10. A text-only edit leaves other groups' collapse state unchanged.
+11. Removing the selected category moves an active edit into recovery with its category name, and moves a new draft to General with a notice while keeping its text.
+12. Renaming the selected category updates the picker label without changing the selection.
+13. With no custom categories, only General is offered and saves; unavailable data disables the picker and Save until reads recover.
+14. A pending draft keeps its text and selection across a day change and saves into the new day.
+15. At the minimum size with a long category name, the picker truncates while Save and Cancel stay usable, in dark and light appearance.
+16. After quit and relaunch, a new draft starts from the last saved category, and the unsaved draft is gone as designed. The VoiceOver label was optional.
+
+The fixture is non-sandboxed and in-memory, so it does not establish production sandbox identity, SQLite persistence across relaunch, menu bar or Dock behavior, or Release behavior. It does not close the earlier acceptance gaps above. Final integrated category acceptance remains TASK-011.
