@@ -406,7 +406,11 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertNil(presentation.categoryRemovalTarget)
         fixture.delegate.showTasks()
         await waitUntil { window.isVisible && window.attachedSheet == nil }
+        XCTAssertTrue(fixture.delegate.taskWindowController === controller)
+        XCTAssertTrue(controller.window === window)
+        XCTAssertTrue(controller.state === fixture.state)
         XCTAssertEqual(fixture.state.draft, "Pending task")
+        XCTAssertEqual(fixture.state.draftCategoryID, work.id)
         XCTAssertEqual(fixture.repository.saved, [note])
         XCTAssertEqual(fixture.repository.savedCategories, [work])
         XCTAssertEqual(fixture.repository.removeAttempts, 0)

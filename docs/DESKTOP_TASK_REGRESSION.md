@@ -393,3 +393,74 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 An isolated interface fixture was prepared: `build/task-categories/task-009/CategoryManagerFixture.app`, bundle ID `local.menupocket.task009.fixture`, executable SHA-256 `b4c97d2d586be393dd391bf567c50d7d7606a74e2dd92d132c154e34e4704d5d`. It compiles the production `MenuPocket/Notes` sources in Swift 6 mode with an in-memory repository (`FixtureRepository.swift`, `090f841c310a04c9ad3cb817d31a99790c4f89b1f701f43d8c980ce465227b66`) and the defaults suite `local.menupocket.task009.fixture.categories`. The fixture source is `CategoryManagerFixture.swift` (`2fe54ce9c34f1993c53f8bc99db5df56608162e9599351c9ee9b0b5c29bc97f5`). Its seeded School category has tasks today, yesterday, and on an older day. Option-Command fixture commands toggle write and read failures, add an older School task to change the all-days count, close the Today window directly, advance the day, and show all saved data. A menu self-test, run without showing a window, confirmed every fixture shortcut sends its own item; the only shared combination reported was the system's own Emoji & Symbols entries. The fixture is non-sandboxed and never opens `notes.sqlite`. Claude did not drive it.
 
 Retained under ignored `build/task-categories/task-009/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `test-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, and the fixture sources, build log, and app. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `fa9e6902095aba3827ddb56190b63155672c7f64ca5e896ced0053362c6dd4ba`; debug dylib SHA-256: `601b172d221bd38b8452bf88951189fa958ba4bc2ae48b9e0021b90ac1bd7174`. Only isolated databases and defaults and fake login and hotkey services were used. No production app or data launch, full-suite or Release run, independent review, or remote CI result is claimed. Integrated regression and final actual-interface acceptance remain TASK-010 and TASK-011.
+
+## Integrated category regressions — Task 10, 2026-10-02
+
+**Pass for TASK-010 automated verification. TASK-011 actual-interface acceptance remains Not tested.** Source: `feat/task-categories` at `0c30448326ce7cc5cbb6686d5f7e2ddcb70c47e1`, initially clean. The verified dirty Swift inputs add two cross-layer tests to `DailyNotesStateTests.swift` and four identity/draft assertions to the existing hosted manager test in `AppConfigurationTests.swift`. Production source and project configuration are unchanged. `source-inputs.json` records SHA-256 for all 49 Swift/project/scheme/entitlements inputs, and the hashes were checked again after testing and both final builds.
+
+The focused change review covered the nine category commits (`c215205`, `847cea8`, `683f62d`, `d2fd21e`, `e65017c`, `411898c`, `9bdbd81`, `0ed73d9`, `0c30448`), including the migration, transactions, shared snapshot, Note reconstruction and fake paths, grouping/preferences, composer, manager and native command guards. No product defect requiring repair was found. Category commits do not modify Settings, login-item services or `QuickAddPanelController`; unrelated Quick Add commits in the broader branch history were excluded from this scope. This was a focused review by the executing agent, not an independent pre-push review.
+
+Xcode 27.0 (`27A266a`), macOS 26.6.2 (`25G83`), SDK `macosx27.0`, arm64 test host, shared `MenuPocket` scheme:
+
+| Check | Result and retained evidence |
+| --- | --- |
+| Focused category/lifecycle verification | **134/134 Pass**, zero skipped, seven classes, `Focused-tests.xcresult`, `focused-summary.json`, `focused-tests.log`. |
+| Full existing hosted suite | **219/219 Pass**, zero skipped, 15 classes, `Full-tests.xcresult`, `full-summary.json`, `full-tests.log`. |
+| Final Debug build | Pass, arm64, `debug-build.log`. |
+| Final Release build | Pass, universal arm64/x86_64, `release-build.log`. |
+| Migration and schema protection | Pass: existing SQLite tests exercise fresh/v0/v1 upgrade, preserved rowids/fields/counts, migration rollback/retry, v2 reopen, newer/incompatible/incomplete schema rejection and foreign keys. |
+| SQLite reopen plus grouped presentation | Pass: `testSQLiteGroupsAndPresentationPreferencesSurviveReassignmentAndReopen` releases the first state/connection, reopens SQLite, and checks complete notes, categories, group identities/names/order/counts, unused-category omission, last-used category and collapsed groups. A completed reassigned task keeps its original relative position. |
+| Failed reassignment/removal plus saved progress | Pass: `testSQLiteRejectedReassignmentAndRemovalKeepGroupsProgressAndSavedRowsUntilRetry` injects real SQLite AFTER-trigger failures. Atomic edit and all-days removal roll back; groups, counts, completion/day fields, drafts and preferences remain saved values. Removing the triggers permits retry, then reopened SQLite retains the committed results across today/yesterday/older days. |
+| Manager guards and reused window | Pass: the existing hosted manager test also checks identical controller/window/state and selected category after closing Today with a sheet/removal pending and reopening it. |
+| Unavailable reads and stale actions | Pass: the full suite retains complete-snapshot failure/retry, category invalidation, recovered text/selection, rollover, day/wake/clock/time-zone notification and stale deletion/edit checks using isolated clocks/notifications/fakes. |
+| Production preservation | Pass: `notes.sqlite` and the real sandbox defaults plist have identical SHA-256, size and modification time before/after the tests. No production app/data launch or live fixture seeding occurred. |
+| Whitespace | Pass: `git diff --check`. |
+
+The initial sandboxed test build failed before tests at `ObservationMacros.ObservableMacro`/`swift-plugin-server`. The authorized Xcode build succeeded; only that authorized artifact was tested. The unchanged Command-W assertions passed in both focused and full runs. Earlier dated failures remain preserved; these runs do not establish their historical cause.
+
+Commands, from the checkout (all outputs under `build/task-categories/task-010/`):
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-010/DerivedData \
+  SDK_STAT_CACHE_ENABLE=NO build-for-testing
+
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-010/DerivedData \
+  -resultBundlePath build/task-categories/task-010/Focused-tests.xcresult \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests \
+  SDK_STAT_CACHE_ENABLE=NO test-without-building
+
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-010/DerivedData \
+  -resultBundlePath build/task-categories/task-010/Full-tests.xcresult \
+  SDK_STAT_CACHE_ENABLE=NO test
+
+# Executed separately with Debug and Release.
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Release -destination 'platform=macOS' \
+  -derivedDataPath build/task-categories/task-010/DerivedData \
+  SDK_STAT_CACHE_ENABLE=NO build
+```
+
+Both final bundles are under `build/task-categories/task-010/DerivedData/Build/Products/{Debug,Release}/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0`, build `1`. `codesign --verify --deep --strict` passes for both; sandbox entitlements remain enabled. This is a local ad hoc build, with no publishing or distribution claim.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Debug executable | `c06907212137fcfea5af2f2c65263b4667e6827d3d2becf3a0f32599d1b8d474` |
+| Debug dylib | `5334fa510f6ed912a3b7be6ea79130b963589f6ab8cff01e9d83e1543c438d56` |
+| Release executable | `44be4b613e633b6f4eb777dc34d1c588987036848a9ccf31f2d30080ec703f41` |
+| Isolated fixture executable | `a5108843f39fecd9ca9828a2cfd93e88fa341396eb24fa3470ed691eda2d74a7` |
+
+TASK-011 preparation: `CategoryRegressionFixture.app`, bundle ID `local.menupocket.task010.fixture`, compiles the unchanged production views/state/controller/delegate/Settings/status item with an isolated SQLite file per scenario and defaults suite `local.menupocket.task010.fixture.categories.<scenario>`. The fixture is non-sandboxed and injects fake login/hotkey services. Six deterministic scenarios (`mixed`, `empty`, `general`, `many`, `completed`, `legacy`) passed headless seed/read and a second actual-process reopen with identical saved IDs/rows. The legacy scenario starts at v1 and opens at v2; this supports fixture readiness only. No fixture window was opened or visually inspected in TASK-010.
+
+Retained supporting records include `reviewed.diff`, source/artifact/fixture identity JSON, both xcresults and summary JSON, build/test logs, signature/entitlement information, before/after preservation hashes, fixture source/build recipe, and per-scenario seed/reopen logs and SQLite files. The local handoff is `plan/task-categories/evidence/task-010.md`. No real production migration, genuine login/day/wake, VoiceOver, final interface acceptance, independent review or remote CI result is claimed. TASK-011 is ready; TASK-012 remains dependent on its outcomes.
