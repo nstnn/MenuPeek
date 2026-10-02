@@ -316,6 +316,14 @@ final class DailyNotesState {
         }
     }
 
+    /// Selects the category for a new task draft the user has just opened: the
+    /// last-used category while it is still saved, otherwise General. A pending
+    /// draft keeps its own selection, so callers skip this when one exists.
+    func startNewDraft() {
+        let lastUsed = categoryPreferences.lastUsedCategoryID
+        draftCategoryID = isAvailable(lastUsed) ? lastUsed : nil
+    }
+
     func cancelDraft() {
         draft = ""
         draftCategoryID = nil
@@ -329,6 +337,8 @@ final class DailyNotesState {
         case .added:
             // Only a saved new task from Today sets the last-used category.
             categoryPreferences.rememberLastUsed(categoryID)
+            // Show the saved task, even in a group the user had collapsed.
+            categoryPreferences.setCollapsed(false, for: TaskGroupID(categoryID: categoryID))
             draft = ""
             draftCategoryID = nil
             taskIssue = nil
@@ -421,6 +431,10 @@ final class DailyNotesState {
             notes[index] = Note(id: saved.id, text: text, dayKey: saved.dayKey,
                                 createdAt: saved.createdAt, completedAt: saved.completedAt,
                                 categoryID: categoryID)
+            // A reassigned task stays visible; a text-only edit changes no group.
+            if categoryID != saved.categoryID {
+                categoryPreferences.setCollapsed(false, for: TaskGroupID(categoryID: categoryID))
+            }
             cancelEditing()
             taskIssue = nil
             return true

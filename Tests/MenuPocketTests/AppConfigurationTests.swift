@@ -442,6 +442,65 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testComposerStartsNewDraftsFromLastUsedCategoryAndKeepsAPendingSelection() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        fixture.repository.savedCategories = [work, home]
+        fixture.repository.allowAdd = true
+        fixture.launch()
+        let preferences = fixture.state.categoryPreferences
+        preferences.rememberLastUsed(work.id)
+        preferences.setCollapsed(true, for: .category(home.id))
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        let editor = try await focusedEditor(in: window)
+        await waitUntil { controller.presentation.newTaskRequestID == nil }
+        XCTAssertEqual(fixture.state.draftCategoryID, work.id)
+
+        // The picker's choice stays with a pending draft through repeated
+        // Command-N and a closed and reopened window.
+        fixture.state.draftCategoryID = home.id
+        editor.insertText("Categorized task", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        await waitUntil { controller.presentation.newTaskRequestID == nil }
+        window.close()
+        fixture.delegate.showTasks()
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        await waitUntil { controller.presentation.newTaskRequestID == nil }
+        XCTAssertEqual(fixture.state.draft, "Categorized task")
+        XCTAssertEqual(fixture.state.draftCategoryID, home.id)
+        XCTAssertEqual(preferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+
+        // Return saves text and category together and shows the collapsed destination.
+        try await focusedEditor(in: window).doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { !fixture.repository.saved.isEmpty }
+        XCTAssertEqual(fixture.repository.saved.map(\.text), ["Categorized task"])
+        XCTAssertEqual(fixture.repository.saved.first?.categoryID, home.id)
+        XCTAssertFalse(preferences.isCollapsed(.category(home.id)))
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+
+        // The next new draft starts from the saved category. Escape discards a
+        // changed selection without remembering it, so the draft after it does too.
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        await waitUntil { controller.presentation.newTaskRequestID == nil }
+        XCTAssertEqual(fixture.state.draftCategoryID, home.id)
+        fixture.state.draftCategoryID = work.id
+        try await focusedEditor(in: window).doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { fixture.state.draftCategoryID == nil }
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        await waitUntil { controller.presentation.newTaskRequestID == nil }
+        XCTAssertEqual(fixture.state.draftCategoryID, home.id)
+        XCTAssertEqual(fixture.repository.saved.count, 1)
+    }
+
+    @MainActor
     func testSettingsShortcutReusesWindowAndCloseDoesNotTerminate() throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }
@@ -778,6 +837,16 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    private func waitUntil(_ condition: @MainActor () -> Bool,
+                           file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<50 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    @MainActor
     private func waitForStatusTitle(_ title: String, fixture: AppLifecycleFixture) async {
         for _ in 0..<50 {
             if fixture.delegate.taskStatusItemController?.statusItem?.button?.title == title { return }
@@ -819,7 +888,9 @@ private final class TaskWindowReadFixture: NoteRepository {
 
     func add(_ note: Note) throws {
         guard allowAdd else { throw CocoaError(.fileWriteNoPermission) }
-        if let id = note.categoryID { throw TaskCategoryRepositoryError.notFound(id) }
+        if let id = note.categoryID, !savedCategories.contains(where: { $0.id == id }) {
+            throw TaskCategoryRepositoryError.notFound(id)
+        }
         guard !saved.contains(where: { $0.id == note.id }) else { throw CocoaError(.fileWriteUnknown) }
         saved.append(note)
     }

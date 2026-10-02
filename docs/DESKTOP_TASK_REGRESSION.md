@@ -295,3 +295,55 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 An isolated interface fixture was prepared: `build/task-categories/task-007/GroupedChecklistFixture.app`, bundle ID `local.menupocket.task007.fixture`. It runs the unchanged production state, controller, and view over an in-memory repository and the defaults suite `local.menupocket.task007.fixture.categories`. The first fixture build crashed at launch because its suite name equaled its bundle identifier, for which `UserDefaults(suiteName:)` returns nil; only the fixture was renamed and rebuilt. Fixture source SHA-256 is `4c520c01e1d1f5535a1ffbd3b6b17f3c06e91820b2592e833de8d4ee36d05729`, and its executable is `b5762422b917fc30d5fcf2cc3a1e5278f2fb539903faba81b049780b747f0bb9`. It is non-sandboxed and never opens `notes.sqlite`. Claude did not exercise it, because the Screen Recording grant needed for Computer Use was declined. The user ran the scripted checks manually and reported that all of them passed.
 
 Retained under ignored `build/task-categories/task-007/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, the fixture source, and `fixture-build.log`. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `224d2d827ef5113871166856f59a445df0eabe4a3eb98aabdedbbbe6062a8e0d`; debug dylib SHA-256: `9071b5159308e1ddf147fcfdf27fe5e8f099ce3139c43cbb0eff1877c0c69c21`. Only isolated databases/defaults and fake login/hotkey services were used. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed. The category selector, manager, and final actual-interface acceptance remain later cards.
+
+## Category composer selector — Task 8, 2026-10-02
+
+Automated verification is partial; the user's manual running-interface checks on an isolated fixture passed and are recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md#category-composer-selector--task-8-2026-10-02). The baseline was clean `main` at `0170dbfc89025f2e7d5e53dbf74906a39669c028`, which merges Task 7 (PR #40). `feat/task-categories` was fast-forwarded to it, and the change was verified uncommitted. Changed Swift inputs, by SHA-256:
+
+| File | SHA-256 |
+| --- | --- |
+| `MenuPocket/Notes/TaskWindowView.swift` | `3c1c347acfc2ae2d274e594cc930fbb2f5fc0084142d2ae79992891d7bdfbcc1` |
+| `MenuPocket/Notes/DailyNotesState.swift` | `21a1b5fbcde0624cab3a6ae9e89c0f4be0269dcf4191959a892b2e2d595ff1c6` |
+| `MenuPocket/Notes/TaskGrouping.swift` | `ef4debeaf5791c7a003767dd8f55a200bb7c8fe58e05267dbf5375f2ffc13dd7` |
+| `Tests/MenuPocketTests/AppConfigurationTests.swift` | `68ac46411ba3b08366695be058223fde3670f777a4befb76e7ab07306921ad1e` |
+| `Tests/MenuPocketTests/DailyNotesStateTests.swift` | `297b21adb685c34145e262f65a32e02e386e1aa214f4885eaa012bd8441949cb` |
+| `Tests/MenuPocketTests/TaskGroupingTests.swift` | `1c74e0a08dde2d1d897efa47620b3d308d49666c2b69383f441ebd5dea279d05` |
+
+The composer now has two rows: the task field, then a Category picker bound to `draftCategoryID`/`editCategoryID`, with Save and Cancel. The picker lists saved categories in creation order and then General. `DailyNotesState.startNewDraft()` selects the saved last-used category or General, and the view calls it only when it opens a hidden composer with empty new-task text. A successful `addDraft()`, or a `saveEdit()` that changes the category, expands the destination group. `TaskGroupID(categoryID:)` maps nil to General. The recovery notice shows a recovered edit's category. The project file, `AppDelegate`, `TaskWindowController`, Quick Add, and the legacy panel did not change.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app and tests with the shared MenuPocket scheme. A single hosted run of the same seven classes as Task 7 finished at 00:56 EDT. It executed 128 tests: **126 passed and 2 assertions failed**, with none skipped. DailyNotesStateTests (49), SQLiteNoteRepositoryTests (23), NoteDomainTests (9), QuickAddPanelTests (8), TaskGroupingTests (5), and TaskCategoryPreferencesTests (5) all passed. In AppConfigurationTests, 28 of 29 tests passed. The failing test was again `testSettingsShortcutReusesWindowAndCloseDoesNotTerminate`, at lines 515 and 519, where Command-W left the Settings and task windows visible. These are the same unchanged assertions recorded above for Tasks 3, 4, and 7. They moved 59 lines only because a new test was inserted above them. No isolated rerun was made, and no cause is claimed. After the run, the app's real sandbox defaults domain still held only its preferences and onboarding keys, last modified 2026-09-30. The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -resultBundlePath build/task-categories/task-008/Focused-tests.xcresult test \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests
+```
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Build | Pass: Debug build and test build of the shared scheme. |
+| A new draft starts from a saved last-used category, otherwise General; a missing remembered ID never becomes a selection; starting a draft leaves an edit's selection alone | Pass: `testNewDraftStartsFromSavedLastUsedCategoryOrGeneral`. |
+| General saves as nil, including with saved categories | Pass: the same test plus Task 5/6 state tests. |
+| A successful add or category change expands only the destination; text-only edits, rejected saves, and Quick Add change no disclosure | Pass: `testSavedAddOrReassignmentExpandsOnlyItsCollapsedDestination`. |
+| Through the real view and menu: Command-N seeds once; repeated Command-N and close/reopen keep the selection; Return saves text and category together and expands the destination; Escape discards a changed selection without remembering it | Pass: `testComposerStartsNewDraftsFromLastUsedCategoryAndKeepsAPendingSelection`. |
+| Failed saves keep text and selection; removed categories fall back or recover | Pass: Task 5 state tests, rerun unchanged. |
+| Window reuse, presentation, and deletion guards | Pass, except the native Command-W test above. |
+| Layout at 600 × 400 with a long category name, dark mode, and edit selection | Pass, reported by the user's manual fixture observation; also an offscreen render (below). |
+| Picker keyboard traversal, Up/Down, Return/Escape with the picker focused, native editing | Pass, reported by the user's manual fixture observation. |
+| Seeding, pending selection, failure, removal, rename, day change, destination expansion, and relaunch in the running interface | Pass, reported by the user's manual fixture observation. |
+
+A layout self-check rendered the production `TaskWindowView` offscreen, never on screen, through `ComposerSnapshot` (source `9359a3efddc26f217b28df518975181191e4d4afc39613eba506323e5f7ba905`). It used an in-memory repository and a throwaway defaults suite. The PNGs show both composer rows inside the 600 × 400 minimum, a long name truncated before Save and Cancel, readable dark mode, and an edit starting from its saved category. Offscreen rendering does not establish focus, keyboard, or interaction behavior.
+
+An isolated interface fixture was prepared: `build/task-categories/task-008/CategoryComposerFixture.app`, bundle ID `local.menupocket.task008.fixture`, executable SHA-256 `c902138fe87ab903ba819bae49df899d89e39cab2ea7aeb2d6e261ceca93f0da`. It compiles the production `MenuPocket/Notes` sources with an in-memory repository (`FixtureRepository.swift`, `ab807b7a7a68bec4307c89d6d6b6c622656daac53d09bf241b89014564feb091`) and the defaults suite `local.menupocket.task008.fixture.categories`. The fixture source is `CategoryComposerFixture.swift` (`09a9547e05371241de85453bf58807e4ffeadf798fdeccfb30cd8a95d8bc768d`). Its menu adds Command-N, write and read failures, category removal and rename, next day, and a remembered-category readout. It is non-sandboxed and never opens `notes.sqlite`. Claude did not drive it.
+
+The first fixture build (executable `9dfa8b525f22ab2f40615bdcf3a161864da71ecce2dbe2fc7adc28f5242b9725`) was defective. Its fixture menu put Remove School on Command-X ahead of the Edit menu's Cut, so Command-X in the text field removed the category instead of cutting text. Its write-failure commands gave no visible state. During the user's first pass, an edit save failed with the expected inline error, keeping its text and selection, because simulated write failure was still on. A reseed then moved the edit into recovery with its category, also as designed. Only the fixture was rebuilt. Fixture-only commands now use Option-Command; Fail Writes and Fail Reads are checkmarked toggles; and the window title shows the simulated failures, day offset, and the last command's outcome. A menu self-test, run without showing a window, confirmed every fixture shortcut sends its own item and that no Command key combination is shared. That self-test also cleared the fixture's own defaults suite, never the app's.
+
+Retained under ignored `build/task-categories/task-008/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, the fixture and snapshot sources and builds, and `snapshots/`. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `fee2fba9ffb80a11c62521ceb83fd7df9b924d1dfd2e120c0da35a109204ce1a`; debug dylib SHA-256: `b9fad895e0464056642bf46196d42813e5512e9b2e47edd7cc3d319acef4a5d2`. Only isolated databases and defaults and fake login and hotkey services were used. No production app or data launch, full-suite or Release run, independent review, or remote CI result is claimed. The category manager and final actual-interface acceptance remain later cards.

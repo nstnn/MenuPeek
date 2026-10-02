@@ -807,6 +807,89 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(TaskCategoryPreferences(userDefaults: defaults).lastUsedCategoryID, work.id)
     }
 
+    func testNewDraftStartsFromSavedLastUsedCategoryOrGeneral() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let store = FakeNoteRepository(categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let preferences = state.categoryPreferences
+
+        // No remembered category starts in General, even with saved categories.
+        state.startNewDraft()
+        XCTAssertNil(state.draftCategoryID)
+
+        preferences.rememberLastUsed(work.id)
+        state.startNewDraft()
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        state.draft = "General task"
+        state.draftCategoryID = nil
+        XCTAssertTrue(state.addDraft())
+        XCTAssertNil(store.saved.last?.categoryID)
+
+        // A remembered ID missing from the catalog never becomes a selection.
+        preferences.rememberLastUsed(UUID())
+        state.draftCategoryID = work.id
+        state.startNewDraft()
+        XCTAssertNil(state.draftCategoryID)
+
+        // Starting a new draft never changes an active edit's selection.
+        let task = try XCTUnwrap(store.saved.last)
+        preferences.rememberLastUsed(work.id)
+        state.beginEditing(id: task.id)
+        state.startNewDraft()
+        XCTAssertNil(state.editCategoryID)
+        XCTAssertEqual(state.draftCategoryID, work.id)
+    }
+
+    func testSavedAddOrReassignmentExpandsOnlyItsCollapsedDestination() throws {
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let general = note("General task", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [general], categories: [work, home])
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        let preferences = state.categoryPreferences
+        let all: Set<TaskGroupID> = [.category(work.id), .category(home.id), .general]
+        for group in all { preferences.setCollapsed(true, for: group) }
+
+        // Rejected, unavailable, and Quick Add saves change no disclosure.
+        state.draft = "Rejected"
+        state.draftCategoryID = work.id
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        store.failWrite = nil
+        XCTAssertEqual(state.add(text: "Captured"), .added)
+        XCTAssertEqual(preferences.collapsedGroupIDs, all)
+
+        XCTAssertTrue(state.addDraft())
+        XCTAssertEqual(preferences.collapsedGroupIDs, [.category(home.id), .general])
+        let saved = try XCTUnwrap(state.notes.last)
+        XCTAssertEqual(saved.categoryID, work.id)
+
+        // A text-only edit leaves its own collapsed group alone.
+        state.beginEditing(id: general.id)
+        state.editDraft = "General task, edited"
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertTrue(preferences.isCollapsed(.general))
+
+        state.beginEditing(id: general.id)
+        state.editCategoryID = home.id
+        store.failWrite = .edit
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertTrue(preferences.isCollapsed(.category(home.id)))
+        store.failWrite = nil
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertEqual(preferences.collapsedGroupIDs, [.general])
+        XCTAssertEqual(groupTexts(state), [["Rejected"], ["General task, edited"], ["Captured"]])
+
+        // Moving a task back into a collapsed General shows General too.
+        state.beginEditing(id: saved.id)
+        state.editCategoryID = nil
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertEqual(preferences.collapsedGroupIDs, [])
+    }
+
     func testCategoryPreferencesForgetCategoriesOnlyAfterACompleteReadOrCommittedRemoval() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 0)
         let home = try TaskCategory(name: "Home", creationOrder: 1)

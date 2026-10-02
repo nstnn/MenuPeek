@@ -4,7 +4,7 @@ import SwiftUI
 /// Desktop checklist backed by the app-owned saved snapshot and draft.
 struct TaskWindowView: View {
     private enum FocusControl: Hashable {
-        case add, settings, retry, save, draft, cancelDelete, confirmDelete
+        case add, settings, retry, save, draft, category, cancelDelete, confirmDelete
         case group(TaskGroupID)
         case completion(UUID)
         case edit(UUID), delete(UUID)
@@ -222,12 +222,20 @@ struct TaskWindowView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(notice)
                     .font(.callout)
-                if let text = state.recoveredEditDraft {
+                if let recovered = state.recoveredEdit {
                     Text("Unsaved edit")
                         .font(.callout.weight(.semibold))
-                    Text(text)
+                    Text(recovered.text)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                    // The name captured at cancellation, so a removed category still shows.
+                    if let name = recovered.categoryID == nil ? TaskCategoryName.general : recovered.categoryName {
+                        Text("Category: \(name)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .padding(12)
@@ -359,8 +367,10 @@ struct TaskWindowView: View {
         .accessibilityIdentifier("taskRow-\(note.id)")
     }
 
+    /// The field takes its own row, so the category and actions stay usable at
+    /// the minimum window width.
     private var composer: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             TextField(state.editingNoteID == nil ? "Write a task" : "Edit task",
                       text: state.editingNoteID == nil ? $state.draft : $state.editDraft)
                 .textFieldStyle(.roundedBorder)
@@ -373,20 +383,56 @@ struct TaskWindowView: View {
                     await Task.yield()
                     focusedControl = .draft
                 }
-            Button("Save", action: saveDraft)
-                .focusable()
-                .focused($focusedControl, equals: .save)
-                .onKeyPress(keys: [.space, .return]) { _ in
-                    saveDraft()
-                    return .handled
-                }
-                .disabled((state.editingNoteID == nil ? state.draft : state.editDraft)
-                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
-                .accessibilityIdentifier("saveTask")
-            Button("Cancel", action: cancelDraft)
-                .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier(state.editingNoteID == nil ? "cancelNewTask" : "cancelTaskEdit")
+            HStack(spacing: 12) {
+                categoryPicker(editing: state.editingNoteID != nil)
+                Spacer(minLength: 0)
+                Button("Save", action: saveDraft)
+                    .focusable()
+                    .focused($focusedControl, equals: .save)
+                    .onKeyPress(keys: [.space, .return]) { _ in
+                        saveDraft()
+                        return .handled
+                    }
+                    .disabled((state.editingNoteID == nil ? state.draft : state.editDraft)
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
+                    .accessibilityIdentifier("saveTask")
+                Button("Cancel", action: cancelDraft)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(state.editingNoteID == nil ? "cancelNewTask" : "cancelTaskEdit")
+            }
         }
+    }
+
+    /// Binds the visible draft's selection in state; nil is General, listed
+    /// last as in Today. With keyboard focus, Up and Down step the selection.
+    /// Return does nothing here, so choosing a category never saves the draft.
+    private func categoryPicker(editing: Bool) -> some View {
+        Picker("Category", selection: editing ? $state.editCategoryID : $state.draftCategoryID) {
+            ForEach(state.categories) { category in
+                Text(category.name).tag(UUID?.some(category.id))
+            }
+            Text(TaskCategoryName.general).tag(UUID?.none)
+        }
+        .focusable()
+        .focused($focusedControl, equals: .category)
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            stepCategory(by: press.key == .downArrow ? 1 : -1, editing: editing)
+            return .handled
+        }
+        .overlay { focusOutline(focusedControl == .category) }
+        // A long name truncates in the control instead of crowding Save and Cancel.
+        .frame(maxWidth: 280, alignment: .leading)
+        .disabled(state.availableCategories == nil)
+        .help(editing ? "Category for this task" : "Category for the new task")
+        .accessibilityIdentifier(editing ? "editTaskCategory" : "newTaskCategory")
+    }
+
+    private func stepCategory(by offset: Int, editing: Bool) {
+        let options = state.categories.map { UUID?.some($0.id) } + [nil]
+        let current = editing ? state.editCategoryID : state.draftCategoryID
+        guard state.availableCategories != nil, let index = options.firstIndex(of: current) else { return }
+        let next = options[min(max(index + offset, 0), options.count - 1)]
+        if editing { state.editCategoryID = next } else { state.draftCategoryID = next }
     }
 
     private func deletionConfirmation(_ note: Note) -> some View {
@@ -467,6 +513,9 @@ struct TaskWindowView: View {
 
     private func showComposer() {
         guard presentation.canAddTask(state: state) else { return }
+        // Only a genuinely new draft takes the last-used category. A pending one,
+        // from repeated Command-N or a reopened window, keeps its selection.
+        if !isComposerVisible && state.draft.isEmpty { state.startNewDraft() }
         isComposerVisible = true
         focusDraft()
     }
