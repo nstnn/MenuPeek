@@ -5,9 +5,13 @@ import SwiftUI
 struct TaskWindowView: View {
     private enum FocusControl: Hashable {
         case add, settings, retry, save, draft, cancelDelete, confirmDelete
+        case group(TaskGroupID)
         case completion(UUID)
         case edit(UUID), delete(UUID)
     }
+
+    /// Row controls and checkboxes align with the group name after its chevron.
+    private static let groupRowIndent: CGFloat = 22
 
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
@@ -28,10 +32,21 @@ struct TaskWindowView: View {
                         if progress.total == 0 {
                             emptyState
                         } else {
+                            let groups = state.groups
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(state.notes) { note in
-                                    taskRow(note)
-                                    if note.id != state.notes.last?.id { Divider() }
+                                ForEach(groups) { group in
+                                    let collapsed = state.categoryPreferences.isCollapsed(group.id)
+                                    groupHeader(group, collapsed: collapsed)
+                                        .padding(.top, group.id == groups.first?.id ? 0 : 12)
+                                    // A collapsed group renders no rows, so their
+                                    // controls leave keyboard and accessibility traversal.
+                                    if !collapsed {
+                                        ForEach(group.notes) { note in
+                                            Divider()
+                                            taskRow(note)
+                                        }
+                                        .padding(.leading, Self.groupRowIndent)
+                                    }
                                 }
                             }
                         }
@@ -222,6 +237,60 @@ struct TaskWindowView: View {
         }
     }
 
+    /// The count covers every task in the group, including rows hidden by collapse.
+    private func groupHeader(_ group: TaskGroup, collapsed: Bool) -> some View {
+        let progress = group.progress
+        return Button {
+            toggleGroup(group)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.groupRowIndent - 8)
+                Text(group.name)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(progress.completed)/\(progress.total)")
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focused($focusedControl, equals: .group(group.id))
+        .onKeyPress(keys: [.space, .return]) { _ in
+            toggleGroup(group)
+            return .handled
+        }
+        .overlay { focusOutline(focusedControl == .group(group.id)) }
+        .help(collapsed ? "Show tasks" : "Hide tasks")
+        .accessibilityLabel("\(group.name), \(progress.completed) of \(progress.total) complete")
+        .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+        .accessibilityHint(collapsed ? "Shows this group's tasks" : "Hides this group's tasks")
+        .accessibilityIdentifier("taskGroup-\(group.id.storageKey)")
+    }
+
+    private func toggleGroup(_ group: TaskGroup) {
+        let collapse = !state.categoryPreferences.isCollapsed(group.id)
+        state.categoryPreferences.setCollapsed(collapse, for: group.id)
+        // Its rows leave the view, so keep keyboard focus on the header.
+        if collapse, let id = focusedNoteID, group.notes.contains(where: { $0.id == id }) {
+            focusedControl = .group(group.id)
+        }
+    }
+
+    private var focusedNoteID: UUID? {
+        switch focusedControl {
+        case let .completion(id), let .edit(id), let .delete(id): id
+        default: nil
+        }
+    }
+
     private func taskRow(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Toggle(isOn: Binding(
@@ -375,8 +444,18 @@ struct TaskWindowView: View {
     private func restoreRowFocus(_ id: UUID) {
         Task { @MainActor in
             await Task.yield()
-            focusedControl = state.notes.contains(where: { $0.id == id }) ? .edit(id) : .add
+            focusedControl = focusAfterLeavingRow(id)
         }
+    }
+
+    /// The row's Edit button when it is visible; its group header when the
+    /// group is collapsed; Add when the task is gone; Retry when data is unavailable.
+    private func focusAfterLeavingRow(_ id: UUID) -> FocusControl {
+        guard state.availableProgress != nil else { return .retry }
+        guard let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else {
+            return .add
+        }
+        return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .edit(id)
     }
 
     private func focusDraft() {

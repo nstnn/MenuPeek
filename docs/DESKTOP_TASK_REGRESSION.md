@@ -262,3 +262,36 @@ xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
 Retained under ignored `build/task-categories/task-006/`: `Verified-tests.xcresult`, `verified-tests.log`, `build-for-testing.log`, and `source-hashes.txt`. The Debug bundle is `DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `0e2e08e5ec14186efa9646869c3be004e54cf9d792ef9e2e0077a28fc99cf6d5`; debug dylib SHA-256: `8527b8db2857f6f9dfc65224ec596712525283ca6116113b1c4fdd5604be321e`.
 
 Hosted tests share the app's sandbox container, so `UserDefaults.standard` there is the user's real domain. Every test state with a successful read used an isolated defaults suite; after the run, the real domain still held only its preferences and onboarding keys. Only isolated databases/defaults and fake login/hotkey services were used. No view changed, so no running-interface check was made. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed for Task 6. The grouped checklist, selector control, manager, and actual-interface acceptance remain later cards.
+
+## Grouped Today checklist — Task 7, 2026-10-01
+
+Automated verification is partial; the user's manual running-interface checks on an isolated fixture passed and are recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md#grouped-today-checklist--task-7-2026-10-02). The baseline was clean `main` at `7ca74e6601aa4645b93e8a13412d1eed01ab0d7b`, which merges Task 6 (PR #39); `feat/task-categories` was fast-forwarded to it and the change was verified uncommitted. The only changed Swift input is `TaskWindowView.swift` (`5d88e12e2b86b579fdd48666dee965cffbb0a035840d9d9e86099a8162b6982f`). It renders `DailyNotesState.groups` as collapsible sections, binds their disclosures to `TaskCategoryPreferences`, and restores focus to a group header when a row is hidden. No test, project, or other source file changed. Architecture and requirements describe the view contract; this section keeps the dated evidence.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app with the shared MenuPocket scheme. A single hosted run of the same seven classes as Task 6 finished at 23:59 EDT. It executed 125 tests: **123 passed and 2 assertions failed**, with none skipped. DailyNotesStateTests (47), SQLiteNoteRepositoryTests (23), NoteDomainTests (9), QuickAddPanelTests (8), TaskGroupingTests (5), and TaskCategoryPreferencesTests (5) all passed. In AppConfigurationTests, 27 of 28 tests passed. The failing test was `testSettingsShortcutReusesWindowAndCloseDoesNotTerminate`: lines 456 and 460, where Command-W left the Settings and task windows visible. That is the same unchanged test and the same two assertions recorded above as unresolved native repeatability in Task 3 and Task 4 reviews. Its lifecycle fixture repository is empty, so the window shows the empty state and the new group code does not run. No isolated rerun was made, and no cause is claimed. The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -resultBundlePath build/task-categories/task-007/Focused-tests.xcresult test \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests
+```
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Build | Pass: Debug build of the shared scheme. |
+| Projection, counts, order, and preferences that the view consumes | Pass: Task 6 grouping and preference tests, plus state and SQLite tests, rerun unchanged. |
+| Window reuse, presentation, and deletion guards | Pass, except the native Command-W test above. |
+| Groups match the projection; complete and text edits move no rows; collapse keeps counts | Pass, reported by the user's manual fixture observation. |
+| Hidden rows leave Tab traversal; focus returns to the header, Add, or Retry | Pass, reported by the user's manual fixture observation. |
+| Empty, all-completed, only-General, many-group, long-text, and 600 × 400 layouts, light and dark | Pass, reported by the user's manual fixture observation. |
+
+An isolated interface fixture was prepared: `build/task-categories/task-007/GroupedChecklistFixture.app`, bundle ID `local.menupocket.task007.fixture`. It runs the unchanged production state, controller, and view over an in-memory repository and the defaults suite `local.menupocket.task007.fixture.categories`. The first fixture build crashed at launch because its suite name equaled its bundle identifier, for which `UserDefaults(suiteName:)` returns nil; only the fixture was renamed and rebuilt. Fixture source SHA-256 is `4c520c01e1d1f5535a1ffbd3b6b17f3c06e91820b2592e833de8d4ee36d05729`, and its executable is `b5762422b917fc30d5fcf2cc3a1e5278f2fb539903faba81b049780b747f0bb9`. It is non-sandboxed and never opens `notes.sqlite`. Claude did not exercise it, because the Screen Recording grant needed for Computer Use was declined. The user ran the scripted checks manually and reported that all of them passed.
+
+Retained under ignored `build/task-categories/task-007/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, the fixture source, and `fixture-build.log`. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `224d2d827ef5113871166856f59a445df0eabe4a3eb98aabdedbbbe6062a8e0d`; debug dylib SHA-256: `9071b5159308e1ddf147fcfdf27fe5e8f099ce3139c43cbb0eff1877c0c69c21`. Only isolated databases/defaults and fake login/hotkey services were used. No production app/data launch, full-suite/Release run, independent review, or remote CI result is claimed. The category selector, manager, and final actual-interface acceptance remain later cards.
