@@ -347,3 +347,49 @@ An isolated interface fixture was prepared: `build/task-categories/task-008/Cate
 The first fixture build (executable `9dfa8b525f22ab2f40615bdcf3a161864da71ecce2dbe2fc7adc28f5242b9725`) was defective. Its fixture menu put Remove School on Command-X ahead of the Edit menu's Cut, so Command-X in the text field removed the category instead of cutting text. Its write-failure commands gave no visible state. During the user's first pass, an edit save failed with the expected inline error, keeping its text and selection, because simulated write failure was still on. A reseed then moved the edit into recovery with its category, also as designed. Only the fixture was rebuilt. Fixture-only commands now use Option-Command; Fail Writes and Fail Reads are checkmarked toggles; and the window title shows the simulated failures, day offset, and the last command's outcome. A menu self-test, run without showing a window, confirmed every fixture shortcut sends its own item and that no Command key combination is shared. That self-test also cleared the fixture's own defaults suite, never the app's.
 
 Retained under ignored `build/task-categories/task-008/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, the fixture and snapshot sources and builds, and `snapshots/`. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `fee2fba9ffb80a11c62521ceb83fd7df9b924d1dfd2e120c0da35a109204ce1a`; debug dylib SHA-256: `b9fad895e0464056642bf46196d42813e5512e9b2e47edd7cc3d319acef4a5d2`. Only isolated databases and defaults and fake login and hotkey services were used. No production app or data launch, full-suite or Release run, independent review, or remote CI result is claimed. The category manager and final actual-interface acceptance remain later cards.
+
+## Category manager — Task 9, 2026-10-02
+
+Automated verification passed, and the user's manual running-interface checks on an isolated fixture passed; they are recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md#category-manager--task-9-2026-10-02). The baseline was clean `main` at `515e376eee3859dc45721c2b3ff47afa3b6c8b65`, which merges Task 8 (PR #41). `feat/task-categories` was fast-forwarded to it, and the change was verified uncommitted. Changed inputs, by SHA-256:
+
+| File | SHA-256 |
+| --- | --- |
+| `MenuPocket/Notes/TaskCategoryManagerView.swift` (new) | `b4f8d4d6448c0c8fc7a6bbdd41fd77c578cc477a593cba0f8bb22e5101569698` |
+| `MenuPocket/Notes/TaskWindowController.swift` | `62dff45936e6e77055899134af79071e43e7688d0958b68c0da01407233043e5` |
+| `MenuPocket/Notes/TaskWindowView.swift` | `fd0bfa2b7b6df4c7b7111eddf30e73551159c6679b60ed95c38a0c77a3a6ec5a` |
+| `MenuPocket/Notes/DailyNotesState.swift` | `ab0a042d769658e1ed7326f14921e4afbbe7baa4133a2cee9486c4f3502ce78b` |
+| `MenuPocket/App/AppDelegate.swift` | `08531b07c1f3599390d4e772b62134aea609dedb4974a89227f2b156226d4d56` |
+| `Tests/MenuPocketTests/AppConfigurationTests.swift` | `5b0677dbcab15d85886b0aed654e4e1e3905454df493e0187a8443a0176cb21f` |
+| `MenuPocket.xcodeproj/project.pbxproj` | `9f6a22fd478b6bf6db0c4a7f8c58af622576240ff7d84a2b22706f5dd6e8c9ae` |
+
+Today has a Manage categories… button that opens `TaskCategoryManagerView` as a sheet attached to the Today window. `TaskWindowPresentation` owns whether the manager is open and the pending removal: `canAddTask` is false while the manager is open, `requestDeletion` is ignored then, and `canManageCategories` refuses an edit, a deletion confirmation, or unavailable data but allows a pending new-task draft. Removal reads the all-days count before showing a confirmation, consumes that confirmation before writing, rechecks the category and count, asks again with the new count if it changed, and needs a fresh confirmation after a failure. `AppDelegate.validateMenuItem` now uses `canAddTask`, so Command-N is disabled behind the sheet. `DailyNotesState.clearCategoryIssues()` lets a reopened manager start without old messages. The project file registers the new view.
+
+Xcode 27.0 (`27A266a`) on arm64 macOS 26.6.2 (`25G83`) built the Debug app and tests with the shared MenuPocket scheme. After the user approved it, a single hosted run of the same seven classes as Task 8 finished at 12:50 EDT. It executed 132 tests: **all 132 passed**, with none skipped. AppConfigurationTests (33), DailyNotesStateTests (49), SQLiteNoteRepositoryTests (23), NoteDomainTests (9), QuickAddPanelTests (8), TaskGroupingTests (5), and TaskCategoryPreferencesTests (5). The native Command-W assertions in `testSettingsShortcutReusesWindowAndCloseDoesNotTerminate` that failed in the Task 3, 4, 7, and 8 runs passed in this run; that test did not change. One passing run does not resolve their recorded repeatability question, and no cause is claimed. After the run, the app's real sandbox defaults domain still held no category keys and was last modified 2026-09-30. The command was:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -resultBundlePath build/task-categories/task-009/Focused-tests.xcresult test \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/NoteDomainTests
+```
+
+| Claim | Outcome and proof |
+| --- | --- |
+| Build | Pass: Debug build and test build of the shared scheme. |
+| Removal starts only in the open manager from the all-days count; Cancel leaves everything; a changed count asks again without writing; the confirmation is consumed before the write; a failure keeps the category, assignments, and draft and needs a fresh confirmation; success moves every day's tasks to General with unchanged progress and yesterday count, and a pending draft keeps its text but falls back to General with a notice and a cleared last-used category | Pass: `testCategoryRemovalConsumesConfirmationRechecksCountAndRequiresFreshConfirmationAfterFailure`. |
+| A missing category or unavailable data cancels a pending confirmation; a failed count shows none; closing the manager cancels it; reopening clears old category messages | Pass: `testCategoryRemovalCancelsForMissingOrUnavailableTargetsAndClosedManager`. |
+| Through the real window and menu: no manager over an edit or a deletion confirmation; the attached sheet opens over a pending draft; Command-N validation, Add, and deletion are blocked behind it; Escape in its name field closes only the sheet; a reopened sheet starts without the discarded name; closing Today dismisses the sheet and its pending removal and keeps the draft | Pass: `testCategoryManagerSheetBlocksTaskCommandsAndKeepsTheNewTaskDraft`. |
+| Through the real sheet: Return creates a category and clears the field; reserved (" general ") and duplicate ("SCHOOL") names show a field error and stay in the field | Pass: `testCategoryManagerSheetCreatesCategoriesAndKeepsInvalidNamesForCorrection`. |
+| Name rules, catalog commands, removal across all days, and selection fallback | Pass: Task 1–5 domain, SQLite, and state tests, rerun unchanged. |
+| General row, rename, removal copy and focus, changed-count reconfirmation, keyboard traversal, unavailable state, layout at 600 × 400, dark and light | Pass, reported by the user's manual fixture observation. |
+
+An isolated interface fixture was prepared: `build/task-categories/task-009/CategoryManagerFixture.app`, bundle ID `local.menupocket.task009.fixture`, executable SHA-256 `b4c97d2d586be393dd391bf567c50d7d7606a74e2dd92d132c154e34e4704d5d`. It compiles the production `MenuPocket/Notes` sources in Swift 6 mode with an in-memory repository (`FixtureRepository.swift`, `090f841c310a04c9ad3cb817d31a99790c4f89b1f701f43d8c980ce465227b66`) and the defaults suite `local.menupocket.task009.fixture.categories`. The fixture source is `CategoryManagerFixture.swift` (`2fe54ce9c34f1993c53f8bc99db5df56608162e9599351c9ee9b0b5c29bc97f5`). Its seeded School category has tasks today, yesterday, and on an older day. Option-Command fixture commands toggle write and read failures, add an older School task to change the all-days count, close the Today window directly, advance the day, and show all saved data. A menu self-test, run without showing a window, confirmed every fixture shortcut sends its own item; the only shared combination reported was the system's own Emoji & Symbols entries. The fixture is non-sandboxed and never opens `notes.sqlite`. Claude did not drive it.
+
+Retained under ignored `build/task-categories/task-009/`: `Focused-tests.xcresult`, `focused-tests.log`, `debug-build.log`, `test-build.log`, `source-hashes.txt`, `artifact-hashes.txt`, and the fixture sources, build log, and app. The Debug bundle is `build/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Executable SHA-256: `fa9e6902095aba3827ddb56190b63155672c7f64ca5e896ced0053362c6dd4ba`; debug dylib SHA-256: `601b172d221bd38b8452bf88951189fa958ba4bc2ae48b9e0021b90ac1bd7174`. Only isolated databases and defaults and fake login and hotkey services were used. No production app or data launch, full-suite or Release run, independent review, or remote CI result is claimed. Integrated regression and final actual-interface acceptance remain TASK-010 and TASK-011.

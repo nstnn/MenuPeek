@@ -214,6 +214,235 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testCategoryRemovalConsumesConfirmationRechecksCountAndRequiresFreshConfirmationAfterFailure() throws {
+        let store = TaskWindowReadFixture()
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = NoteDay(now: { instant })
+        let keys = day.keys()
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let todayWork = Note(id: UUID(), text: "Today work", dayKey: keys.today,
+                             createdAt: instant, completedAt: instant, categoryID: work.id)
+        let todayHome = Note(id: UUID(), text: "Today home", dayKey: keys.today,
+                             createdAt: instant, completedAt: nil, categoryID: home.id)
+        let yesterdayWork = Note(id: UUID(), text: "Yesterday work", dayKey: keys.yesterday,
+                                 createdAt: instant, completedAt: nil, categoryID: work.id)
+        store.savedCategories = [work, home]
+        store.saved = [todayWork, todayHome, yesterdayWork]
+        let preferences = isolatedCategoryPreferences()
+        let state = DailyNotesState(repositoryFactory: { store }, day: day,
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: preferences)
+        state.startup()
+        preferences.rememberLastUsed(work.id)
+        state.draft = "Pending task"
+        state.draftCategoryID = work.id
+        let presentation = TaskWindowPresentation()
+        typealias Target = TaskWindowPresentation.CategoryRemovalTarget
+
+        // Removal starts only in the open manager, from the all-days count.
+        XCTAssertFalse(presentation.requestCategoryRemoval(id: work.id, state: state))
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertTrue(presentation.requestCategoryRemoval(id: work.id, state: state))
+        XCTAssertEqual(presentation.categoryRemovalTarget,
+                       Target(id: work.id, name: "Work", usageCount: 2, countChanged: false))
+        XCTAssertTrue(TaskCategoryManagerView.removalMessage(usageCount: 2)
+            .hasPrefix("2 tasks, across all days, use this category. They will move to General"))
+        presentation.cancelCategoryRemoval()
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .notRemoved)
+        XCTAssertEqual(store.removeAttempts, 0)
+
+        // A count that changed after the confirmation appeared asks again.
+        presentation.requestCategoryRemoval(id: work.id, state: state)
+        store.saved.append(Note(id: UUID(), text: "Older work", dayKey: "2000-01-01",
+                                createdAt: instant, completedAt: nil, categoryID: work.id))
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .countChanged)
+        XCTAssertEqual(presentation.categoryRemovalTarget,
+                       Target(id: work.id, name: "Work", usageCount: 3, countChanged: true))
+        XCTAssertEqual(store.removeAttempts, 0)
+
+        // Confirmation is consumed before the write. A failure keeps the
+        // category, assignments, and draft, and needs a fresh confirmation.
+        store.onRemove = { XCTAssertNil(presentation.categoryRemovalTarget) }
+        store.failRemove = true
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .notRemoved)
+        XCTAssertEqual(store.removeAttempts, 1)
+        XCTAssertEqual(state.categoryIssue, .remove)
+        XCTAssertEqual(state.categories, [work, home])
+        XCTAssertEqual(state.notes, [todayWork, todayHome])
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        store.failRemove = false
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .notRemoved)
+        XCTAssertEqual(store.removeAttempts, 1)
+
+        // Success moves every day's tasks to General without changing counts,
+        // and the pending draft keeps its text but falls back to General.
+        let progress = state.availableProgress
+        XCTAssertTrue(presentation.requestCategoryRemoval(id: work.id, state: state))
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .removed)
+        XCTAssertEqual(store.removeAttempts, 2)
+        XCTAssertEqual(state.categories, [home])
+        XCTAssertEqual(state.notes.map(\.id), [todayWork.id, todayHome.id])
+        XCTAssertEqual(state.notes.map(\.categoryID), [nil, home.id])
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+        XCTAssertEqual(store.saved.count, 4)
+        XCTAssertFalse(store.saved.contains { $0.categoryID == work.id })
+        XCTAssertEqual(state.draft, "Pending task")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertEqual(state.refreshNotice, "The selected category is no longer available. The new task will use General.")
+        XCTAssertNil(preferences.lastUsedCategoryID)
+        XCTAssertNil(state.categoryIssue)
+        XCTAssertTrue(presentation.isManagingCategories)
+    }
+
+    @MainActor
+    func testCategoryRemovalCancelsForMissingOrUnavailableTargetsAndClosedManager() throws {
+        let store = TaskWindowReadFixture()
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        store.savedCategories = [work, home]
+        let state = DailyNotesState(repositoryFactory: { store },
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        state.startup()
+        let presentation = TaskWindowPresentation()
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+
+        presentation.requestCategoryRemoval(id: home.id, state: state)
+        store.savedCategories = [work]
+        state.refresh()
+        presentation.validateCategoryRemoval(state: state)
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        XCTAssertFalse(presentation.requestCategoryRemoval(id: home.id, state: state))
+
+        presentation.requestCategoryRemoval(id: work.id, state: state)
+        store.failRead = true
+        state.refresh()
+        presentation.validateCategoryRemoval(state: state)
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .notRemoved)
+        XCTAssertFalse(presentation.canManageCategories(state: state))
+        store.failRead = false
+        state.refresh()
+
+        // A failed count shows no confirmation and keeps its own error.
+        store.savedCategories = []
+        XCTAssertFalse(presentation.requestCategoryRemoval(id: work.id, state: state))
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        XCTAssertEqual(state.categoryIssue, .notFound)
+        store.savedCategories = [work]
+
+        // Closing the manager cancels its confirmation; reopening clears old messages.
+        presentation.requestCategoryRemoval(id: work.id, state: state)
+        presentation.dismissCategoryManager()
+        XCTAssertFalse(presentation.isManagingCategories)
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        XCTAssertFalse(presentation.requestCategoryRemoval(id: work.id, state: state))
+        XCTAssertNil(state.createCategory(name: "work"))
+        XCTAssertEqual(state.categoryNameIssue, .duplicate)
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertNil(state.categoryNameIssue)
+        XCTAssertNil(state.categoryIssue)
+        XCTAssertEqual(store.removeAttempts, 0)
+        XCTAssertEqual(store.savedCategories, [work])
+    }
+
+    @MainActor
+    func testCategoryManagerSheetBlocksTaskCommandsAndKeepsTheNewTaskDraft() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let note = Note(id: UUID(), text: "Original", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: nil, categoryID: work.id)
+        fixture.repository.savedCategories = [work]
+        fixture.repository.saved = [note]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        let window = try XCTUnwrap(controller.window)
+        let item = NSMenuItem(title: "Add Task", action: #selector(AppDelegate.addTask), keyEquivalent: "n")
+
+        // Not over an edit or a deletion confirmation.
+        fixture.state.beginEditing(id: note.id)
+        XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
+        fixture.state.cancelEditing()
+        presentation.requestDeletion(id: note.id, state: fixture.state)
+        XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
+        presentation.cancelDeletion()
+
+        // Over a pending new-task draft, the attached sheet blocks task commands.
+        fixture.state.draft = "Pending task"
+        fixture.state.draftCategoryID = work.id
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        await waitUntil { window.attachedSheet != nil }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(presentation.newTaskRequestID)
+        presentation.requestDeletion(id: note.id, state: fixture.state)
+        XCTAssertNil(presentation.deletionTarget)
+
+        // Escape in the sheet's name field closes the sheet and nothing else.
+        let editor = try await focusedEditor(in: sheet)
+        editor.insertText("Unsaved name", replacementRange: NSRange(location: 0, length: 0))
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { !presentation.isManagingCategories && window.attachedSheet == nil }
+        XCTAssertEqual(fixture.state.draft, "Pending task")
+        XCTAssertEqual(fixture.state.draftCategoryID, work.id)
+        XCTAssertTrue(fixture.delegate.validateMenuItem(item))
+
+        // A reopened sheet starts without the discarded name; closing Today
+        // dismisses it and its pending removal.
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        await waitUntil { window.attachedSheet != nil }
+        let reopened = try await focusedEditor(in: XCTUnwrap(window.attachedSheet))
+        XCTAssertEqual(reopened.string, "")
+        XCTAssertTrue(presentation.requestCategoryRemoval(id: work.id, state: fixture.state))
+        window.close()
+        XCTAssertFalse(presentation.isManagingCategories)
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        fixture.delegate.showTasks()
+        await waitUntil { window.isVisible && window.attachedSheet == nil }
+        XCTAssertEqual(fixture.state.draft, "Pending task")
+        XCTAssertEqual(fixture.repository.saved, [note])
+        XCTAssertEqual(fixture.repository.savedCategories, [work])
+        XCTAssertEqual(fixture.repository.removeAttempts, 0)
+    }
+
+    @MainActor
+    func testCategoryManagerSheetCreatesCategoriesAndKeepsInvalidNamesForCorrection() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertTrue(controller.presentation.showCategoryManager(state: fixture.state))
+        await waitUntil { window.attachedSheet != nil }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+
+        let editor = try await focusedEditor(in: sheet)
+        editor.insertText("School", replacementRange: NSRange(location: 0, length: 0))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.state.categories.map(\.name) == ["School"] }
+        await waitUntil { editor.string.isEmpty }
+
+        // Reserved and duplicate names stay in the field with a field error.
+        for (name, issue) in [(" general ", CategoryNameIssue.invalid(.reserved)), ("SCHOOL", .duplicate)] {
+            editor.selectAll(nil)
+            editor.insertText(name, replacementRange: editor.selectedRange())
+            editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            await waitUntil { fixture.state.categoryNameIssue == issue }
+            XCTAssertEqual(editor.string, name)
+        }
+        XCTAssertEqual(fixture.repository.savedCategories.map(\.name), ["School"])
+        XCTAssertTrue(controller.presentation.isManagingCategories)
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+    }
+
+    @MainActor
     func testAppDelegateReusesItsSettingsWindow() throws {
         let suiteName = "local.menupocket.tests.AppConfigurationTests.\(UUID().uuidString)"
         let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -866,15 +1095,41 @@ private final class TaskWindowReadFixture: NoteRepository {
     var onDelete: (() -> Void)?
     var readAttempts = 0
     var allowAdd = false
+    var failRemove = false
+    var removeAttempts = 0
+    var onRemove: (() -> Void)?
 
     func categories() throws -> [TaskCategory] {
         if failRead { throw CocoaError(.fileReadUnknown) }
         return savedCategories
     }
-    func createCategory(name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }
+    func createCategory(name: String) throws -> TaskCategory {
+        let name = try TaskCategoryName.validate(name)
+        guard !savedCategories.contains(where: { $0.nameKey == TaskCategoryName.key(for: name) }) else {
+            throw TaskCategoryRepositoryError.duplicateName
+        }
+        let category = try TaskCategory(name: name,
+                                        creationOrder: (savedCategories.map(\.creationOrder).max() ?? -1) + 1)
+        savedCategories.append(category)
+        return category
+    }
     func renameCategory(id: UUID, name: String) throws -> TaskCategory { throw CocoaError(.fileWriteNoPermission) }
-    func categoryUsageCount(id: UUID) throws -> Int { throw TaskCategoryRepositoryError.notFound(id) }
-    func removeCategory(id: UUID) throws { throw CocoaError(.fileWriteNoPermission) }
+    /// Counts every saved day, like the store.
+    func categoryUsageCount(id: UUID) throws -> Int {
+        guard savedCategories.contains(where: { $0.id == id }) else { throw TaskCategoryRepositoryError.notFound(id) }
+        return saved.count { $0.categoryID == id }
+    }
+    func removeCategory(id: UUID) throws {
+        removeAttempts += 1
+        onRemove?()
+        if failRemove { throw CocoaError(.fileWriteNoPermission) }
+        guard savedCategories.contains(where: { $0.id == id }) else { throw TaskCategoryRepositoryError.notFound(id) }
+        savedCategories.removeAll { $0.id == id }
+        saved = saved.map { note in
+            Note(id: note.id, text: note.text, dayKey: note.dayKey, createdAt: note.createdAt,
+                 completedAt: note.completedAt, categoryID: note.categoryID == id ? nil : note.categoryID)
+        }
+    }
 
     func notes(for dayKey: String) throws -> [Note] {
         readAttempts += 1

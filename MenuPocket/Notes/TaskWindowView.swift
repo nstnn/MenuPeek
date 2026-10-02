@@ -4,7 +4,7 @@ import SwiftUI
 /// Desktop checklist backed by the app-owned saved snapshot and draft.
 struct TaskWindowView: View {
     private enum FocusControl: Hashable {
-        case add, settings, retry, save, draft, category, cancelDelete, confirmDelete
+        case add, manageCategories, settings, retry, save, draft, category, cancelDelete, confirmDelete
         case group(TaskGroupID)
         case completion(UUID)
         case edit(UUID), delete(UUID)
@@ -64,7 +64,7 @@ struct TaskWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("todayTaskList")
-            .disabled(presentation.deletionTarget != nil)
+            .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
             .contentShape(Rectangle())
             .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
             Divider()
@@ -93,6 +93,16 @@ struct TaskWindowView: View {
                     .overlay { focusOutline(focusedControl == .add) }
                     .disabled(!presentation.canAddTask(state: state))
                     .accessibilityIdentifier("addTask")
+                    Button("Manage categories…", action: showCategoryManager)
+                        .focusable()
+                        .focused($focusedControl, equals: .manageCategories)
+                        .onKeyPress(keys: [.space, .return]) { _ in
+                            showCategoryManager()
+                            return .handled
+                        }
+                        .overlay { focusOutline(focusedControl == .manageCategories) }
+                        .disabled(!presentation.canManageCategories(state: state))
+                        .accessibilityIdentifier("manageCategories")
                     Spacer()
                     Button("Settings…", action: onSettings)
                         .focusable()
@@ -112,6 +122,16 @@ struct TaskWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        // Attached to this window, so it blocks the rows and actions behind it.
+        .sheet(isPresented: Binding(
+            get: { presentation.isManagingCategories },
+            set: { if !$0 { presentation.dismissCategoryManager() } }
+        )) {
+            TaskCategoryManagerView(state: state, presentation: presentation)
+        }
+        .onChange(of: presentation.isManagingCategories) { wasManaging, isManaging in
+            if wasManaging, !isManaging { focusManageCategories() }
+        }
         .onChange(of: presentation.newTaskRequestID, initial: true) { _, request in
             if request != nil {
                 showComposer()
@@ -518,6 +538,19 @@ struct TaskWindowView: View {
         if !isComposerVisible && state.draft.isEmpty { state.startNewDraft() }
         isComposerVisible = true
         focusDraft()
+    }
+
+    /// A pending new-task draft stays in state and its composer stays visible.
+    private func showCategoryManager() {
+        presentation.showCategoryManager(state: state)
+    }
+
+    /// After the sheet closes: its entry button, or Retry if data became unavailable.
+    private func focusManageCategories() {
+        Task { @MainActor in
+            await Task.yield()
+            focusedControl = state.availableCategories == nil ? .retry : .manageCategories
+        }
     }
 
     private func saveDraft() {
