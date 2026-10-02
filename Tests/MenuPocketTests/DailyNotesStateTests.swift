@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SQLite3
 import XCTest
 @testable import MenuPocket
 
@@ -706,6 +707,140 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(reopened.notes, expected)
         XCTAssertEqual(reopened.availableCategories, [work, home])
         XCTAssertEqual(reopened.progress, NoteProgress(completed: 1, total: 2))
+    }
+
+    func testSQLiteGroupsAndPresentationPreferencesSurviveReassignmentAndReopen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CategoryGroups-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let defaults = isolatedDefaults()
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { current }), notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
+        }
+        let expectedNotes: [Note]
+        let expectedGroups: [TaskGroup]
+        let expectedCategories: [TaskCategory]
+        let work: TaskCategory
+        do {
+            let state = makeState()
+            state.startup()
+            work = try XCTUnwrap(state.createCategory(name: "Work"))
+            let home = try XCTUnwrap(state.createCategory(name: "Home"))
+            XCTAssertNotNil(state.createCategory(name: "Unused"))
+            let drafts: [(String, UUID?)] = [("First", work.id), ("Second", home.id),
+                                           ("General task", nil), ("Fourth", work.id)]
+            for (text, categoryID) in drafts {
+                state.draft = text
+                state.draftCategoryID = categoryID
+                XCTAssertTrue(state.addDraft())
+            }
+            let first = try XCTUnwrap(state.notes.first)
+            XCTAssertTrue(state.setCompleted(id: first.id, completed: true))
+            state.beginEditing(id: first.id)
+            state.editCategoryID = home.id
+            XCTAssertTrue(state.saveEdit())
+            XCTAssertNotNil(state.renameCategory(id: home.id, name: "Household"))
+            state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+            state.categoryPreferences.setCollapsed(true, for: .general)
+            XCTAssertEqual(state.groups.map(\.name), ["Work", "Household", "General"])
+            XCTAssertEqual(groupTexts(state), [["Fourth"], ["First", "Second"], ["General task"]])
+            assertGroupCounts(state, equal: NoteProgress(completed: 1, total: 4))
+            expectedNotes = state.notes
+            expectedGroups = state.groups
+            expectedCategories = state.categories
+            state.stopForTermination()
+        }
+
+        // Both the state and its SQLite connection have been released.
+        let reopened = makeState()
+        reopened.startup()
+        XCTAssertEqual(reopened.notes, expectedNotes)
+        XCTAssertEqual(reopened.groups, expectedGroups)
+        XCTAssertEqual(reopened.availableCategories, expectedCategories)
+        XCTAssertEqual(reopened.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(reopened.categoryPreferences.collapsedGroupIDs, [.category(work.id), .general])
+        assertGroupCounts(reopened, equal: NoteProgress(completed: 1, total: 4))
+    }
+
+    func testSQLiteRejectedReassignmentAndRemovalKeepGroupsProgressAndSavedRowsUntilRetry() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CategoryFailures-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let store = try SQLiteNoteRepository(databaseURL: url)
+        let work = try store.createCategory(name: "Work")
+        let home = try store.createCategory(name: "Home")
+        let today = Note(id: UUID(), text: "Done", dayKey: "2026-09-27", createdAt: current,
+                         completedAt: current, categoryID: work.id)
+        let yesterday = Note(id: UUID(), text: "Yesterday", dayKey: "2026-09-26", createdAt: current,
+                             completedAt: nil, categoryID: work.id)
+        let older = Note(id: UUID(), text: "Older", dayKey: "2026-09-20", createdAt: current,
+                         completedAt: current, categoryID: work.id)
+        for note in [today, yesterday, older] { try store.add(note) }
+        let preferences = isolatedCategoryPreferences()
+        let state = DailyNotesState(repositoryFactory: { store }, day: makeDay(now: { current }),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: preferences)
+        state.startup()
+        preferences.rememberLastUsed(work.id)
+        preferences.setCollapsed(true, for: .category(home.id))
+        let groups = state.groups
+        let progress = NoteProgress(completed: 1, total: 1)
+        try executeCategoryFixtureSQL(
+            """
+            CREATE TRIGGER reject_edit AFTER UPDATE OF text ON notes
+            BEGIN SELECT RAISE(FAIL, 'rejected after editing'); END;
+            CREATE TRIGGER reject_removal AFTER UPDATE OF category_id ON notes
+            WHEN NEW.day_key = '2026-09-20'
+            BEGIN SELECT RAISE(FAIL, 'rejected after removing'); END;
+            """, at: url)
+        state.beginEditing(id: today.id)
+        state.editDraft = "Changed"
+        state.editCategoryID = home.id
+        XCTAssertFalse(state.saveEdit())
+        XCTAssertEqual(state.taskIssue, .edit)
+        XCTAssertEqual(state.editDraft, "Changed")
+        XCTAssertEqual(state.editCategoryID, home.id)
+        XCTAssertFalse(state.removeCategory(id: work.id))
+        XCTAssertEqual(state.categoryIssue, .remove)
+        XCTAssertEqual(state.taskIssue, .edit)
+        XCTAssertEqual(state.groups, groups)
+        XCTAssertEqual(state.availableCategories, [work, home])
+        assertGroupCounts(state, equal: progress)
+        XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+        XCTAssertEqual(preferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(preferences.isCollapsed(.category(home.id)))
+        for note in [today, yesterday, older] {
+            XCTAssertEqual(try store.notes(for: note.dayKey), [note])
+        }
+
+        try executeCategoryFixtureSQL("DROP TRIGGER reject_edit; DROP TRIGGER reject_removal", at: url)
+        XCTAssertTrue(state.saveEdit())
+        XCTAssertFalse(preferences.isCollapsed(.category(home.id)))
+        XCTAssertEqual(state.groups.first?.id, .category(home.id))
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertNil(preferences.lastUsedCategoryID)
+        assertGroupCounts(state, equal: progress)
+        XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+        let reopened = try SQLiteNoteRepository(databaseURL: url)
+        XCTAssertEqual(try reopened.categories(), [home])
+        XCTAssertEqual(try reopened.notes(for: today.dayKey), [
+            Note(id: today.id, text: "Changed", dayKey: today.dayKey, createdAt: today.createdAt,
+                 completedAt: today.completedAt, categoryID: home.id)
+        ])
+        for note in [yesterday, older] {
+            XCTAssertEqual(try reopened.notes(for: note.dayKey), [
+                Note(id: note.id, text: note.text, dayKey: note.dayKey, createdAt: note.createdAt,
+                     completedAt: note.completedAt)
+            ])
+        }
     }
 
     func testGroupsFollowSavedSnapshotAndKeepDailyProgressThroughCategoryChanges() throws {
@@ -1634,6 +1769,16 @@ final class DailyNotesStateTests: XCTestCase {
 
     private func groupTexts(_ state: DailyNotesState) -> [[String]] {
         state.groups.map { $0.notes.map(\.text) }
+    }
+
+    private func executeCategoryFixtureSQL(_ sql: String, at url: URL) throws {
+        var database: OpaquePointer?
+        let result = sqlite3_open(url.path, &database)
+        defer { if let database { sqlite3_close(database) } }
+        XCTAssertEqual(result, SQLITE_OK)
+        let opened = try XCTUnwrap(database)
+        XCTAssertEqual(sqlite3_exec(opened, sql, nil, nil, nil), SQLITE_OK,
+                       String(cString: sqlite3_errmsg(opened)))
     }
 
     private func assertGroupCounts(_ state: DailyNotesState, equal daily: NoteProgress,
