@@ -143,8 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard !isTerminating else { return false }
         if menuItem.action == #selector(addTask) {
-            return dailyNotesState.availableProgress != nil && dailyNotesState.editingNoteID == nil &&
-                taskWindowController?.presentation.deletionTarget == nil
+            // The window's presentation also blocks Add behind deletion
+            // confirmation and the category manager.
+            if let presentation = taskWindowController?.presentation {
+                return presentation.canAddTask(state: dailyNotesState)
+            }
+            return dailyNotesState.availableProgress != nil && dailyNotesState.editingNoteID == nil
         }
         return true
     }

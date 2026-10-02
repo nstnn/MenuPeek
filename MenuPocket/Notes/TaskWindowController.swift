@@ -10,11 +10,34 @@ final class TaskWindowPresentation {
         let dayKey: String
     }
 
+    /// A category awaiting confirmed removal, with the all-days task count the
+    /// confirmation states.
+    struct CategoryRemovalTarget: Equatable {
+        let id: UUID
+        let name: String
+        let usageCount: Int
+        /// The count changed after the user last saw it, so the confirmation
+        /// shows the new count and must be confirmed again.
+        let countChanged: Bool
+    }
+
+    enum CategoryRemovalOutcome: Equatable {
+        case removed
+        case countChanged
+        /// Nothing was removed: no target, a missing category, unavailable data,
+        /// or a failed count or write. The state reports any command error.
+        case notRemoved
+    }
+
     private(set) var deletionTarget: DeletionTarget?
     private(set) var newTaskRequestID: UUID?
+    private(set) var isManagingCategories = false
+    private(set) var categoryRemovalTarget: CategoryRemovalTarget?
 
+    /// Also false while the category manager is open, so no task command acts behind it.
     func canAddTask(state: DailyNotesState) -> Bool {
-        state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil
+        state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil &&
+            !isManagingCategories
     }
 
     @discardableResult
@@ -27,6 +50,7 @@ final class TaskWindowPresentation {
     func consumeNewTaskRequest() { newTaskRequestID = nil }
 
     func requestDeletion(id: UUID, state: DailyNotesState) {
+        guard !isManagingCategories else { return }
         state.refreshIfDayChanged()
         guard state.availableProgress != nil,
               let note = state.notes.first(where: { $0.id == id }),
@@ -55,6 +79,68 @@ final class TaskWindowPresentation {
             return false
         }
         return state.delete(id: target.id)
+    }
+
+    /// The manager can open over a pending new-task draft, which it leaves
+    /// alone, but not over an edit or a deletion confirmation.
+    func canManageCategories(state: DailyNotesState) -> Bool {
+        state.availableCategories != nil && state.editingNoteID == nil && deletionTarget == nil
+    }
+
+    @discardableResult
+    func showCategoryManager(state: DailyNotesState) -> Bool {
+        guard !isManagingCategories else { return true }
+        guard canManageCategories(state: state) else { return false }
+        // A reopened manager starts without the last session's messages.
+        state.clearCategoryIssues()
+        isManagingCategories = true
+        return true
+    }
+
+    func dismissCategoryManager() {
+        cancelCategoryRemoval()
+        isManagingCategories = false
+    }
+
+    /// Reads the all-days count the confirmation must state. A failed count
+    /// leaves no confirmation and reports its own command error.
+    @discardableResult
+    func requestCategoryRemoval(id: UUID, state: DailyNotesState) -> Bool {
+        guard isManagingCategories,
+              let category = state.availableCategories?.first(where: { $0.id == id }),
+              let count = state.categoryUsageCount(id: id) else { return false }
+        categoryRemovalTarget = CategoryRemovalTarget(id: id, name: category.name,
+                                                      usageCount: count, countChanged: false)
+        return true
+    }
+
+    func cancelCategoryRemoval() { categoryRemovalTarget = nil }
+
+    /// Cancels a confirmation whose category left the catalog or whose data
+    /// became unavailable.
+    func validateCategoryRemoval(state: DailyNotesState) {
+        guard let target = categoryRemovalTarget else { return }
+        if state.availableCategories?.contains(where: { $0.id == target.id }) != true {
+            cancelCategoryRemoval()
+        }
+    }
+
+    /// Consumes the confirmation before writing, then rechecks the target and
+    /// its count. A changed count asks again with the new count; a failed
+    /// removal needs a fresh confirmation.
+    @discardableResult
+    func confirmCategoryRemoval(state: DailyNotesState) -> CategoryRemovalOutcome {
+        guard let target = categoryRemovalTarget else { return .notRemoved }
+        cancelCategoryRemoval()
+        guard isManagingCategories,
+              let category = state.availableCategories?.first(where: { $0.id == target.id }),
+              let count = state.categoryUsageCount(id: target.id) else { return .notRemoved }
+        guard count == target.usageCount else {
+            categoryRemovalTarget = CategoryRemovalTarget(id: target.id, name: category.name,
+                                                          usageCount: count, countChanged: true)
+            return .countChanged
+        }
+        return state.removeCategory(id: target.id) ? .removed : .notRemoved
     }
 }
 
@@ -106,5 +192,6 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         presentation.cancelDeletion()
+        presentation.dismissCategoryManager()
     }
 }

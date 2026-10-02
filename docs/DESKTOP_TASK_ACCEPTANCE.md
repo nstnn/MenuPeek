@@ -162,3 +162,31 @@ The user reported all 16 scripted checks as passing:
 16. After quit and relaunch, a new draft starts from the last saved category, and the unsaved draft is gone as designed. The VoiceOver label was optional.
 
 The fixture is non-sandboxed and in-memory, so it does not establish production sandbox identity, SQLite persistence across relaunch, menu bar or Dock behavior, or Release behavior. It does not close the earlier acceptance gaps above. Final integrated category acceptance remains TASK-011.
+
+## Category manager — Task 9, 2026-10-02
+
+Pass, as reported by the user from direct manual observation of the isolated fixture: "ok tất cả test đều pass rồi". Claude did not observe or drive the interface; per the user's standing preference, no Computer Use or Screen Recording was used. No screenshots were retained, apart from the one the user shared during the first pass, described below.
+
+The fixture was `build/task-categories/task-009/CategoryManagerFixture.app`, bundle ID `local.menupocket.task009.fixture`, executable SHA-256 `b4c97d2d586be393dd391bf567c50d7d7606a74e2dd92d132c154e34e4704d5d`. It is compiled from the production `MenuPocket/Notes` sources (`TaskCategoryManagerView.swift` SHA-256 `b4f8d4d6448c0c8fc7a6bbdd41fd77c578cc477a593cba0f8bb22e5101569698`), with an in-memory repository and the defaults suite `local.menupocket.task009.fixture.categories`. Source and build identity match the [Task 9 regression record](DESKTOP_TASK_REGRESSION.md#category-manager--task-9-2026-10-02).
+
+During the first pass, removing Fitness in check 9 showed "Could not remove category. Try again." and kept the category; the user's screenshot also showed the renamed Classes category still saved. The fixture's simulated write failure from check 5 was still on. That message comes only from a failed repository write, and a headless replay of checks 4–9 through the production state and presentation (not retained) reproduced it with simulated failure on and removed both categories with it off, moving the pending draft to General with a notice. This is designed behavior: the failed removal kept the data and returned focus to the row's Remove… button. Nothing was rebuilt; the user turned the simulated failure off and reran the checks.
+
+The user reported all 15 scripted checks as passing:
+
+1. The sheet lists every saved custom category in creation order, including one without tasks today, then General with no actions; a long name wraps without hiding its buttons.
+2. Creating a category adds it at the end, clears the field, adds no Today group, and makes it available in the composer's picker.
+3. Reserved (`general`) and duplicate (`SCHOOL`) names show an inline error and stay in the field; nothing is created.
+4. Renaming updates the Today group header without moving the group; other rows' actions are disabled during a rename; Escape in the rename field cancels only the rename.
+5. With simulated write failure, create, rename, and remove show an error and change nothing; after turning it off, a retry succeeds.
+6. The removal confirmation names the category and its count across all days, says tasks move to General and none are deleted, and starts with Cancel focused; Escape returns to the list with focus on that row's Remove… button and changes nothing.
+7. Adding an older task while the confirmation is open makes Remove Category show the new count and ask again instead of removing; a second confirmation removes.
+8. After removal, that category's tasks appear in General in their original order, overall progress is unchanged, and every day's tasks remain, now in General.
+9. Removing the category a pending new-task draft selected keeps the draft text, moves the selection to General, and shows a notice.
+10. While the sheet is open, Add Task and Command-N are unavailable and the window behind cannot be used; Manage categories… is disabled during a task edit or deletion confirmation.
+11. Escape in the name field closes the sheet and returns focus to Manage categories…, a reopened sheet starts with an empty field, and closing the Today window during a removal confirmation leaves neither the sheet nor the confirmation on reopening while the task draft remains.
+12. With simulated read failure, the sheet shows an unavailable state with Retry and cancels a pending removal; after reads recover, Retry restores the list.
+13. Tab reaches Rename, Remove…, the name field, Create, and Done; Space and Return activate the focused button.
+14. At the minimum window size, in dark and light appearance, the sheet fits and stays readable.
+15. With no custom categories, the sheet shows "No custom categories yet." and General.
+
+The fixture is non-sandboxed and in-memory, so it does not establish production sandbox identity, SQLite persistence across relaunch, menu bar or Dock behavior, or Release behavior. It does not close the earlier acceptance gaps above. Final integrated category acceptance remains TASK-011.

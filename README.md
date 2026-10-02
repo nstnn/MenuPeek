@@ -43,7 +43,7 @@ Settings provides Open at Login, a Theme choice, a Quick Add switch, app informa
 
 | Shortcut | Action |
 | --- | --- |
-| Command-N | Restore the task window and focus Add task; unavailable during editing, deletion confirmation, or unavailable data. |
+| Command-N | Restore the task window and focus Add task; unavailable during editing, deletion confirmation, while Manage categories is open, or with unavailable data. |
 | Command-comma | Open the reusable Settings window. |
 | Command-W | Close the active window while the app keeps running. |
 | Command-Q | Quit the app. |

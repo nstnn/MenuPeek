@@ -288,6 +288,12 @@ final class DailyNotesState {
         }
     }
 
+    /// Clears category field and command messages; saved data and task errors are unchanged.
+    func clearCategoryIssues() {
+        categoryNameIssue = nil
+        categoryIssue = nil
+    }
+
     private func validatedCategoryName(_ name: String) -> String? {
         do {
             let validated = try TaskCategoryName.validate(name)
