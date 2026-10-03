@@ -227,10 +227,17 @@ struct TaskCategoryManagerView: View {
 
     private func removalConfirmation(_ target: TaskWindowPresentation.CategoryRemovalTarget) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Remove “\(target.name)”?")
-                .font(.title3.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
+            // Names have no length limit. Scroll the full name independently
+            // so the all-days notice and actions stay visible in this sheet.
+            ScrollView {
+                Text("Remove “\(target.name)”?")
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            .frame(maxHeight: .infinity)
+            .accessibilityIdentifier("categoryRemovalName")
             Text(Self.removalMessage(usageCount: target.usageCount))
                 .fixedSize(horizontal: false, vertical: true)
             if target.countChanged {
@@ -244,7 +251,6 @@ struct TaskCategoryManagerView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("categoryCommandError")
             }
-            Spacer(minLength: 0)
             HStack {
                 Spacer()
                 Button("Cancel", action: cancelRemoval)

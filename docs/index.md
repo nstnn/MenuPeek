@@ -6,8 +6,9 @@ MenuPocket manages daily tasks in one desktop window and shows saved progress in
 - [Requirements](REQUIREMENTS.md) — desktop task behavior, daily-only scope, and acceptance criteria.
 - [Architecture](ARCHITECTURE.md) — app composition, data flow, persistence, and system boundaries.
 - [Workflow](WORKFLOW.md) — build, verification, and local Release steps.
-- [Desktop regression](DESKTOP_TASK_REGRESSION.md) — 2026-09-29 automated regression, storage preservation, local builds, and retained artifact identity.
-- [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) — 2026-09-29 actual Release observations, partial acceptance, and blocked/untested system and fixture checks.
+- [Desktop regression](DESKTOP_TASK_REGRESSION.md) — dated automated regression, category storage/state/UI checks, local builds, and retained artifact identity.
+- [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) — dated actual-interface observations, category fixtures, partial acceptance, and blocked/untested production and system checks.
+- [Task categories handoff](TASK_CATEGORIES_HANDOFF.md) — category source/artifact identity, automated and interface evidence, completed documentation, and the remaining TASK-011 acceptance gate.
 
 ## Historical evidence
 
@@ -16,6 +17,6 @@ MenuPocket manages daily tasks in one desktop window and shows saved progress in
 
 ## Local plans
 
-The [desktop task-management plan](../plan/desktop-task-management/desktop-task-management.md) defines Tasks 1–10 for this increment. The earlier [Notes MVP design](../plan/mvp/NOTES_MVP_PLAN.md) and [task cards](../plan/mvp/NOTES_MVP_TASKS.md) describe the superseded compact panel. The [initial roadmap](../plan/init/master_plan.md) records the historical demo-shell phase.
+The [task-categories plan](../plan/task-categories/task-categories.md) defines the category implementation and acceptance sequence. The [desktop task-management plan](../plan/desktop-task-management/desktop-task-management.md) defines the preceding desktop increment. The earlier [Notes MVP design](../plan/mvp/NOTES_MVP_PLAN.md) and [task cards](../plan/mvp/NOTES_MVP_TASKS.md) describe the superseded compact panel. The [initial roadmap](../plan/init/master_plan.md) records the historical demo-shell phase.
 
 `plan/` and `build/` are ignored by Git and may be absent from another checkout. Current requirements and the tracked desktop evidence records stand on their own; local links provide additional detail without changing that Git policy.
