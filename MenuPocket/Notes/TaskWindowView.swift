@@ -12,116 +12,72 @@ struct TaskWindowView: View {
 
     /// Row controls and checkboxes align with the group name after its chevron.
     private static let groupRowIndent: CGFloat = 22
+    private static let contentWidth: CGFloat = 660
 
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
     let onSettings: () -> Void
     @State private var isComposerVisible = false
+    @State private var hoveredNoteID: UUID?
     @FocusState private var focusedControl: FocusControl?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(24)
-                .background { focusClearingBackground }
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    recoveryNotice
-                    if let progress = state.availableProgress {
-                        if progress.total == 0 {
-                            emptyState
-                        } else {
-                            let groups = state.groups
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(groups) { group in
-                                    let collapsed = state.categoryPreferences.isCollapsed(group.id)
-                                    groupHeader(group, collapsed: collapsed)
-                                        .padding(.top, group.id == groups.first?.id ? 0 : 12)
-                                    // A collapsed group renders no rows, so their
-                                    // controls leave keyboard and accessibility traversal.
-                                    if !collapsed {
-                                        ForEach(group.notes) { note in
-                                            Divider()
-                                            taskRow(note)
-                                        }
-                                        .padding(.leading, Self.groupRowIndent)
+        GeometryReader { geometry in
+            let horizontalPadding: CGFloat = geometry.size.width < 700 ? 24 : 32
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, horizontalPadding)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity)
+                    .background { focusClearingBackground }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        recoveryNotice
+                        if let progress = state.availableProgress {
+                            if progress.total == 0 {
+                                emptyState
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 24) {
+                                    ForEach(state.groups) { group in
+                                        groupSurface(group)
                                     }
                                 }
                             }
+                            if state.yesterdayIncompleteCount > 0 {
+                                Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
+                                    .font(.callout.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+                        } else {
+                            unavailableState
                         }
-                        if state.yesterdayIncompleteCount > 0 {
-                            Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.red)
-                        }
-                    } else {
-                        unavailableState
                     }
+                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.bottom, horizontalPadding)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityIdentifier("todayTaskList")
-            .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
-            .contentShape(Rectangle())
-            .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
-            Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                if let target = presentation.deletionTarget,
-                   let note = state.notes.first(where: { $0.id == target.id }) {
-                    deletionConfirmation(note)
-                } else if state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty {
-                    composer
-                }
-                if let message = writeError {
-                    Text(message)
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("taskWriteError")
-                }
-                HStack {
-                    Button(action: showComposer) {
-                        Label("Add task", systemImage: "plus")
-                    }
-                    .focusable()
-                    .focused($focusedControl, equals: .add)
-                    .onKeyPress(keys: [.space, .return]) { _ in
-                        showComposer()
-                        return .handled
-                    }
-                    .overlay { focusOutline(focusedControl == .add) }
-                    .disabled(!presentation.canAddTask(state: state))
-                    .accessibilityIdentifier("addTask")
-                    Button("Manage categories…", action: showCategoryManager)
-                        .focusable()
-                        .focused($focusedControl, equals: .manageCategories)
-                        .onKeyPress(keys: [.space, .return]) { _ in
-                            showCategoryManager()
-                            return .handled
-                        }
-                        .overlay { focusOutline(focusedControl == .manageCategories) }
-                        .disabled(!presentation.canManageCategories(state: state))
-                        .accessibilityIdentifier("manageCategories")
-                    Spacer()
-                    Button("Settings…", action: onSettings)
-                        .focusable()
-                        .focused($focusedControl, equals: .settings)
-                        .onKeyPress(keys: [.space, .return]) { _ in
-                            onSettings()
-                            return .handled
-                        }
-                        .overlay { focusOutline(focusedControl == .settings) }
-                        .accessibilityLabel("Open Settings")
-                        .disabled(presentation.deletionTarget != nil)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("todayTaskList")
+                .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
+                .contentShape(Rectangle())
+                .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+                if hasFooterContent {
+                    Divider()
+                    footer
+                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity)
+                        .background { focusClearingBackground }
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .background { focusClearingBackground }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background { canvasBackground }
         // Attached to this window, so it blocks the rows and actions behind it.
         .sheet(isPresented: Binding(
             get: { presentation.isManagingCategories },
@@ -161,27 +117,37 @@ struct TaskWindowView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 24) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Today")
-                    .font(.largeTitle.bold())
-                    .accessibilityAddTraits(.isHeader)
-                Text(dateLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 24) {
+                    dateHeading
+                    Spacer(minLength: 16)
+                    topActions
+                }
+                VStack(alignment: .leading, spacing: 16) {
+                    dateHeading
+                    topActions
+                }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 12) {
                 if let progress = state.availableProgress {
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.quaternary)
+                        Capsule().fill(Color.accentColor)
+                            .frame(width: 160 * Double(progress.completed) / Double(max(progress.total, 1)))
+                    }
+                    .frame(width: 160, height: 4)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Today's task progress")
+                    .accessibilityValue("\(progress.completed) of \(progress.total) complete")
                     Text("\(progress.completed)/\(progress.total) complete")
-                        .font(.headline.monospacedDigit())
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
                         .accessibilityIdentifier("todayProgress")
-                    ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
-                        .frame(width: 140)
-                        .accessibilityLabel("Today's task progress")
                 } else {
                     Text("—")
-                        .font(.headline)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                         .accessibilityLabel("Task progress unavailable")
                         .accessibilityIdentifier("todayProgress")
                 }
@@ -189,7 +155,95 @@ struct TaskWindowView: View {
         }
     }
 
-    private var dateLabel: String {
+    private var dateHeading: some View {
+        let labels = dayLabels
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(labels.date)
+                .font(.system(size: 24, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(labels.weekday)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var topActions: some View {
+        HStack(spacing: 8) {
+            Button(action: showComposer) {
+                HStack(spacing: 12) {
+                    Label("Add task", systemImage: "plus")
+                    Text("⌘N")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .focusable()
+            .focused($focusedControl, equals: .add)
+            .onKeyPress(keys: [.space, .return]) { _ in
+                showComposer()
+                return .handled
+            }
+            .overlay { focusOutline(focusedControl == .add) }
+            .disabled(!presentation.canAddTask(state: state))
+            .help("Add task (⌘N)")
+            .accessibilityIdentifier("addTask")
+            Button(action: showCategoryManager) {
+                Image(systemName: "folder.badge.gearshape")
+            }
+            .focusable()
+            .focused($focusedControl, equals: .manageCategories)
+            .onKeyPress(keys: [.space, .return]) { _ in
+                showCategoryManager()
+                return .handled
+            }
+            .overlay { focusOutline(focusedControl == .manageCategories) }
+            .disabled(!presentation.canManageCategories(state: state))
+            .help("Manage categories")
+            .accessibilityLabel("Manage categories")
+            .accessibilityIdentifier("manageCategories")
+            Button(action: onSettings) {
+                Image(systemName: "gearshape")
+            }
+            .focusable()
+            .focused($focusedControl, equals: .settings)
+            .onKeyPress(keys: [.space, .return]) { _ in
+                onSettings()
+                return .handled
+            }
+            .overlay { focusOutline(focusedControl == .settings) }
+            .help("Open Settings (⌘,)")
+            .accessibilityLabel("Open Settings")
+            .disabled(presentation.deletionTarget != nil)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .fixedSize()
+    }
+
+    private var hasFooterContent: Bool {
+        presentation.deletionTarget != nil || state.editingNoteID != nil ||
+            isComposerVisible || !state.draft.isEmpty || writeError != nil
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let target = presentation.deletionTarget,
+               let note = state.notes.first(where: { $0.id == target.id }) {
+                deletionConfirmation(note)
+            } else if state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty {
+                composer
+            }
+            if let message = writeError {
+                Text(message)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("taskWriteError")
+            }
+        }
+    }
+
+    private var dayLabels: (date: String, weekday: String) {
         let key = state.todayKey ?? NoteDay().keys().today
         // A saved day key is a calendar date, not an instant to shift into the
         // current time zone. Format its components without changing that date.
@@ -198,11 +252,12 @@ struct TaskWindowView: View {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: key) else { return key }
+        guard let date = formatter.date(from: key) else { return (key, "") }
         formatter.locale = Locale(identifier: "en")
-        formatter.dateStyle = .full
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+        formatter.dateFormat = "MMMM d, yyyy"
+        let dateLabel = formatter.string(from: date)
+        formatter.dateFormat = "EEEE"
+        return (dateLabel, formatter.string(from: date))
     }
 
     private var emptyState: some View {
@@ -266,6 +321,30 @@ struct TaskWindowView: View {
     }
 
     /// The count covers every task in the group, including rows hidden by collapse.
+    private func groupSurface(_ group: TaskGroup) -> some View {
+        let collapsed = state.categoryPreferences.isCollapsed(group.id)
+        return VStack(alignment: .leading, spacing: 0) {
+            groupHeader(group, collapsed: collapsed)
+            // Remove collapsed rows from keyboard and accessibility traversal.
+            if !collapsed {
+                ForEach(group.notes) { note in
+                    taskRow(note)
+                }
+                .padding(.leading, Self.groupRowIndent)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
+                }
+        }
+    }
+
     private func groupHeader(_ group: TaskGroup, collapsed: Bool) -> some View {
         let progress = group.progress
         return Button {
@@ -277,11 +356,11 @@ struct TaskWindowView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: Self.groupRowIndent - 8)
                 Text(group.name)
-                    .font(.headline)
+                    .font(.system(size: 13, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("\(progress.completed)/\(progress.total)")
-                    .font(.headline.monospacedDigit())
+                    .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
@@ -381,8 +460,17 @@ struct TaskWindowView: View {
             .accessibilityLabel("Delete task: \(note.text)")
             .accessibilityIdentifier("deleteTask-\(note.id)")
         }
+        .font(.system(size: 14))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(hoveredNoteID == note.id ? 0.04 : 0))
+        }
+        .onHover { hovering in
+            hoveredNoteID = hovering ? note.id : nil
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("taskRow-\(note.id)")
     }
@@ -581,11 +669,20 @@ struct TaskWindowView: View {
 
     private var focusClearingBackground: some View {
         Button(action: clearFocus) {
-            Color(nsColor: .windowBackgroundColor)
+            canvasBackground
         }
         .buttonStyle(.plain)
         .focusable(false)
         .accessibilityHidden(true)
+    }
+
+    /// Native background colors can coincide; a semantic tint keeps inset
+    /// groups distinct without introducing a fixed Light/Dark palette.
+    private var canvasBackground: some View {
+        Color(nsColor: .windowBackgroundColor)
+            .overlay {
+                Color.primary.opacity(colorScheme == .light ? 0.04 : 0)
+            }
     }
 
     private func focusOutline(_ focused: Bool) -> some View {

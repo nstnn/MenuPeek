@@ -487,3 +487,15 @@ Both Xcode commands used `-project MenuPocket.xcodeproj -scheme MenuPocket -dest
 | CategoryFixFixture executable | `6e5cddd4ed25d2b050341de8665948bd0fc0ba1782d2be05018d18d2838a13c7` |
 
 Native fixture observations and saved-data comparisons are recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md#category-removal-repair-2026-10-02). Tests use isolated repositories/defaults and the hosted app skips production delegate initialization. No production app/data upgrade, login registration, real hotkey registration, or GitHub action was performed. Historical evidence above retains its original scope.
+
+## Soft Focus presentation — Task 1, 2026-10-03
+
+**Pass for the Task 1 automated scope.** Source: `main` at `31f9e38db80e3461c54b5a6b509357c415fee8ed` plus the uncommitted `TaskWindowView.swift` presentation change (SHA-256 `bc85bab8576e71992289904dd8106ec930f97cbc9ec209def2d254199ef1d3aa`). State, grouping, storage, controllers, and service logic remain unchanged.
+
+The shared `MenuPocket` scheme's Debug build/test action passed **94/94 focused tests, zero failures or skips** on macOS 26.6.2 arm64 with Xcode 27.0 (`27A266a`). Suites: `TaskGroupingTests`, `TaskCategoryPreferencesTests`, `DailyNotesStateTests`, and `AppConfigurationTests`. The initial sandboxed attempt could not launch Swift macro plugins; the successful run used the required host permissions. A subsequent surface-contrast fix was rebuilt and the same suites passed again against the final source.
+
+Command: `xcodebuild -quiet -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/soft-focus-task-001/DerivedData -resultBundlePath build/soft-focus-task-001/Final-focused-tests.xcresult -only-testing:MenuPocketTests/TaskGroupingTests -only-testing:MenuPocketTests/TaskCategoryPreferencesTests -only-testing:MenuPocketTests/DailyNotesStateTests -only-testing:MenuPocketTests/AppConfigurationTests SDK_STAT_CACHE_ENABLE=NO test`.
+
+The built Debug app is `build/soft-focus-task-001/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle `local.menupocket.app`, version `0.1.0`, build `1`. Executable SHA-256: `cf2c9bea0cde55e5f33b75d69fce0ad4f883545b71a9f9d7079b7c695cbc5fde`; debug dylib: `02fcbec98553ffcd76de58ef5643f3a6eb136586341f6f24cf0c9954d3c7be8e`. This production-identity build was not launched against saved user data.
+
+Retained under ignored `build/soft-focus-task-001/`: final xcresult/log/summary, source hashes, artifact identity, isolated fixture source/build recipe, and the mixed fixture's saved-row inspection. That inspection retains rowids 1–6 and task IDs/order after completion/uncompletion; only disposable fixture category naming and collapse preferences were changed for layout checks. [Native Task 1 observations](DESKTOP_TASK_ACCEPTANCE.md#soft-focus-header-and-grouped-list--task-1-2026-10-03) provide the separate interface proof. Full-suite/Release/remote-CI results and final Soft Focus acceptance are not claimed here.
