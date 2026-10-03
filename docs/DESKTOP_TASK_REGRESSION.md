@@ -464,3 +464,26 @@ Both final bundles are under `build/task-categories/task-010/DerivedData/Build/P
 TASK-011 preparation: `CategoryRegressionFixture.app`, bundle ID `local.menupocket.task010.fixture`, compiles the unchanged production views/state/controller/delegate/Settings/status item with an isolated SQLite file per scenario and defaults suite `local.menupocket.task010.fixture.categories.<scenario>`. The fixture is non-sandboxed and injects fake login/hotkey services. Six deterministic scenarios (`mixed`, `empty`, `general`, `many`, `completed`, `legacy`) passed headless seed/read and a second actual-process reopen with identical saved IDs/rows. The legacy scenario starts at v1 and opens at v2; this supports fixture readiness only. No fixture window was opened or visually inspected in TASK-010.
 
 Retained supporting records include `reviewed.diff`, source/artifact/fixture identity JSON, both xcresults and summary JSON, build/test logs, signature/entitlement information, before/after preservation hashes, fixture source/build recipe, and per-scenario seed/reopen logs and SQLite files. The local handoff is `plan/task-categories/evidence/task-010.md`. No real production migration, genuine login/day/wake, VoiceOver, final interface acceptance, independent review or remote CI result is claimed. TASK-011 is ready; TASK-012 remains dependent on its outcomes.
+
+## Category removal repair (2026-10-02)
+
+The subsequent feature review reproduced a valid 775-character category name clipping the all-days notice and both buttons in the fixed-size removal sheet. The repair puts the complete name in its own scrolling region and keeps the notice and action footer outside it. No name limit, persistence rule, confirmation rule, permission, dependency, or Settings behavior changed. README ordering/category instructions, grouped-layout requirements, architecture, and documentation links were synchronized; full feature acceptance remains partial.
+
+Reviewed source: `main` at `7be53da0c4fd3cb5a64bf381ecb15afb5103ddff` plus the uncommitted `TaskCategoryManagerView.swift` repair and documentation changes. The repaired view's SHA-256 is `73406faf370270262ab9b13259108ebec42ab289844362373b5bb3a793d41a98`; all 49 Swift/project/scheme/entitlements inputs are retained in `build/category-fix-20261002/source-hashes.json`.
+
+Fresh verification on Xcode 27.0 (`27A266a`), macOS arm64:
+
+- Debug hosted build/test action: **Pass, 219/219 tests, none skipped**, using the shared `MenuPocket` scheme. Result: `build/category-fix-20261002/Fix-tests.xcresult`; log: `tests.log` in the same directory.
+- Release shared-scheme build: **Pass**; log: `build/category-fix-20261002/release-build.log`.
+- Debug, Release, and isolated fixture signatures: **Pass**, `codesign --verify --deep --strict`.
+
+Both Xcode commands used `-project MenuPocket.xcodeproj -scheme MenuPocket -destination 'platform=macOS' -derivedDataPath build/category-review-20261002/DerivedData`, with Debug `test` and Release `build`. The test action also used `-resultBundlePath build/category-fix-20261002/Fix-tests.xcresult`.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Debug executable | `e3524a6d5316b00bfbcdd125ed05fa0f5bdc4cb5e4fdba3e6d8fbe4139833128` |
+| Debug dylib | `b9e8c525972e7b7f753b4e31e61c6f2d14cea27d22d52df7055aed38038880a8` |
+| Release executable | `e7dc1dcfcdec54e564dcd95bb9a92b0316d798df4293242edd9b7db79d8a302d` |
+| CategoryFixFixture executable | `6e5cddd4ed25d2b050341de8665948bd0fc0ba1782d2be05018d18d2838a13c7` |
+
+Native fixture observations and saved-data comparisons are recorded in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md#category-removal-repair-2026-10-02). Tests use isolated repositories/defaults and the hosted app skips production delegate initialization. No production app/data upgrade, login registration, real hotkey registration, or GitHub action was performed. Historical evidence above retains its original scope.
