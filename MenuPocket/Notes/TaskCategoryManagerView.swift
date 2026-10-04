@@ -410,6 +410,7 @@ struct TaskCategoryManagerView: View {
     /// The Today window's keyboard pattern: a button takes Tab focus, Space and
     /// Return activate it, and focus shows an accent outline.
     private struct KeyboardActivation: ViewModifier {
+        @State private var keyboardFocus = KeyboardFocusVisibility.shared
         let field: Field
         let focus: FocusState<Field?>.Binding
         let action: () -> Void
@@ -417,6 +418,7 @@ struct TaskCategoryManagerView: View {
         func body(content: Content) -> some View {
             content
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused(focus, equals: field)
                 .onKeyPress(keys: [.space, .return]) { _ in
                     action()
@@ -424,7 +426,7 @@ struct TaskCategoryManagerView: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.accentColor, lineWidth: focus.wrappedValue == field ? 2 : 0)
+                        .strokeBorder(Color.accentColor, lineWidth: focus.wrappedValue == field && keyboardFocus.isVisible ? 2 : 0)
                         .padding(-3)
                         .allowsHitTesting(false)
                 }

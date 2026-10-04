@@ -74,6 +74,7 @@ struct DailyNotesView: View {
 
     @FocusState private var isDraftFocused: Bool
     @FocusState private var focusedControl: FocusControl?
+    @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @State private var noteToDelete: Note?
 
     private let rowHeight: CGFloat = 43
@@ -132,6 +133,7 @@ struct DailyNotesView: View {
             .disabled(noteToDelete != nil)
             .accessibilityLabel("Open Settings")
             .focusable()
+            .keyboardFocusAppearance()
             .focused($focusedControl, equals: .settings)
             .overlay { focusOutline(focusedControl == .settings) }
         }
@@ -154,6 +156,7 @@ struct DailyNotesView: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .cancelDelete)
                 .overlay { focusOutline(focusedControl == .cancelDelete) }
                 .accessibilityIdentifier("cancelNoteDeletion")
@@ -165,6 +168,7 @@ struct DailyNotesView: View {
                     onDelete(note.id)
                 }
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .confirmDelete)
                 .overlay { focusOutline(focusedControl == .confirmDelete) }
                 .accessibilityIdentifier("confirmNoteDeletion")
@@ -210,6 +214,7 @@ struct DailyNotesView: View {
                                     .foregroundStyle(note.isCompleted ? .secondary : .primary)
                             }
                             .toggleStyle(.checkbox)
+                            .keyboardFocusAppearance()
                             .tint(.primary)
                             .accessibilityLabel("\(note.text), \(note.isCompleted ? "completed" : "incomplete")")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,6 +233,7 @@ struct DailyNotesView: View {
                             .fixedSize()
                             .accessibilityLabel("Actions for \(note.text)")
                             .focusable()
+                            .keyboardFocusAppearance()
                             .focused($focusedControl, equals: .rowActions(note.id))
                             .overlay { focusOutline(focusedControl == .rowActions(note.id)) }
                         }
@@ -263,6 +269,7 @@ struct DailyNotesView: View {
                 .font(.subheadline.weight(.medium))
                 .frame(height: 32)
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .add)
                 .overlay { focusOutline(focusedControl == .add) }
             }
@@ -289,6 +296,7 @@ struct DailyNotesView: View {
                 .frame(height: 32)
                 .background(Color.primary, in: RoundedRectangle(cornerRadius: 6))
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .save)
                 .overlay { focusOutline(focusedControl == .save) }
         }
@@ -317,7 +325,7 @@ struct DailyNotesView: View {
 
     private func focusOutline(_ focused: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(Color.accentColor, lineWidth: focused ? 2 : 0)
+            .strokeBorder(Color.accentColor, lineWidth: focused && keyboardFocus.isVisible ? 2 : 0)
             .padding(-2)
             .allowsHitTesting(false)
     }

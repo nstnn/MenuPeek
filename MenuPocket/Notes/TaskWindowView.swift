@@ -20,6 +20,7 @@ struct TaskWindowView: View {
     @State private var isComposerVisible = false
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @FocusState private var focusedControl: FocusControl?
+    @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -198,6 +199,7 @@ struct TaskWindowView: View {
                 }
             }
             .focusable()
+            .keyboardFocusAppearance()
             .focused($focusedControl, equals: .add)
             .onKeyPress(keys: [.space, .return]) { _ in
                 showComposer()
@@ -211,6 +213,7 @@ struct TaskWindowView: View {
                 Image(systemName: "folder.badge.gearshape")
             }
             .focusable()
+            .keyboardFocusAppearance()
             .focused($focusedControl, equals: .manageCategories)
             .onKeyPress(keys: [.space, .return]) { _ in
                 showCategoryManager()
@@ -225,6 +228,7 @@ struct TaskWindowView: View {
                 Image(systemName: "gearshape")
             }
             .focusable()
+            .keyboardFocusAppearance()
             .focused($focusedControl, equals: .settings)
             .onKeyPress(keys: [.space, .return]) { _ in
                 onSettings()
@@ -308,6 +312,7 @@ struct TaskWindowView: View {
                 .foregroundStyle(.secondary)
             Button("Retry") { state.refresh() }
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .retry)
                 .onKeyPress(keys: [.space, .return]) { _ in
                     state.refresh()
@@ -397,6 +402,7 @@ struct TaskWindowView: View {
         }
         .buttonStyle(.plain)
         .focusable()
+        .keyboardFocusAppearance()
         .focused($focusedControl, equals: .group(group.id))
         .onKeyPress(keys: [.space, .return]) { _ in
             toggleGroup(group)
@@ -435,6 +441,7 @@ struct TaskWindowView: View {
                 .toggleStyle(.checkbox)
                 .labelsHidden()
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .completion(note.id))
                 .onKeyPress(keys: [.space, .return]) { _ in
                     if let saved = state.notes.first(where: { $0.id == note.id }) {
@@ -488,6 +495,7 @@ struct TaskWindowView: View {
                 Spacer(minLength: 0)
                 Button("Save", action: saveDraft)
                     .focusable()
+                    .keyboardFocusAppearance()
                     .focused($focusedControl, equals: .save)
                     .onKeyPress(keys: [.space, .return]) { _ in
                         saveDraft()
@@ -497,6 +505,7 @@ struct TaskWindowView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
                     .accessibilityIdentifier("saveTask")
                 Button("Cancel", action: cancelDraft)
+                    .keyboardFocusAppearance()
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(state.editingNoteID == nil ? "cancelNewTask" : "cancelTaskEdit")
             }
@@ -514,6 +523,7 @@ struct TaskWindowView: View {
             Text(TaskCategoryName.general).tag(UUID?.none)
         }
         .focusable()
+        .keyboardFocusAppearance()
         .focused($focusedControl, equals: .category)
         .onKeyPress(keys: [.upArrow, .downArrow]) { press in
             stepCategory(by: press.key == .downArrow ? 1 : -1, editing: editing)
@@ -548,6 +558,7 @@ struct TaskWindowView: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .cancelDelete)
                 .onKeyPress(keys: [.space, .return]) { _ in
                     presentation.cancelDeletion()
@@ -559,6 +570,7 @@ struct TaskWindowView: View {
                     confirmDeletion()
                 }
                 .focusable()
+                .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .confirmDelete)
                 .onKeyPress(keys: [.space, .return]) { _ in
                     confirmDeletion()
@@ -696,7 +708,7 @@ struct TaskWindowView: View {
 
     private func focusOutline(_ focused: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(Color.accentColor, lineWidth: focused ? 2 : 0)
+            .strokeBorder(Color.accentColor, lineWidth: focused && keyboardFocus.isVisible ? 2 : 0)
             .padding(-3)
             .allowsHitTesting(false)
     }
@@ -727,6 +739,7 @@ private struct TaskActionsMenu: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .focusable()
+        .keyboardFocusAppearance()
         .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
             // Let the initiating key finish before native menu tracking starts;
             // subsequent Return/Space belong to the menu, not its trigger.

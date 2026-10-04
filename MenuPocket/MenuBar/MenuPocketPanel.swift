@@ -35,6 +35,7 @@ struct MenuPocketPanel: View {
         // compact child is shorter. Preserve the 480 pt ceiling while adopting
         // the selected child's natural height.
         .fixedSize(horizontal: false, vertical: true)
+        .keyboardFocusAppearance()
         .onAppear { model.panelDidOpen() }
     }
 

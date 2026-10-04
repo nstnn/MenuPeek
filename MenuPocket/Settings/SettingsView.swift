@@ -122,6 +122,8 @@ struct SettingsView: View {
             .padding(.top, 12)
             .padding(.bottom, 20)
         }
+        // Settings contains no editable fields, so all its controls share this treatment.
+        .keyboardFocusAppearance()
         .font(.system(size: 13))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
