@@ -20,6 +20,18 @@ The hosted tests cover note day boundaries, ordering, SQLite persistence and err
 
 For a user-facing change, run the relevant tests and inspect the running app. In particular, exercise task-window opening, task writes and relaunch, empty and long lists, Command-N/W/Q/comma, native text editing, Settings reuse, and both appearances as applicable. For a theme change, check each Theme choice against the macOS appearance, including the menu bar count and a relaunch. For a Quick Add change, press Control-Option-N with another app frontmost, with the Today window or Settings key, and over a full-screen app. Check that MenuPocket does not become active, that Return saves and updates the menu bar count, that Escape, Command-W, clicking outside, and a second press discard the text, that native editing works and Command-Q/N/comma do nothing, and that a half-typed Today draft survives a capture. To check conflict reporting, register the same key from a throwaway process kept outside the repository and the app, once shared and once exclusive, and quit it between cases. Check explicit launch versus quiet login startup separately, without changing real login registration to seed an automated test. Record unavailable UI or hardware checks as untested. Compilation and XCTest do not prove menu bar, Settings, or global hotkey interaction.
 
+## Test artifact cleanup
+
+Cleanup is part of completing every build/test/UI verification session, whether checks pass or fail. Identify the user's main app by its exact bundle and running path before testing; a `MenuPocket.app` name or bundle ID alone cannot distinguish it from a test host. Reuse `build/DerivedData` for routine checks when doing so will not overwrite the main app. Create separate outputs only when isolation requires them, and track every temporary Debug/Release host, baseline app, and renamed fixture you create.
+
+Before reporting completion:
+
+1. Finish any relaunch/persistence checks, save the required logs, `.xcresult` files, screenshots, and artifact identity, then quit each temporary app and confirm its process has exited. Do not move an app while a build or test is using it.
+2. Unregister each temporary app's exact path from LaunchServices and move the `.app` bundle to macOS Trash using `FileManager.trashItem`. Preserve source, evidence, the main app, saved databases, preferences, and login-item state. Remove your own test bundles; do not sweep another active session's artifacts unless the user explicitly requests a wider cleanup.
+3. Unregister the resulting Trash paths after moving the apps, since macOS can register them again. Verify the temporary original paths are gone and Spotlight/LaunchServices no longer expose them as runnable copies. Verify the main app remains intact; report any cleanup blocker instead of silently leaving test apps behind.
+
+Do not keep test apps for possible future use or leave them installed in `/Applications`. A user-requested final app is the retained product; disposable verification copies must be cleaned up without emptying Trash or deleting saved user data.
+
 ## Category verification
 
 Use the shared scheme above for category domain, SQLite migration/transactions, coherent daily reads, grouping, draft recovery, presentation preferences, and hosted window/manager checks. For native scenarios, use the production views/state with an isolated SQLite database and defaults suite, injected clock, and fake login/hotkey services. Verify the fixture's running path, bundle/hash, database, and defaults before changing assignments; removal affects every saved day. Fixture identities and data must remain separate from the production sandbox.
