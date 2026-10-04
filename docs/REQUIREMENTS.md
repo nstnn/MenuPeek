@@ -25,13 +25,15 @@ The behavior in the desktop task contract and the rules that follow it is implem
 
 ## Interaction and recovery rules
 
-Add and edit use single-line fields. Return/Save stores valid trimmed text; Escape/Cancel discards the relevant draft. Completing or uncompleting a task changes its saved checkbox and progress only after persistence succeeds, without moving the row. Completed tasks remain visible in their original positions with muted presentation.
+Add and edit share a single-line composer below progress and above the scrollable list. Return in the field or Save stores valid trimmed text; Escape/Cancel discards the relevant draft. Each row has an always-visible native “…” menu with Edit and Delete… only, reachable by mouse or keyboard. Completing or uncompleting a task changes its saved checkbox and progress only after persistence succeeds, without moving the row. Completed tasks remain visible in their original positions with muted presentation.
 
 New and current-day edit drafts survive task-window close/reopen within the running process. Add and other row actions cannot replace an active edit. Command-N is unavailable during editing, deletion confirmation, while the category manager is open, or with unavailable data. Quit/relaunch preserves saved tasks but does not promise unsaved-draft recovery.
 
 Quick Add uses the fixed Control-Option-N shortcut; a shortcut recorder is out of scope. It registers exclusively through the system hotkey API and needs no Accessibility or Input Monitoring permission. Only conflicts the system reports can be shown, and while Quick Add holds the shortcut, another app's shared use of the same key stops receiving it. A refused registration leaves the setting on. The capture panel keeps no draft, saves tasks without a category (General), and, once category choices exist, does not change the remembered last-used category. The app keeps its Dock icon and Command-Tab entry (REQ-006) while the panel is shown.
 
 Deletion uses inline confirmation with Cancel initially focused. Cancel/Escape, window close, unavailable data, a changed day, or a removed target cancels confirmation. Confirmation is consumed before writing; a failed delete keeps the row/count and requires fresh confirmation for retry.
+
+Leaving an edit or deletion returns focus to the task's menu, or its group header when collapsed. If the task disappears, prefer its surviving group, then Add; unavailable data uses Retry. Choosing a category in the composer never saves automatically.
 
 A day change cancels stale edit/deletion targets with an explanation and preserves unsaved edit text for recovery. Recovery text is selectable and never saved automatically to another task or day. A new task receives its day assignment when explicitly saved. Retry rereads through the shared daily state.
 

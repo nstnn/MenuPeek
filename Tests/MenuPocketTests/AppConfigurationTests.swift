@@ -640,6 +640,35 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testComposerKeepsNativeUndoAcrossRepeatedRequestsAndWindowReopen() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let window = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        let editor = try await focusedEditor(in: window)
+        editor.insertText("Undo this pending task", replacementRange: NSRange(location: 0, length: 0))
+        editor.breakUndoCoalescing()
+        let undo = try XCTUnwrap(editor.undoManager)
+        XCTAssertTrue(undo.canUndo)
+
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        window.close()
+        XCTAssertFalse(window.isVisible)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let reopenedEditor = try await focusedEditor(in: window)
+        XCTAssertEqual(fixture.state.draft, "Undo this pending task")
+        XCTAssertTrue(reopenedEditor.undoManager === undo)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("z", keyCode: 6)))
+        await waitUntil { fixture.state.draft.isEmpty }
+        XCTAssertTrue(undo.canRedo)
+        undo.redo()
+        await waitUntil { fixture.state.draft == "Undo this pending task" }
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+    }
+
+    @MainActor
     func testAddCommandDoesNotReplaceEditOrDeletionAndRejectsUnavailableData() throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }

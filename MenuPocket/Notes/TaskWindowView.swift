@@ -7,7 +7,7 @@ struct TaskWindowView: View {
         case add, manageCategories, settings, retry, save, draft, category, cancelDelete, confirmDelete
         case group(TaskGroupID)
         case completion(UUID)
-        case edit(UUID), delete(UUID)
+        case actions(UUID)
     }
 
     /// Row controls and checkboxes align with the group name after its chevron.
@@ -19,6 +19,7 @@ struct TaskWindowView: View {
     let onSettings: () -> Void
     @State private var isComposerVisible = false
     @State private var hoveredNoteID: UUID?
+    @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @FocusState private var focusedControl: FocusControl?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -33,6 +34,18 @@ struct TaskWindowView: View {
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity)
                     .background { focusClearingBackground }
+                if hasTopInteractionContent {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if hasComposer { composer }
+                        if let message = writeError { taskWriteError(message) }
+                    }
+                    .padding(16)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity)
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         recoveryNotice
@@ -95,7 +108,13 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
-        .onChange(of: state.notes) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: state.notes) { old, new in
+            presentation.validateDeletion(state: state)
+            if let id = focusedNoteID, !new.contains(where: { $0.id == id }),
+               let note = old.first(where: { $0.id == id }) {
+                restoreRowFocus(id, fallbackGroup: TaskGroupID(categoryID: note.categoryID))
+            }
+        }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: presentation.deletionTarget?.id) { old, new in
             if let old, new == nil { restoreRowFocus(old) }
@@ -222,9 +241,17 @@ struct TaskWindowView: View {
         .fixedSize()
     }
 
+    private var hasComposer: Bool {
+        presentation.deletionTarget == nil &&
+            (state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty)
+    }
+
+    private var hasTopInteractionContent: Bool {
+        presentation.deletionTarget == nil && (hasComposer || writeError != nil)
+    }
+
     private var hasFooterContent: Bool {
-        presentation.deletionTarget != nil || state.editingNoteID != nil ||
-            isComposerVisible || !state.draft.isEmpty || writeError != nil
+        presentation.deletionTarget != nil
     }
 
     private var footer: some View {
@@ -232,15 +259,17 @@ struct TaskWindowView: View {
             if let target = presentation.deletionTarget,
                let note = state.notes.first(where: { $0.id == target.id }) {
                 deletionConfirmation(note)
-            } else if state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty {
-                composer
             }
             if let message = writeError {
-                Text(message)
-                    .foregroundStyle(.red)
-                    .accessibilityIdentifier("taskWriteError")
+                taskWriteError(message)
             }
         }
+    }
+
+    private func taskWriteError(_ message: String) -> some View {
+        Text(message)
+            .foregroundStyle(.red)
+            .accessibilityIdentifier("taskWriteError")
     }
 
     private var dayLabels: (date: String, weekday: String) {
@@ -393,7 +422,7 @@ struct TaskWindowView: View {
 
     private var focusedNoteID: UUID? {
         switch focusedControl {
-        case let .completion(id), let .edit(id), let .delete(id): id
+        case let .completion(id), let .actions(id): id
         default: nil
         }
     }
@@ -421,44 +450,15 @@ struct TaskWindowView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                state.beginEditing(id: note.id)
-            } label: {
-                Image(systemName: "pencil")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-            }
-            .focusable()
-            .focused($focusedControl, equals: .edit(note.id))
-            .onKeyPress(keys: [.space, .return]) { _ in
-                state.beginEditing(id: note.id)
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .edit(note.id)) }
+            TaskActionsMenu(onOpen: { focusedControl = .actions(note.id) },
+                            onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) })
+            .focused($focusedControl, equals: .actions(note.id))
+            .overlay { focusOutline(focusedControl == .actions(note.id)) }
             .disabled(state.editingNoteID != nil)
-            .help("Edit task")
-            .accessibilityLabel("Edit task: \(note.text)")
-            .accessibilityIdentifier("editTask-\(note.id)")
-            Button(role: .destructive) {
-                requestDeletion(note.id)
-            } label: {
-                Image(systemName: "trash")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-            }
-            .focusable()
-            .focused($focusedControl, equals: .delete(note.id))
-            .onKeyPress(keys: [.space, .return]) { _ in
-                requestDeletion(note.id)
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .delete(note.id)) }
-            .disabled(state.editingNoteID != nil)
-            .help("Delete task")
-            .accessibilityLabel("Delete task: \(note.text)")
-            .accessibilityIdentifier("deleteTask-\(note.id)")
+            .help("Task actions")
+            .accessibilityLabel("Actions for task: \(note.text)")
+            .accessibilityHint("Opens Edit and Delete actions")
+            .accessibilityIdentifier("taskActions-\(note.id)")
         }
         .font(.system(size: 14))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
@@ -587,7 +587,20 @@ struct TaskWindowView: View {
         }
     }
 
+    private func beginEditing(_ id: UUID) {
+        guard canUseRowActions, let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+        rowActionOrigin = (id, group.id)
+        state.beginEditing(id: id)
+    }
+
+    private var canUseRowActions: Bool {
+        state.availableProgress != nil && state.editingNoteID == nil &&
+            presentation.deletionTarget == nil && !presentation.isManagingCategories
+    }
+
     private func requestDeletion(_ id: UUID) {
+        guard canUseRowActions, let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+        rowActionOrigin = (id, group.id)
         presentation.requestDeletion(id: id, state: state)
     }
 
@@ -595,21 +608,25 @@ struct TaskWindowView: View {
         _ = presentation.confirmDeletion(state: state)
     }
 
-    private func restoreRowFocus(_ id: UUID) {
+    private func restoreRowFocus(_ id: UUID, fallbackGroup: TaskGroupID? = nil) {
+        let originGroup = fallbackGroup ?? (rowActionOrigin?.id == id ? rowActionOrigin?.groupID : nil)
         Task { @MainActor in
             await Task.yield()
-            focusedControl = focusAfterLeavingRow(id)
+            focusedControl = focusAfterLeavingRow(id, fallbackGroup: originGroup)
         }
     }
 
-    /// The row's Edit button when it is visible; its group header when the
-    /// group is collapsed; Add when the task is gone; Retry when data is unavailable.
-    private func focusAfterLeavingRow(_ id: UUID) -> FocusControl {
+    /// Return to the row menu or collapsed group; if the task disappeared,
+    /// prefer its surviving group, then Add. Unavailable data always uses Retry.
+    private func focusAfterLeavingRow(_ id: UUID, fallbackGroup: TaskGroupID?) -> FocusControl {
         guard state.availableProgress != nil else { return .retry }
         guard let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else {
+            if let fallbackGroup, state.groups.contains(where: { $0.id == fallbackGroup }) {
+                return .group(fallbackGroup)
+            }
             return .add
         }
-        return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .edit(id)
+        return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .actions(id)
     }
 
     private func focusDraft() {
@@ -691,4 +708,92 @@ struct TaskWindowView: View {
             .padding(-3)
             .allowsHitTesting(false)
     }
+}
+
+/// A focusable SwiftUI trigger with one native menu for mouse and keyboard.
+/// A separate focus wrapper around SwiftUI's Menu does not reliably open it
+/// with Space/Return; use the same button key handling as other row controls.
+private struct TaskActionsMenu: View {
+    let onOpen: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @State private var anchor = TaskMenuAnchor.Reference()
+
+    var body: some View {
+        Button(action: showMenu) {
+            Image(systemName: "ellipsis")
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
+            // Let the initiating key finish before native menu tracking starts;
+            // subsequent Return/Space belong to the menu, not its trigger.
+            if anchor.isTrackingMenu { return .ignored }
+            if press.phase == .down {
+                anchor.opensOnKeyUp = true
+            } else if press.phase == .up {
+                guard anchor.opensOnKeyUp else { return .ignored }
+                anchor.opensOnKeyUp = false
+                showMenu()
+            }
+            return .handled
+        }
+        .background {
+            TaskMenuAnchor(reference: anchor)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func showMenu() {
+        guard !anchor.isTrackingMenu, let view = anchor.view, view.window != nil else { return }
+        onOpen()
+        anchor.isTrackingMenu = true
+        defer { anchor.isTrackingMenu = false }
+        let actions = Actions()
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let edit = menu.addItem(withTitle: "Edit", action: #selector(Actions.edit), keyEquivalent: "")
+        edit.target = actions
+        let delete = menu.addItem(withTitle: "Delete…", action: #selector(Actions.delete), keyEquivalent: "")
+        delete.target = actions
+        withExtendedLifetime(actions) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.maxY), in: view)
+        }
+        // Finish native menu tracking before changing the SwiftUI hierarchy.
+        // Otherwise AppKit can restore the old responder after draft/Cancel focus.
+        switch actions.selection {
+        case .edit: DispatchQueue.main.async { onEdit() }
+        case .delete: DispatchQueue.main.async { onDelete() }
+        case nil: break
+        }
+    }
+
+    @MainActor private final class Actions: NSObject {
+        enum Selection { case edit, delete }
+        var selection: Selection?
+        @objc func edit() { selection = .edit }
+        @objc func delete() { selection = .delete }
+    }
+}
+
+private struct TaskMenuAnchor: NSViewRepresentable {
+    // The anchor is layout plumbing, not observable UI state. Updating a binding
+    // when it mounts can interrupt the parent window's sheet dismissal.
+    @MainActor final class Reference {
+        weak var view: NSView?
+        var isTrackingMenu = false
+        var opensOnKeyUp = false
+    }
+
+    let reference: Reference
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        reference.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
