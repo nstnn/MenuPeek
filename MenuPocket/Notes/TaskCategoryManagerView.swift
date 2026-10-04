@@ -25,6 +25,7 @@ struct TaskCategoryManagerView: View {
     @State private var nameIssueField: NameField?
     @State private var createdID: UUID?
     @FocusState private var focus: Field?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
@@ -36,6 +37,11 @@ struct TaskCategoryManagerView: View {
         }
         .padding(20)
         .frame(width: 480, height: 360, alignment: .topLeading)
+        .font(.system(size: 14))
+        .background {
+            Color(nsColor: .windowBackgroundColor)
+                .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
+        }
         .task {
             await Task.yield()
             focus = state.availableCategories == nil ? .retry : .newName
@@ -54,10 +60,10 @@ struct TaskCategoryManagerView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Manage categories")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
                 Text("Categories are shared by every day. Tasks without a category appear in General.")
-                    .font(.callout)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -93,21 +99,30 @@ struct TaskCategoryManagerView: View {
                         Text("No custom categories yet.")
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 8)
-                        Divider()
                     }
                     ForEach(categories) { category in
                         categoryRow(category)
                             .id(category.id)
-                        Divider()
                     }
                     generalRow
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
             }
             .frame(maxHeight: .infinity)
+            .background { insetSurface }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityIdentifier("categoryList")
             .onChange(of: createdID) { _, id in
                 if let id { proxy.scrollTo(id) }
+            }
+            .onChange(of: focus) { _, field in
+                // Confirmation replaces the list. Bring its restored row focus
+                // back into view when the list returns, including after a failure.
+                switch field {
+                case let .rename(id), let .remove(id): proxy.scrollTo(id)
+                default: break
+                }
             }
         }
     }
@@ -171,7 +186,7 @@ struct TaskCategoryManagerView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(TaskCategoryName.general)
             Text("Built in. Tasks without a category appear here. It can't be renamed or removed.")
-                .font(.callout)
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -218,7 +233,7 @@ struct TaskCategoryManagerView: View {
     private func nameIssue(for field: NameField) -> some View {
         if nameIssueField == field, let message = state.categoryNameIssue?.message {
             Text(message)
-                .font(.callout)
+                .font(.system(size: 12))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("categoryNameError")
@@ -227,22 +242,28 @@ struct TaskCategoryManagerView: View {
 
     private func removalConfirmation(_ target: TaskWindowPresentation.CategoryRemovalTarget) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Remove category?")
+                .font(.system(size: 18, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
             // Names have no length limit. Scroll the full name independently
             // so the all-days notice and actions stay visible in this sheet.
             ScrollView {
-                Text("Remove “\(target.name)”?")
-                    .font(.title3.weight(.semibold))
+                Text(target.name)
+                    .font(.system(size: 14, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityAddTraits(.isHeader)
+                    .padding(12)
             }
             .frame(maxHeight: .infinity)
+            .background { insetSurface }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityIdentifier("categoryRemovalName")
             Text(Self.removalMessage(usageCount: target.usageCount))
+                .font(.system(size: 13))
                 .fixedSize(horizontal: false, vertical: true)
             if target.countChanged {
                 Text("The number of tasks changed. Review it and confirm again.")
-                    .font(.callout.weight(.semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = state.categoryIssue?.message {
@@ -269,6 +290,15 @@ struct TaskCategoryManagerView: View {
             await Task.yield()
             focus = .cancelRemoval
         }
+    }
+
+    private var insetSurface: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color(nsColor: .windowBackgroundColor))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
+            }
     }
 
     /// States the all-days scope, so the removal never looks limited to Today.

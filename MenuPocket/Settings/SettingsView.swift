@@ -4,6 +4,7 @@ struct SettingsView: View {
     let model: AppModel
     let appVersion: String
     let onQuit: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     init(model: AppModel, bundle: Bundle = .main, onQuit: @escaping () -> Void) {
         self.model = model
@@ -12,97 +13,143 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            if let warning = model.preferenceWarning {
-                Label(warning.message, systemImage: "exclamationmark.triangle")
-                    .accessibilityIdentifier("preferencesWarning")
-            }
-
-            if let saveError = model.preferenceSaveError {
-                Label(saveError, systemImage: "exclamationmark.triangle")
-            }
-
-            Section("Startup") {
-                Toggle("Open at Login", isOn: Binding(
-                    get: { model.isLoginItemEnabled },
-                    set: { model.setLoginItemEnabled($0) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(!model.canChangeLoginItemRegistration)
-                .accessibilityIdentifier("openAtLoginToggle")
-
-                Text(model.loginItemStatus.message)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("openAtLoginStatus")
-
-                if let failure = model.loginItemOperationFailure {
-                    Label(failure.message, systemImage: "exclamationmark.triangle")
-                        .accessibilityIdentifier("openAtLoginError")
-                }
-
-                if model.loginItemStatus == .requiresApproval {
-                    Button("Open Login Items Settings…") {
-                        model.openSystemSettingsLoginItems()
-                    }
-                    .accessibilityIdentifier("openLoginItemsSettings")
-                }
-            }
-
-            Section("Appearance") {
-                Picker("Theme", selection: Binding(
-                    get: { model.preferences.theme },
-                    set: { model.setTheme($0) }
-                )) {
-                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                        Text(theme.title).tag(theme)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .disabled(!model.isPreferenceEditingAllowed)
-                .accessibilityIdentifier("themePicker")
-            }
-
-            Section("Quick Add") {
-                // A label wider than "Open at Login" widens the label column and
-                // clips the other sections at the 500 × 380 pt minimum.
-                Toggle("Shortcut", isOn: Binding(
-                    get: { model.preferences.quickAddEnabled },
-                    set: { model.setQuickAddEnabled($0) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(!model.isPreferenceEditingAllowed)
-                .accessibilityLabel("Quick Add shortcut")
-                .accessibilityIdentifier("quickAddToggle")
-
-                // The shortcut is fixed; the text never claims it is free of conflicts.
-                Text("Press ⌃⌥N in any app to add a task for today.")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Press Control-Option-N in any app to add a task for today.")
-                    .accessibilityIdentifier("quickAddShortcut")
-
-                if let failure = model.quickAddRegistrationFailure {
-                    Label("\(failure.message) \(failure.retryGuidance)", systemImage: "exclamationmark.triangle")
-                        .accessibilityIdentifier("quickAddError")
-                }
-            }
-
-            Section("App") {
-                LabeledContent("Name", value: "MenuPocket")
-                    .accessibilityRepresentation {
-                        Text("App name: MenuPocket")
-                    }
-                LabeledContent("Version", value: appVersion)
-                    .accessibilityRepresentation {
-                        Text("Version: \(appVersion)")
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let warning = model.preferenceWarning {
+                        Label(warning.message, systemImage: "exclamationmark.triangle")
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("preferencesWarning")
                     }
 
+                    if let saveError = model.preferenceSaveError {
+                        Label(saveError, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("preferencesSaveError")
+                    }
+
+                    settingsSection("Startup") {
+                        Toggle("Open at Login", isOn: Binding(
+                            get: { model.isLoginItemEnabled },
+                            set: { model.setLoginItemEnabled($0) }
+                        ))
+                        .toggleStyle(.switch)
+                        .disabled(!model.canChangeLoginItemRegistration)
+                        .accessibilityIdentifier("openAtLoginToggle")
+
+                        Text(model.loginItemStatus.message)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("openAtLoginStatus")
+
+                        if let failure = model.loginItemOperationFailure {
+                            Label(failure.message, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("openAtLoginError")
+                        }
+
+                        if model.loginItemStatus == .requiresApproval {
+                            Button("Open Login Items Settings…") {
+                                model.openSystemSettingsLoginItems()
+                            }
+                            .accessibilityIdentifier("openLoginItemsSettings")
+                        }
+                    }
+
+                    settingsSection("Appearance") {
+                        Picker("Theme", selection: Binding(
+                            get: { model.preferences.theme },
+                            set: { model.setTheme($0) }
+                        )) {
+                            ForEach(AppTheme.allCases, id: \.self) { theme in
+                                Text(theme.title).tag(theme)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(!model.isPreferenceEditingAllowed)
+                        .accessibilityIdentifier("themePicker")
+                    }
+
+                    settingsSection("Quick Add") {
+                        Toggle("Shortcut", isOn: Binding(
+                            get: { model.preferences.quickAddEnabled },
+                            set: { model.setQuickAddEnabled($0) }
+                        ))
+                        .toggleStyle(.switch)
+                        .disabled(!model.isPreferenceEditingAllowed)
+                        .accessibilityLabel("Quick Add shortcut")
+                        .accessibilityIdentifier("quickAddToggle")
+
+                        // The shortcut is fixed; the text never claims it is free of conflicts.
+                        Text("Press ⌃⌥N in any app to add a task for today.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Press Control-Option-N in any app to add a task for today.")
+                            .accessibilityIdentifier("quickAddShortcut")
+
+                        if let failure = model.quickAddRegistrationFailure {
+                            Label("\(failure.message) \(failure.retryGuidance)", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("quickAddError")
+                        }
+                    }
+
+                    settingsSection("App") {
+                        LabeledContent("Name", value: "MenuPocket")
+                            .accessibilityRepresentation {
+                                Text("App name: MenuPocket")
+                            }
+                        LabeledContent("Version", value: appVersion)
+                            .accessibilityRepresentation {
+                                Text("Version: \(appVersion)")
+                            }
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("settingsContent")
+
+            HStack {
+                Spacer()
                 Button("Quit MenuPocket", action: onQuit)
                     .accessibilityIdentifier("quitMenuPocket")
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
         }
-        .padding(20)
+        .font(.system(size: 13))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            Color(nsColor: .windowBackgroundColor)
+                .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
+                }
+        }
     }
 }
 
