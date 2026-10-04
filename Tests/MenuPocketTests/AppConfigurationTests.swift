@@ -669,6 +669,41 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testInlineEditNativeReturnFailureAndEscapePreserveSavedTaskAndAddDraft() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let note = Note(id: UUID(), text: "Original task", dayKey: NoteDay().keys().today,
+                        createdAt: Date(), completedAt: nil)
+        fixture.repository.saved = [note]
+        fixture.launch()
+        fixture.state.draft = "Separate pending Add"
+        fixture.state.beginEditing(id: note.id)
+        let window = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
+        let editor = try await focusedEditor(in: window)
+        XCTAssertEqual(editor.string, note.text)
+        editor.insertText("Unsaved inline edit", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+
+        // The fixture rejects edits: native Return must retain the editor and draft.
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.state.issue == .edit }
+        XCTAssertEqual(fixture.state.editingNoteID, note.id)
+        XCTAssertEqual(fixture.state.editDraft, "Unsaved inline edit")
+        XCTAssertEqual(fixture.repository.saved, [note])
+        XCTAssertEqual(fixture.state.draft, "Separate pending Add")
+
+        // Escape cancels this row's edit, then the independent Add field returns.
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { fixture.state.editingNoteID == nil }
+        XCTAssertNil(fixture.state.issue)
+        XCTAssertEqual(fixture.repository.saved, [note])
+        XCTAssertEqual(fixture.state.draft, "Separate pending Add")
+        fixture.delegate.addTask()
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == "Separate pending Add" }
+        let addEditor = try await focusedEditor(in: window)
+        XCTAssertEqual(addEditor.string, "Separate pending Add")
+    }
+
+    @MainActor
     func testAddCommandDoesNotReplaceEditOrDeletionAndRejectsUnavailableData() throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }

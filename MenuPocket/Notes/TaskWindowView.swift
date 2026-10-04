@@ -37,7 +37,7 @@ struct TaskWindowView: View {
                 if hasTopInteractionContent {
                     VStack(alignment: .leading, spacing: 12) {
                         if hasComposer { composer }
-                        if let message = writeError { taskWriteError(message) }
+                        if let message = topWriteError { taskWriteError(message) }
                     }
                     .padding(16)
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
@@ -46,38 +46,59 @@ struct TaskWindowView: View {
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity)
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        recoveryNotice
-                        if let progress = state.availableProgress {
-                            if progress.total == 0 {
-                                emptyState
-                            } else {
-                                LazyVStack(alignment: .leading, spacing: 24) {
-                                    ForEach(state.groups) { group in
-                                        groupSurface(group)
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            recoveryNotice
+                            if let progress = state.availableProgress {
+                                if progress.total == 0 {
+                                    emptyState
+                                } else {
+                                    LazyVStack(alignment: .leading, spacing: 24) {
+                                        ForEach(state.groups) { group in
+                                            groupSurface(group)
+                                                .id(group.id)
+                                        }
                                     }
                                 }
+                                if state.yesterdayIncompleteCount > 0 {
+                                    Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                }
+                            } else {
+                                unavailableState
                             }
-                            if state.yesterdayIncompleteCount > 0 {
-                                Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(.red)
+                        }
+                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.bottom, horizontalPadding)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("todayTaskList")
+                    .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+                    .onChange(of: state.editingNoteID, initial: true) { old, new in
+                        // Keep the editor or its saved destination visible when
+                        // the Add composer changes the list's available height.
+                        if let id = new ?? old {
+                            Task { @MainActor in
+                                await Task.yield()
+                                if let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) {
+                                    // Entry/exit changes the space above the list.
+                                    // Mount the group before targeting its row.
+                                    scroll.scrollTo(group.id, anchor: .top)
+                                    await Task.yield()
+                                }
+                                scroll.scrollTo(id, anchor: .center)
+                                if new != nil { focusDraft() }
+                                else { restoreRowFocus(id) }
                             }
-                        } else {
-                            unavailableState
                         }
                     }
-                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.bottom, horizontalPadding)
-                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("todayTaskList")
-                .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
-                .contentShape(Rectangle())
-                .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
                 if hasFooterContent {
                     Divider()
                     footer
@@ -118,10 +139,6 @@ struct TaskWindowView: View {
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: presentation.deletionTarget?.id) { old, new in
             if let old, new == nil { restoreRowFocus(old) }
-        }
-        .onChange(of: state.editingNoteID) { old, new in
-            if new != nil { focusDraft() }
-            else if let old { restoreRowFocus(old) }
         }
     }
 
@@ -245,12 +262,16 @@ struct TaskWindowView: View {
     }
 
     private var hasComposer: Bool {
-        presentation.deletionTarget == nil &&
-            (state.editingNoteID != nil || isComposerVisible || !state.draft.isEmpty)
+        presentation.deletionTarget == nil && state.editingNoteID == nil &&
+            (isComposerVisible || !state.draft.isEmpty)
+    }
+
+    private var topWriteError: String? {
+        state.editingNoteID != nil && state.issue == .edit ? nil : writeError
     }
 
     private var hasTopInteractionContent: Bool {
-        presentation.deletionTarget == nil && (hasComposer || writeError != nil)
+        presentation.deletionTarget == nil && (hasComposer || topWriteError != nil)
     }
 
     private var hasFooterContent: Bool {
@@ -380,6 +401,7 @@ struct TaskWindowView: View {
 
     private func groupHeader(_ group: TaskGroup, collapsed: Bool) -> some View {
         let progress = group.progress
+        let containsEdit = group.notes.contains { $0.id == state.editingNoteID }
         return Button {
             toggleGroup(group)
         } label: {
@@ -409,7 +431,8 @@ struct TaskWindowView: View {
             return .handled
         }
         .overlay { focusOutline(focusedControl == .group(group.id)) }
-        .help(collapsed ? "Show tasks" : "Hide tasks")
+        .disabled(containsEdit)
+        .help(containsEdit ? "Finish editing before hiding this group" : (collapsed ? "Show tasks" : "Hide tasks"))
         .accessibilityLabel("\(group.name), \(progress.completed) of \(progress.total) complete")
         .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
         .accessibilityHint(collapsed ? "Shows this group's tasks" : "Hides this group's tasks")
@@ -432,7 +455,28 @@ struct TaskWindowView: View {
         }
     }
 
+    @ViewBuilder
     private func taskRow(_ note: Note) -> some View {
+        if state.editingNoteID == note.id {
+            VStack(alignment: .leading, spacing: 8) {
+                composer
+                if state.issue == .edit, let message = writeError {
+                    taskWriteError(message)
+                }
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(.primary)
+            .padding(.vertical, 10)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("taskRow-\(note.id)")
+            .id(note.id)
+        } else {
+            savedTaskRow(note)
+                .id(note.id)
+        }
+    }
+
+    private func savedTaskRow(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Toggle(isOn: Binding(
                 get: { state.notes.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
@@ -486,10 +530,6 @@ struct TaskWindowView: View {
                 .focused($focusedControl, equals: .draft)
                 .onSubmit(saveDraft)
                 .onExitCommand(perform: cancelDraft)
-                .task {
-                    await Task.yield()
-                    focusedControl = .draft
-                }
             HStack(spacing: 12) {
                 categoryPicker(editing: state.editingNoteID != nil)
                 Spacer(minLength: 0)
@@ -672,9 +712,8 @@ struct TaskWindowView: View {
     }
 
     private func cancelDraft() {
-        if let id = state.editingNoteID {
+        if state.editingNoteID != nil {
             state.cancelEditing()
-            restoreRowFocus(id)
             return
         }
         state.cancelDraft()
