@@ -18,7 +18,6 @@ struct TaskWindowView: View {
     let presentation: TaskWindowPresentation
     let onSettings: () -> Void
     @State private var isComposerVisible = false
-    @State private var hoveredNoteID: UUID?
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @FocusState private var focusedControl: FocusControl?
     @Environment(\.colorScheme) private var colorScheme
@@ -464,13 +463,6 @@ struct TaskWindowView: View {
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
-        .background {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(hoveredNoteID == note.id ? 0.04 : 0))
-        }
-        .onHover { hovering in
-            hoveredNoteID = hovering ? note.id : nil
-        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("taskRow-\(note.id)")
     }
@@ -718,13 +710,22 @@ private struct TaskActionsMenu: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     @State private var anchor = TaskMenuAnchor.Reference()
+    @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: showMenu) {
             Image(systemName: "ellipsis")
                 .frame(width: 28, height: 28)
+                .foregroundStyle(isHovered && isEnabled ? Color.primary : Color.secondary)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(isHovered && isEnabled ? 0.06 : 0))
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
         .focusable()
         .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
             // Let the initiating key finish before native menu tracking starts;
