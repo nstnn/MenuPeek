@@ -87,6 +87,8 @@ Quick Add (REQ-013) is implemented with hosted tests for the saved preference an
 
 Task categories (REQ-014) are implemented, including schema v2, reusable category management, grouped Today tasks, category drafts, and separate presentation preferences. The [dated category handoff](TASK_CATEGORIES_HANDOFF.md) identifies the source/artifacts, passing automated and scoped native-fixture results, and remaining TASK-011 gate. TASK-012 documentation is complete with a partial feature handoff. Full integrated category acceptance remains partial; fixture results do not establish production-identity system behavior or the first real-data upgrade.
 
+Soft Focus presentation is complete for its UI-only scope. The [2026-10-04 integrated UI record](DESKTOP_TASK_ACCEPTANCE.md#soft-focus-integrated-ui--task-4-2026-10-04) reports final focused Debug regressions and isolated native layout, keyboard, recovery, Settings/category-sheet and changed-data relaunch checks. It does not close the production/system or category acceptance gaps above, or add task movement.
+
 ## Historical Notes MVP
 
 The earlier MVP used an icon-only `MenuBarExtra` and compact daily checklist. Its CRUD, failure recovery, SQLite preservation, English copy, Settings, and local-only scope remain the baseline. The desktop task contract supersedes its completion-based ordering, compact-panel, icon-only label, and Settings-first explicit-launch presentation.

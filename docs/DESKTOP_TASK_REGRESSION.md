@@ -533,3 +533,26 @@ Author command: `xcodebuild -quiet -project MenuPocket.xcodeproj -scheme MenuPoc
 Independent final-source rerun: `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/soft-focus-task-003/review/DerivedData -resultBundlePath build/soft-focus-task-003/review/Focused-tests-rerun.xcresult -only-testing:MenuPocketTests/AppConfigurationTests -only-testing:MenuPocketTests/LoginItemSettingsTests -only-testing:MenuPocketTests/AppModelTests -only-testing:MenuPocketTests/DailyNotesStateTests test-without-building`.
 
 The final isolated fixture compiled in Swift 6 mode and all four prepared variants passed ad hoc signature verification. Its source is `build/soft-focus-task-003/SoftFocusFixture.swift`, SHA-256 `7a2ca34005aef53b3757899018c38f1746d161f721becc5f678b534e4d1cc01b`; the argument list, final source hashes, build log, signed artifact identities, test log/summary, and xcresults are retained under ignored `build/soft-focus-task-003/`. Normal/corrupt/protected variants were operated; the empty variant was prepared but not operated by the author. [Native Task 3 observations](DESKTOP_TASK_ACCEPTANCE.md#soft-focus-settings-and-category-sheet--task-3-2026-10-04) are separate evidence. No full-suite, Release, remote CI, genuine system registration, production-data upgrade, or final integrated Soft Focus acceptance is claimed.
+
+## Soft Focus integrated UI — Task 4, 2026-10-04
+
+**Pass for the final focused Debug build/regression scope.** Source was clean `main` at `962c47e4ca6b24b0bf0dc9f3fa3fc86ad34a8678`, containing Tasks 1–3. No production or test source changed during Task 4. Review of the combined change from `31f9e38` found no schema, repository, ordering, movement, controller, or service changes; `git diff --check` passed. Current layout/action guidance already matched the final source.
+
+The shared MenuPocket scheme built the Debug app and hosted test bundle and passed **123/123 tests, zero failures or skips**, with arm64 macOS 26.6.2 (`25G83`) and Xcode 27.0 (`27A266a`), finishing at 13:29 EDT. Suites were `TaskGroupingTests`, `TaskCategoryPreferencesTests`, `DailyNotesStateTests`, `AppConfigurationTests`, `LoginItemSettingsTests`, and `AppModelTests`. Native undo across retained-window close/reopen passed in this run; Task 3's earlier failure retains its unproven cause. An existing QoS runtime warning remains in the result without a test failure.
+
+```bash
+xcodebuild -quiet -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/soft-focus-task-004/DerivedData \
+  -resultBundlePath build/soft-focus-task-004/Focused-tests.xcresult \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/LoginItemSettingsTests \
+  -only-testing:MenuPocketTests/AppModelTests SDK_STAT_CACHE_ENABLE=NO test
+```
+
+The built app is `build/soft-focus-task-004/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle `local.menupocket.app`, version `0.1.0`, build `1`. Executable SHA-256: `520e8dcedd39bf71d92d95efd67b93bfb3a86b23326738e14790e511e09a102e`; Debug dylib: `6bc297d32b02290caee1e215333c5de2314f95ec96e95e4fcea4fde7c213aec9`. This production-identity artifact was not launched against user data.
+
+The unchanged Task 3 native harness was freshly compiled against all current production inputs in Swift 6 mode. Mixed, empty, many, and completed bundles passed ad hoc signature verification and were operated separately. All input hashes still matched after native verification. Logs, xcresult/summary, fixture source/build arguments, full source hashes, artifact/process identities, and relaunch comparisons remain under ignored `build/soft-focus-task-004/`. [Task 4 native observations](DESKTOP_TASK_ACCEPTANCE.md#soft-focus-integrated-ui--task-4-2026-10-04) establish the separate interface result. Full-suite, Release, remote CI, production-data upgrade, and genuine system acceptance were not run; their historical gaps remain open.
