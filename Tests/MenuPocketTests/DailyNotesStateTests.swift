@@ -1944,6 +1944,20 @@ private final class FakeNoteRepository: NoteRepository {
         saved.removeAll { $0.id == id }
     }
 
+    // Later operations are not faked yet; each fails explicitly.
+    func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
+    func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
+    func setLaterCompleted(id: UUID, completedAt: Date?) throws {
+        throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
+    }
+    func updateLater(id: UUID, text: String, categoryID: UUID?) throws {
+        throw LaterTaskRepositoryError.unsupported("updateLater")
+    }
+    func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
+    func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
+        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+    }
+
     private func mutate(id: UUID, change: (Note) -> Note) throws {
         guard let index = saved.firstIndex(where: { $0.id == id }) else { throw FakeFailure.failed }
         saved[index] = change(saved[index])

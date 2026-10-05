@@ -290,6 +290,21 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    // Later storage arrives with schema v3. Until then every Later operation
+    // fails explicitly, without touching the database.
+    func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
+    func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
+    func setLaterCompleted(id: UUID, completedAt: Date?) throws {
+        throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
+    }
+    func updateLater(id: UUID, text: String, categoryID: UUID?) throws {
+        throw LaterTaskRepositoryError.unsupported("updateLater")
+    }
+    func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
+    func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
+        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+    }
+
     private func transaction<Result>(_ body: () throws -> Result) throws -> Result {
         try Self.execute("BEGIN IMMEDIATE", in: database)
         do {
