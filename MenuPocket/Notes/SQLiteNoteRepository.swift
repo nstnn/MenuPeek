@@ -15,7 +15,7 @@ enum SQLiteNoteStoreError: Error {
 /// One connection to the app's local notes database. SQLite stores dates as
 /// seconds since the Unix epoch and keeps the assigned local day separately.
 final class SQLiteNoteRepository: NoteRepository {
-    static let schemaVersion = 2
+    static let schemaVersion = 3
 
     private let database: OpaquePointer
 
@@ -290,8 +290,8 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    // Later storage arrives with schema v3. Until then every Later operation
-    // fails explicitly, without touching the database.
+    // Later storage exists from schema v3; its CRUD arrives in later tasks. Until
+    // then every Later operation fails explicitly, without touching the database.
     func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
     func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
     func setLaterCompleted(id: UUID, completedAt: Date?) throws {
@@ -399,8 +399,12 @@ final class SQLiteNoteRepository: NoteRepository {
         )
         let isFresh = version == 0 && objects.isEmpty
         if !isFresh {
-            let expected: [[String?]] = version == 2
-                ? [["table", "categories"], ["table", "notes"]] : [["table", "notes"]]
+            let expected: [[String?]]
+            switch version {
+            case 3: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
+            case 2: expected = [["table", "categories"], ["table", "notes"]]
+            default: expected = [["table", "notes"]]
+            }
             guard objects == expected else {
                 throw SQLiteNoteStoreError.incompatibleSchema("Unexpected tables or views")
             }
@@ -411,41 +415,14 @@ final class SQLiteNoteRepository: NoteRepository {
             return
         }
 
+        // Every supported upgrade step runs in one transaction, so a failure leaves
+        // the original tables, rows, and user_version exactly as they were.
         try execute("BEGIN IMMEDIATE", in: database)
         do {
-            try execute(
-                """
-                CREATE TABLE categories (
-                    id TEXT PRIMARY KEY NOT NULL,
-                    name TEXT NOT NULL,
-                    name_key TEXT NOT NULL UNIQUE,
-                    creation_order INTEGER NOT NULL UNIQUE CHECK(typeof(creation_order) = 'integer')
-                )
-                """, in: database
-            )
-            if isFresh {
-                try execute(
-                    """
-                    CREATE TABLE notes (
-                        id TEXT PRIMARY KEY NOT NULL,
-                        text TEXT NOT NULL,
-                        day_key TEXT NOT NULL,
-                        created_at REAL NOT NULL,
-                        completed_at REAL,
-                        category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL
-                    )
-                    """, in: database
-                )
-            } else {
-                // Keep the original table and rowids; rebuilding would risk task order.
-                try execute(
-                    "ALTER TABLE notes ADD COLUMN category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL",
-                    in: database
-                )
+            if version < 2 {
+                try addCategories(toFreshStore: isFresh, in: database)
             }
-            try execute("CREATE INDEX IF NOT EXISTS notes_day_key_idx ON notes(day_key)",
-                        in: database)
-            try execute("CREATE INDEX notes_category_id_idx ON notes(category_id)", in: database)
+            try addLaterTasks(in: database)
             try validateSchema(version: schemaVersion, in: database)
             try validateIntegrity(in: database)
             try execute("PRAGMA user_version = \(schemaVersion)", in: database)
@@ -456,9 +433,67 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    /// Upgrade step for v0/v1 stores (and fresh files): the v2 category catalog
+    /// and the optional daily-task association.
+    private static func addCategories(toFreshStore isFresh: Bool, in database: OpaquePointer) throws {
+        try execute(
+            """
+            CREATE TABLE categories (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                name_key TEXT NOT NULL UNIQUE,
+                creation_order INTEGER NOT NULL UNIQUE CHECK(typeof(creation_order) = 'integer')
+            )
+            """, in: database
+        )
+        if isFresh {
+            try execute(
+                """
+                CREATE TABLE notes (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    text TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    completed_at REAL,
+                    category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL
+                )
+                """, in: database
+            )
+        } else {
+            // Keep the original table and rowids; rebuilding would risk task order.
+            try execute(
+                "ALTER TABLE notes ADD COLUMN category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL",
+                in: database
+            )
+        }
+        try execute("CREATE INDEX IF NOT EXISTS notes_day_key_idx ON notes(day_key)", in: database)
+        try execute("CREATE INDEX notes_category_id_idx ON notes(category_id)", in: database)
+    }
+
+    /// Upgrade step for every pre-v3 store: the undated Later list. It only adds a
+    /// table, so existing notes and categories are never copied or rewritten.
+    private static func addLaterTasks(in database: OpaquePointer) throws {
+        try execute(
+            """
+            CREATE TABLE later_tasks (
+                id TEXT PRIMARY KEY NOT NULL,
+                text TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                completed_at REAL,
+                category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL
+            )
+            """, in: database
+        )
+        try execute("CREATE INDEX later_tasks_category_id_idx ON later_tasks(category_id)", in: database)
+    }
+
     private static func validateSchema(version: Int, in database: OpaquePointer) throws {
         // Defaults, nullability, primary keys, and hidden/generated columns are part
         // of the known format. Do not interpret an unknown v0 file as an empty store.
+        let hasCategories = version >= 2
+        let categoryReference: [[String?]] = [
+            ["categories", "category_id", "id", "NO ACTION", "SET NULL", "NONE"]
+        ]
         var noteColumns: [[String?]] = [
             ["id", "TEXT", "1", nil, "1", "0"],
             ["text", "TEXT", "1", nil, "0", "0"],
@@ -466,28 +501,16 @@ final class SQLiteNoteRepository: NoteRepository {
             ["created_at", "REAL", "1", nil, "0", "0"],
             ["completed_at", "REAL", "0", nil, "0", "0"]
         ]
-        if version == 2 {
+        if hasCategories {
             noteColumns.append(["category_id", "TEXT", "0", "NULL", "0", "0"])
         }
         try validateColumns("notes", expected: noteColumns, in: database)
-        // WITHOUT ROWID is incompatible with the saved insertion-order contract.
-        let rowidRead = try prepare("SELECT rowid FROM notes LIMIT 0", in: database)
-        sqlite3_finalize(rowidRead)
+        try validateRowidTable("notes", in: database)
         try validateIndex("notes_day_key_idx", table: "notes", column: "day_key",
-                          required: version == 2, in: database)
-
-        let foreignKeys = try schemaRows(
-            """
-            SELECT "table", "from", "to", on_update, on_delete, "match"
-            FROM pragma_foreign_key_list('notes') ORDER BY id, seq
-            """, in: database
-        )
-        let expectedForeignKeys: [[String?]] = version == 2
-            ? [["categories", "category_id", "id", "NO ACTION", "SET NULL", "NONE"]] : []
-        guard foreignKeys == expectedForeignKeys else {
-            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected task relationships")
-        }
-        guard version == 2 else { return }
+                          required: hasCategories, in: database)
+        try validateForeignKeys("notes", expected: hasCategories ? categoryReference : [],
+                                in: database)
+        guard hasCategories else { return }
 
         try validateColumns("categories", expected: [
             ["id", "TEXT", "1", nil, "1", "0"],
@@ -512,6 +535,39 @@ final class SQLiteNoteRepository: NoteRepository {
         }
         try validateIndex("notes_category_id_idx", table: "notes", column: "category_id",
                           required: true, in: database)
+        guard version >= 3 else { return }
+
+        try validateColumns("later_tasks", expected: [
+            ["id", "TEXT", "1", nil, "1", "0"],
+            ["text", "TEXT", "1", nil, "0", "0"],
+            ["created_at", "REAL", "1", nil, "0", "0"],
+            ["completed_at", "REAL", "0", nil, "0", "0"],
+            ["category_id", "TEXT", "0", "NULL", "0", "0"]
+        ], in: database)
+        try validateRowidTable("later_tasks", in: database)
+        // Category removal must clear Later assignments, never delete the tasks.
+        try validateForeignKeys("later_tasks", expected: categoryReference, in: database)
+        try validateIndex("later_tasks_category_id_idx", table: "later_tasks", column: "category_id",
+                          required: true, in: database)
+    }
+
+    /// WITHOUT ROWID is incompatible with the saved insertion-order contract.
+    private static func validateRowidTable(_ table: String, in database: OpaquePointer) throws {
+        let rowidRead = try prepare("SELECT rowid FROM \(table) LIMIT 0", in: database)
+        sqlite3_finalize(rowidRead)
+    }
+
+    private static func validateForeignKeys(_ table: String, expected: [[String?]],
+                                            in database: OpaquePointer) throws {
+        let foreignKeys = try schemaRows(
+            """
+            SELECT "table", "from", "to", on_update, on_delete, "match"
+            FROM pragma_foreign_key_list('\(table)') ORDER BY id, seq
+            """, in: database
+        )
+        guard foreignKeys == expected else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected \(table) relationships")
+        }
     }
 
     private static func validateColumns(_ table: String, expected: [[String?]],
