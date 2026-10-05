@@ -744,6 +744,235 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try store.categories().first?.id, category.id)
     }
 
+    func testLaterActionsPreserveIdentityOrderAndTodayAndSurviveReopen() throws {
+        let today = note("Today", day: "2026-10-05", createdAt: 1)
+        let first = later("First", createdAt: 10)
+        let second = later("Second", createdAt: 20, completedAt: Date(timeIntervalSince1970: 25))
+        let third = later("Third ' quote 📝", createdAt: 30)
+        let work: TaskCategory
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            work = try store.createCategory(name: "Work")
+            try store.add(today)
+            for task in [first, second, third] { try store.addLater(task) }
+            XCTAssertEqual(try store.laterTasks(), [first, second, third])
+            let rowids = try laterRows().map { $0[0] }
+
+            try store.setLaterCompleted(id: first.id, completedAt: Date(timeIntervalSince1970: 40))
+            try store.setLaterCompleted(id: second.id, completedAt: nil)
+            try store.updateLater(id: third.id, text: "Third edited", categoryID: work.id)
+            XCTAssertEqual(try store.laterTasks(), [
+                LaterTask(id: first.id, text: "First", createdAt: first.createdAt,
+                          completedAt: Date(timeIntervalSince1970: 40)),
+                LaterTask(id: second.id, text: "Second", createdAt: second.createdAt, completedAt: nil),
+                LaterTask(id: third.id, text: "Third edited", createdAt: third.createdAt,
+                          completedAt: nil, categoryID: work.id),
+            ])
+            // Completion and edits keep each row's saved position.
+            XCTAssertEqual(try laterRows().map { $0[0] }, rowids)
+            try store.updateLater(id: third.id, text: "Third edited", categoryID: nil)
+            try store.updateLater(id: third.id, text: "Third final", categoryID: work.id)
+            try store.deleteLater(id: second.id)
+            XCTAssertEqual(try laterRows().map { $0[0] }, [rowids[0], rowids[2]])
+            try store.addLater(second)
+            XCTAssertEqual(try store.laterTasks().map(\.id), [first.id, third.id, second.id])
+        }
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.laterTasks(), [
+            LaterTask(id: first.id, text: "First", createdAt: first.createdAt,
+                      completedAt: Date(timeIntervalSince1970: 40)),
+            LaterTask(id: third.id, text: "Third final", createdAt: third.createdAt,
+                      completedAt: nil, categoryID: work.id),
+            second,
+        ])
+        // Later actions never change daily tasks or Today's progress.
+        XCTAssertEqual(try reopened.notes(for: today.dayKey), [today])
+        XCTAssertEqual(try reopened.incompleteCount(for: today.dayKey), 1)
+    }
+
+    func testLaterMissingTargetsDuplicatesAndMissingCategoriesThrowWithoutChangingRows() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let saved = later("Saved", createdAt: 10, categoryID: work.id)
+        try store.addLater(saved)
+        let daily = note("Daily", day: "2026-10-05", createdAt: 1)
+        try store.add(daily)
+        let before = try laterRows()
+        let missing = UUID()
+        let unknownCategory = UUID()
+
+        let missingTargets: [() throws -> Void] = [
+            { try store.setLaterCompleted(id: missing, completedAt: Date()) },
+            { try store.updateLater(id: missing, text: "Edited", categoryID: nil) },
+            { try store.deleteLater(id: missing) },
+            // A daily task's ID is not a Later target.
+            { try store.deleteLater(id: daily.id) },
+        ]
+        for operation in missingTargets {
+            XCTAssertThrowsError(try operation()) {
+                let error = $0 as? LaterTaskRepositoryError
+                XCTAssertTrue(error == .notFound(missing) || error == .notFound(daily.id), "\($0)")
+            }
+            XCTAssertEqual(try laterRows(), before)
+        }
+        XCTAssertThrowsError(try store.addLater(later("Duplicate", createdAt: 99, id: saved.id)))
+        let missingCategoryWrites: [() throws -> Void] = [
+            { try store.addLater(self.later("Unknown", createdAt: 11, categoryID: unknownCategory)) },
+            { try store.updateLater(id: saved.id, text: "Edited", categoryID: unknownCategory) },
+        ]
+        for operation in missingCategoryWrites {
+            XCTAssertThrowsError(try operation()) {
+                XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(unknownCategory))
+            }
+        }
+        XCTAssertEqual(try laterRows(), before)
+        XCTAssertEqual(try store.laterTasks(), [saved])
+        XCTAssertEqual(try store.notes(for: daily.dayKey), [daily])
+    }
+
+    func testLaterWriteFailuresRollBackThenRetrySafely() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let saved = later("Saved", createdAt: 10)
+        try store.addLater(saved)
+        let before = try laterRows()
+        let added = later("Added", createdAt: 20)
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_later_add AFTER INSERT ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected'); END;
+            CREATE TRIGGER reject_later_completion AFTER UPDATE OF completed_at ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected'); END;
+            CREATE TRIGGER reject_later_edit AFTER UPDATE OF text ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected'); END;
+            CREATE TRIGGER reject_later_delete BEFORE DELETE ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected'); END;
+            """
+        )
+        let operations: [() throws -> Void] = [
+            { try store.addLater(added) },
+            { try store.setLaterCompleted(id: saved.id, completedAt: Date(timeIntervalSince1970: 30)) },
+            { try store.updateLater(id: saved.id, text: "Edited", categoryID: work.id) },
+            { try store.deleteLater(id: saved.id) },
+        ]
+        for operation in operations {
+            XCTAssertThrowsError(try operation())
+            // The edit's text and category are rolled back together.
+            XCTAssertEqual(try laterRows(), before)
+        }
+        try executeRaw(
+            """
+            DROP TRIGGER reject_later_add; DROP TRIGGER reject_later_completion;
+            DROP TRIGGER reject_later_edit; DROP TRIGGER reject_later_delete;
+            """
+        )
+        for operation in operations.dropLast() { try operation() }
+        XCTAssertEqual(try store.laterTasks(), [
+            LaterTask(id: saved.id, text: "Edited", createdAt: saved.createdAt,
+                      completedAt: Date(timeIntervalSince1970: 30), categoryID: work.id),
+            added,
+        ])
+        try operations.last!()
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).laterTasks(), [added])
+    }
+
+    func testInvalidLaterRowsAreReadErrorsWithoutRepair() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let saved = later("Saved", createdAt: 10, categoryID: work.id)
+        try store.addLater(saved)
+        let invalidChanges = [
+            "id = 'not-a-uuid'",
+            "created_at = 'not-a-time'",
+            "completed_at = 'not-a-time'",
+            "text = CAST(x'FF' AS TEXT)",
+            "category_id = 'not-a-uuid'",
+            "category_id = '\(UUID().uuidString)'",
+        ]
+        for change in invalidChanges {
+            // Only the isolated fixture writer disables its own connection's enforcement.
+            try executeRaw("PRAGMA foreign_keys = OFF; UPDATE later_tasks SET \(change)")
+            let corrupted = try laterRows()
+            XCTAssertThrowsError(try store.laterTasks(), change)
+            XCTAssertEqual(try laterRows(), corrupted, change)
+            try executeRaw(
+                """
+                DELETE FROM later_tasks;
+                INSERT INTO later_tasks VALUES ('\(saved.id.uuidString)', 'Saved', 10, NULL, '\(work.id.uuidString)');
+                """
+            )
+            XCTAssertEqual(try store.laterTasks(), [saved])
+        }
+        try executeRaw("UPDATE categories SET name_key = 'wrong-key'")
+        XCTAssertThrowsError(try store.laterTasks())
+    }
+
+    func testCategoryUsageAndRemovalCoverDailyHistoryAndLaterAtomically() throws {
+        let days = ["2026-10-05", "2026-10-04"]
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let other = try store.createCategory(name: "Other")
+        for (index, day) in days.enumerated() {
+            try store.add(note("Unfinished", day: day, createdAt: Double(index), categoryID: work.id))
+            try store.add(note("Finished", day: day, createdAt: Double(index),
+                               completedAt: Date(timeIntervalSince1970: 30), categoryID: work.id))
+            try store.add(note("Other", day: day, createdAt: Double(index), categoryID: other.id))
+        }
+        let laterTasks = [
+            later("Later unfinished", createdAt: 40, categoryID: work.id),
+            later("Later finished", createdAt: 41, completedAt: Date(timeIntervalSince1970: 45),
+                  categoryID: work.id),
+            later("Later other", createdAt: 42, categoryID: other.id),
+            later("Later general", createdAt: 43),
+        ]
+        for task in laterTasks { try store.addLater(task) }
+        // Four daily tasks across two days plus two Later tasks, including completed ones.
+        XCTAssertEqual(try store.categoryUsageCount(id: work.id), 6)
+        XCTAssertEqual(try store.categoryUsageCount(id: other.id), 3)
+        let unused = try store.createCategory(name: "Unused")
+        XCTAssertEqual(try store.categoryUsageCount(id: unused.id), 0)
+        let notesBefore = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterBefore = try laterRows()
+
+        // A failure while clearing Later assignments must also undo the daily ones.
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_later_assignment AFTER UPDATE OF category_id ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected after reassignment'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.removeCategory(id: work.id))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notesBefore)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        XCTAssertEqual(try store.categories(), [work, other, unused])
+        XCTAssertEqual(try store.categoryUsageCount(id: work.id), 6)
+        try executeRaw("DROP TRIGGER reject_later_assignment")
+
+        try store.removeCategory(id: work.id)
+        let expectedLater = laterTasks.map { task in
+            LaterTask(id: task.id, text: task.text, createdAt: task.createdAt, completedAt: task.completedAt,
+                      categoryID: task.categoryID == work.id ? nil : task.categoryID)
+        }
+        XCTAssertEqual(try store.laterTasks(), expectedLater)
+        XCTAssertEqual(try laterRows().map { Array($0.prefix(5)) }, laterBefore.map { Array($0.prefix(5)) })
+        XCTAssertEqual(try rawRows("SELECT category_id FROM notes ORDER BY rowid"),
+                       Array(repeating: [[nil], [nil], [other.id.uuidString]], count: 2).flatMap { $0 })
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.categories(), [other, unused])
+        XCTAssertEqual(try reopened.categoryUsageCount(id: other.id), 3)
+        XCTAssertEqual(try reopened.laterTasks(), expectedLater)
+        XCTAssertThrowsError(try reopened.categoryUsageCount(id: work.id)) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(work.id))
+        }
+    }
+
+    private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,
+                       categoryID: UUID? = nil, id: UUID = UUID()) -> LaterTask {
+        LaterTask(id: id, text: text, createdAt: Date(timeIntervalSince1970: createdAt),
+                  completedAt: completedAt, categoryID: categoryID)
+    }
+
     private func note(_ text: String, day: String, createdAt: TimeInterval,
                       completedAt: Date? = nil, categoryID: UUID? = nil) -> Note {
         Note(id: UUID(), text: text, dayKey: day,

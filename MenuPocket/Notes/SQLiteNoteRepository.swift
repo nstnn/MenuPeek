@@ -139,10 +139,12 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     func categoryUsageCount(id: UUID) throws -> Int {
-        // One statement distinguishes a missing category from an existing unused one.
+        // One statement distinguishes a missing category from an existing unused one,
+        // and counts every saved day plus the Later list.
         let statement = try prepare(
             """
             SELECT (SELECT COUNT(*) FROM notes WHERE category_id = categories.id)
+                 + (SELECT COUNT(*) FROM later_tasks WHERE category_id = categories.id)
             FROM categories WHERE id = ?
             """
         )
@@ -160,7 +162,8 @@ final class SQLiteNoteRepository: NoteRepository {
             let statement = try prepare("DELETE FROM categories WHERE id = ?")
             defer { sqlite3_finalize(statement) }
             try bind(id.uuidString, at: 1, to: statement)
-            // The connection's ON DELETE SET NULL relationship clears every day's assignments.
+            // The connection's ON DELETE SET NULL relationships clear every day's and every
+            // Later task's assignment within this statement, so all of it rolls back together.
             try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "remove category")
             guard sqlite3_changes(database) == 1 else { throw TaskCategoryRepositoryError.notFound(id) }
         }
@@ -290,17 +293,101 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    // Later storage exists from schema v3; its CRUD arrives in later tasks. Until
-    // then every Later operation fails explicitly, without touching the database.
-    func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
-    func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
+    func laterTasks() throws -> [LaterTask] {
+        // Like notes, the rowid preserves insertion order across completion and edits.
+        let statement = try prepare(
+            """
+            SELECT later_tasks.id, text, created_at, completed_at, category_id,
+                   categories.id, name, name_key, creation_order
+            FROM later_tasks LEFT JOIN categories ON categories.id = later_tasks.category_id
+            ORDER BY later_tasks.rowid ASC
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+
+        var result: [LaterTask] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return result }
+            try check(step, expected: SQLITE_ROW, operation: "read Later tasks")
+            guard let id = UUID(uuidString: try text(at: 0, from: statement)) else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            guard let createdAt = try instant(at: 2, from: statement) else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            let categoryID: UUID?
+            if sqlite3_column_type(statement, 4) == SQLITE_NULL {
+                categoryID = nil
+            } else {
+                // A dangling or unreadable association is a read error, never General.
+                guard let reference = UUID(uuidString: try text(at: 4, from: statement)),
+                      sqlite3_column_type(statement, 5) != SQLITE_NULL,
+                      try category(from: statement, offset: 5).id == reference else {
+                    throw SQLiteNoteStoreError.invalidNoteRow
+                }
+                categoryID = reference
+            }
+            result.append(LaterTask(id: id, text: try text(at: 1, from: statement),
+                                    createdAt: createdAt,
+                                    completedAt: try instant(at: 3, from: statement),
+                                    categoryID: categoryID))
+        }
+    }
+
+    func addLater(_ task: LaterTask) throws {
+        try transaction {
+            if let id = task.categoryID { _ = try requireCategory(id) }
+            let statement = try prepare(
+                "INSERT INTO later_tasks (id, text, created_at, completed_at, category_id) VALUES (?, ?, ?, ?, ?)"
+            )
+            defer { sqlite3_finalize(statement) }
+            try bind(task.id.uuidString, at: 1, to: statement)
+            try bind(task.text, at: 2, to: statement)
+            try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970),
+                      operation: "bind created_at")
+            try bindInstant(task.completedAt, at: 4, to: statement)
+            try bindCategoryID(task.categoryID, at: 5, to: statement)
+            // A duplicate ID fails the primary key; the saved row is never replaced.
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "insert Later task")
+        }
+    }
+
     func setLaterCompleted(id: UUID, completedAt: Date?) throws {
-        throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
+        try transaction {
+            let statement = try prepare("UPDATE later_tasks SET completed_at = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bindInstant(completedAt, at: 1, to: statement)
+            try bind(id.uuidString, at: 2, to: statement)
+            try executeWrite(statement, id: id, operation: "set Later completion",
+                             notFound: LaterTaskRepositoryError.notFound(id))
+        }
     }
+
     func updateLater(id: UUID, text: String, categoryID: UUID?) throws {
-        throw LaterTaskRepositoryError.unsupported("updateLater")
+        try transaction {
+            if let categoryID { _ = try requireCategory(categoryID) }
+            let statement = try prepare("UPDATE later_tasks SET text = ?, category_id = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(text, at: 1, to: statement)
+            try bindCategoryID(categoryID, at: 2, to: statement)
+            try bind(id.uuidString, at: 3, to: statement)
+            try executeWrite(statement, id: id, operation: "update Later text and category",
+                             notFound: LaterTaskRepositoryError.notFound(id))
+        }
     }
-    func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
+
+    func deleteLater(id: UUID) throws {
+        try transaction {
+            let statement = try prepare("DELETE FROM later_tasks WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, at: 1, to: statement)
+            try executeWrite(statement, id: id, operation: "delete Later task",
+                             notFound: LaterTaskRepositoryError.notFound(id))
+        }
+    }
+
+    // The transfer arrives in TASK-004; until then it fails without touching the database.
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
         throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
     }
@@ -368,10 +455,30 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     private func executeWrite(_ statement: OpaquePointer, id: UUID,
-                              operation: String) throws {
+                              operation: String, notFound: Error? = nil) throws {
         try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: operation)
         guard sqlite3_changes(database) == 1 else {
-            throw SQLiteNoteStoreError.noteNotFound(id)
+            throw notFound ?? SQLiteNoteStoreError.noteNotFound(id)
+        }
+    }
+
+    private func bindInstant(_ date: Date?, at index: Int32, to statement: OpaquePointer) throws {
+        let result = date.map { sqlite3_bind_double(statement, index, $0.timeIntervalSince1970) }
+            ?? sqlite3_bind_null(statement, index)
+        try check(result, operation: "bind timestamp")
+    }
+
+    /// nil for SQL NULL; a non-numeric or non-finite value is an invalid row.
+    private func instant(at index: Int32, from statement: OpaquePointer) throws -> Date? {
+        switch sqlite3_column_type(statement, index) {
+        case SQLITE_NULL:
+            return nil
+        case SQLITE_FLOAT, SQLITE_INTEGER:
+            let value = sqlite3_column_double(statement, index)
+            guard value.isFinite else { throw SQLiteNoteStoreError.invalidNoteRow }
+            return Date(timeIntervalSince1970: value)
+        default:
+            throw SQLiteNoteStoreError.invalidNoteRow
         }
     }
 
