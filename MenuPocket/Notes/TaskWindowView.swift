@@ -19,6 +19,8 @@ struct TaskWindowView: View {
     let onSettings: () -> Void
     @State private var isComposerVisible = false
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
+    @State private var focusRequestID = UUID()
+    @State private var editFocusRequestID: UUID?
     @FocusState private var focusedControl: FocusControl?
     @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -84,17 +86,24 @@ struct TaskWindowView: View {
                         // Keep the editor or its saved destination visible when
                         // the Add composer changes the list's available height.
                         if let id = new ?? old {
+                            if new != nil {
+                                focusRequestID = UUID()
+                                editFocusRequestID = focusRequestID
+                            }
+                            let requestID = editFocusRequestID ?? focusRequestID
                             Task { @MainActor in
                                 await Task.yield()
+                                guard focusRequestID == requestID else { return }
                                 if let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) {
                                     // Entry/exit changes the space above the list.
                                     // Mount the group before targeting its row.
                                     scroll.scrollTo(group.id, anchor: .top)
                                     await Task.yield()
                                 }
+                                guard focusRequestID == requestID else { return }
                                 scroll.scrollTo(id, anchor: .center)
-                                if new != nil { focusDraft() }
-                                else { restoreRowFocus(id) }
+                                if new != nil { focusDraft(requestID: requestID) }
+                                else { restoreRowFocus(id, requestID: requestID) }
                             }
                         }
                     }
@@ -652,10 +661,13 @@ struct TaskWindowView: View {
         _ = presentation.confirmDeletion(state: state)
     }
 
-    private func restoreRowFocus(_ id: UUID, fallbackGroup: TaskGroupID? = nil) {
+    private func restoreRowFocus(_ id: UUID, fallbackGroup: TaskGroupID? = nil,
+                                 requestID: UUID? = nil) {
         let originGroup = fallbackGroup ?? (rowActionOrigin?.id == id ? rowActionOrigin?.groupID : nil)
+        let requestID = requestID ?? focusRequestID
         Task { @MainActor in
             await Task.yield()
+            guard focusRequestID == requestID else { return }
             focusedControl = focusAfterLeavingRow(id, fallbackGroup: originGroup)
         }
     }
@@ -673,9 +685,14 @@ struct TaskWindowView: View {
         return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .actions(id)
     }
 
-    private func focusDraft() {
+    private func focusDraft(requestID: UUID? = nil) {
+        // Explicit Add requests supersede an edit's delayed scroll/focus work,
+        // including an edit-exit observer that has not run yet.
+        let requestID = requestID ?? UUID()
+        focusRequestID = requestID
         Task { @MainActor in
             await Task.yield()
+            guard focusRequestID == requestID else { return }
             focusedControl = .draft
         }
     }

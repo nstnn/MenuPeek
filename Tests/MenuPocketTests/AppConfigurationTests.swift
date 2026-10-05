@@ -693,14 +693,20 @@ final class AppConfigurationTests: XCTestCase {
 
         // Escape cancels this row's edit, then the independent Add field returns.
         editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        // Command-N can arrive before SwiftUI finishes restoring row focus.
+        // The newer explicit command must win over that pending restoration.
+        fixture.delegate.addTask()
         await waitUntil { fixture.state.editingNoteID == nil }
         XCTAssertNil(fixture.state.issue)
         XCTAssertEqual(fixture.repository.saved, [note])
         XCTAssertEqual(fixture.state.draft, "Separate pending Add")
-        fixture.delegate.addTask()
         await waitUntil { (window.firstResponder as? NSTextView)?.string == "Separate pending Add" }
         let addEditor = try await focusedEditor(in: window)
         XCTAssertEqual(addEditor.string, "Separate pending Add")
+        for _ in 0..<5 {
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertEqual((window.firstResponder as? NSTextView)?.string, "Separate pending Add")
+        }
     }
 
     @MainActor
