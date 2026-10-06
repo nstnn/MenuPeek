@@ -142,6 +142,41 @@ final class TaskHistoryStateTests: XCTestCase {
         XCTAssertEqual(state.filter, .all)
     }
 
+    func testMonthStepsCrossYearBoundariesAndLabelsKeepTheCivilDate() throws {
+        var reads: [String] = []
+        let state = try TaskHistoryState(noteDay: clock("2026-01-31T12:00:00Z"), readMonth: {
+            reads.append($0.start.key); return []
+        }, readDay: empty)
+        state.setVisible(month: true, day: true)
+        XCTAssertEqual(state.selectedDay?.key, "2026-01-30")
+        try state.showPreviousMonth()
+        XCTAssertEqual(state.month.start.key, "2025-12-01")
+        XCTAssertEqual(state.selectedDay?.key, "2025-12-30")
+        try state.showNextMonth()
+        try state.showNextMonth()
+        XCTAssertEqual(state.month.start.key, "2026-02-01")
+        XCTAssertNil(state.selectedDay)
+        XCTAssertEqual(reads, ["2026-01-01", "2025-12-01", "2026-01-01", "2026-02-01"])
+        // Labels format the saved civil date, never an instant shifted by the device zone.
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+        NSTimeZone.default = TimeZone(identifier: "Pacific/Kiritimati")!
+        XCTAssertEqual(try day("2024-02-29").label("EEEE, MMMM d, yyyy"), "Thursday, February 29, 2024")
+        NSTimeZone.default = TimeZone(identifier: "Pacific/Pago_Pago")!
+        XCTAssertEqual(try day("2026-12-31").label("MMMM yyyy"), "December 2026")
+    }
+
+    func testDisclosureResetsForAnotherDayButSurvivesRefreshOfTheSameDay() throws {
+        let state = try TaskHistoryState(noteDay: clock("2026-10-06T12:00:00Z"), readMonth: { _ in [] }, readDay: empty)
+        state.setVisible(month: true, day: true)
+        state.toggleDisclosure(.general)
+        state.retryDay()
+        try state.refresh(revision: 1)
+        XCTAssertEqual(state.collapsedGroups, [.general])
+        try state.select(day("2026-10-03"))
+        XCTAssertEqual(state.collapsedGroups, [])
+    }
+
     func testSharedFacadeBrowsingPreservesTodayDraftProgressAndDefaults() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "TaskHistoryStateTests.\(UUID().uuidString)"

@@ -26,7 +26,10 @@ enum HistoryPaneIssue: Equatable {
 final class TaskHistoryState {
     private(set) var today: GregorianDay
     private(set) var month: HistoryDayRange
-    private(set) var selectedDay: GregorianDay?
+    /// Disclosure is per viewed day: choosing another day starts expanded.
+    private(set) var selectedDay: GregorianDay? {
+        didSet { if oldValue != selectedDay { collapsedGroups = [] } }
+    }
     private(set) var filter: HistoryTaskFilter = .all
     private(set) var monthSummaries: [DayTaskSummary]?
     private(set) var daySnapshot: HistoryDaySnapshot?
@@ -141,6 +144,17 @@ final class TaskHistoryState {
         pendingFutureDay = candidate > today ? candidate : nil
         reloadVisible()
     }
+
+    func showPreviousMonth() throws {
+        let start = month.start
+        let year = start.month == 1 ? start.year - 1 : start.year
+        let previous = start.month == 1 ? 12 : start.month - 1
+        try changeMonth(containing: GregorianDay(key: String(format: "%04d-%02d-01", locale: Locale(identifier: "en_US_POSIX"),
+                                                             year, previous)))
+    }
+
+    /// The exclusive end is the first day of the next month.
+    func showNextMonth() throws { try changeMonth(containing: month.end) }
 
     func thisMonth() throws {
         today = try noteDay.historyKeys().today
