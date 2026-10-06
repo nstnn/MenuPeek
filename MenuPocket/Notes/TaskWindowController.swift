@@ -60,6 +60,12 @@ final class TaskWindowPresentation {
         return true
     }
 
+    /// Matches `selectDestination`: the current list is always selectable;
+    /// switching waits for any edit, deletion, or category manager to finish.
+    func canSelectDestination(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        destination == selectedDestination || !hasGuardedInteraction(state: state)
+    }
+
     func isComposerVisible(in destination: TaskListDestination) -> Bool {
         switch destination {
         case .today: isTodayComposerVisible

@@ -69,9 +69,9 @@ final class QuickAddPanel: NSPanel {
         case ("w", false):
             onCancel?()
             return true
-        // Quitting, adding in the Today window, or opening Settings from a
-        // capture panel would be surprising, so these do nothing here.
-        case ("q", false), ("n", false), (",", false):
+        // Quitting, adding in the Today window, switching its list, or opening
+        // Settings from a capture panel would be surprising, so these do nothing.
+        case ("q", false), ("n", false), ("1", false), ("2", false), (",", false):
             return true
         // The frontmost app may own the menu bar, so send standard edit
         // commands to the field directly instead of relying on the main menu.

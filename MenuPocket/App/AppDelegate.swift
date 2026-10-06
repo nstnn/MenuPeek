@@ -115,6 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         taskWindowController?.presentation.requestNewTask(state: dailyNotesState)
     }
 
+    /// View > Today (⌘1) and Later (⌘2). Opens the window when needed and
+    /// leaves a guarded interaction in place instead of forcing the switch.
+    @objc func showDestination(_ sender: NSMenuItem) {
+        guard !isTerminating, let destination = Self.destination(forMenuTag: sender.tag) else { return }
+        showTasks()
+        taskWindowController?.presentation.selectDestination(destination, state: dailyNotesState)
+    }
+
+    private static func destination(forMenuTag tag: Int) -> TaskListDestination? {
+        switch tag {
+        case 1: .today
+        case 2: .later
+        default: nil
+        }
+    }
+
     @objc func showSettings() {
         guard !isTerminating else { return }
         let controller = settingsWindowController ?? makeSettingsWindowController()
@@ -156,6 +172,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !isTerminating else { return false }
         if menuItem.action == #selector(addTask) {
             return canAddTask
+        }
+        if menuItem.action == #selector(showDestination(_:)),
+           let destination = Self.destination(forMenuTag: menuItem.tag) {
+            // A fresh window starts at Today with nothing guarded.
+            guard let presentation = taskWindowController?.presentation else {
+                menuItem.state = destination == .today ? .on : .off
+                return true
+            }
+            menuItem.state = presentation.selectedDestination == destination ? .on : .off
+            return presentation.canSelectDestination(destination, state: dailyNotesState)
         }
         return true
     }
@@ -230,6 +256,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         menu.addItem(editItem)
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        for (tag, title, key) in [(1, "Today", "1"), (2, "Later", "2")] {
+            let item = viewMenu.addItem(withTitle: title, action: #selector(showDestination(_:)), keyEquivalent: key)
+            item.tag = tag
+            item.target = self
+        }
+        viewItem.submenu = viewMenu
+        menu.addItem(viewItem)
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
