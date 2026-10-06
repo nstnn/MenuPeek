@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         model.stopQuickAdd()
         quickAddPanelController?.dismiss()
         quickAddPanelController?.panel.close()
+        taskWindowController?.stopForTermination()
         dailyNotesState.stopForTermination()
         taskStatusItemController?.remove()
         taskStatusItemController = nil

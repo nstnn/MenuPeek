@@ -5,6 +5,101 @@ import SwiftUI
 @MainActor
 @Observable
 final class TaskWindowPresentation {
+    enum Route { case today, history, unfinished }
+    enum HistoryEntry { case calendar, yesterday }
+
+    private(set) var route: Route = .today
+    private(set) var historyEntry: HistoryEntry = .calendar
+    private(set) var historyState: TaskHistoryState?
+    private(set) var unfinishedState: UnfinishedTasksState?
+    private(set) var browserIssue: String?
+    /// The top visible group is a fallback if retained scroll content disappears.
+    var todayScrollAnchor: TaskGroupID?
+    private(set) var todayScrollRestoreID: UUID?
+    @ObservationIgnored private var isWindowVisible = false
+    @ObservationIgnored private var isTerminating = false
+
+    func canBrowse(state: DailyNotesState) -> Bool {
+        !isTerminating && state.editingNoteID == nil && deletionTarget == nil && !isManagingCategories
+    }
+
+    @discardableResult
+    func showHistory(state: DailyNotesState, entry: HistoryEntry = .calendar) -> Bool {
+        guard canBrowse(state: state) else { return false }
+        historyEntry = entry
+        route = .history
+        refreshBrowser(state: state)
+        if entry == .yesterday, let historyState {
+            do { try historyState.select(state.yesterdayForHistory(), filter: .unfinished) }
+            catch { browserIssue = "Could not open yesterday. Try again." }
+        }
+        return true
+    }
+
+    @discardableResult
+    func showUnfinished(state: DailyNotesState) -> Bool {
+        guard route == .history, canBrowse(state: state) else { return false }
+        route = .unfinished
+        refreshBrowser(state: state)
+        return true
+    }
+
+    func backToHistory(state: DailyNotesState) {
+        guard route == .unfinished, !isTerminating else { return }
+        route = .history
+        refreshBrowser(state: state)
+    }
+
+    @discardableResult
+    func showToday(state: DailyNotesState) -> Bool {
+        guard !isTerminating else { return false }
+        if route != .today {
+            guard canBrowse(state: state) else { return false }
+            // Keep the exact native offset when content survives. If the saved
+            // anchor vanished, explicitly restore the first surviving group.
+            if let anchor = todayScrollAnchor, !state.groups.contains(where: { $0.id == anchor }) {
+                todayScrollAnchor = state.groups.first?.id
+                todayScrollRestoreID = UUID()
+            }
+            route = .today
+        }
+        updateBrowserVisibility()
+        return true
+    }
+
+    func setWindowVisible(_ visible: Bool, state: DailyNotesState) {
+        guard !isTerminating else { return }
+        isWindowVisible = visible
+        refreshBrowser(state: state)
+    }
+
+    func refreshBrowser(state: DailyNotesState) {
+        guard !isTerminating else { return }
+        // Hide before invalidation so only the pane being presented reads.
+        historyState?.setVisible(month: false, day: false)
+        unfinishedState?.setVisible(false)
+        do {
+            if route != .today && historyState == nil { historyState = try state.makeHistoryState() }
+            if route == .unfinished && unfinishedState == nil { unfinishedState = try state.makeUnfinishedState() }
+            try historyState?.refresh(revision: state.historyRevision)
+            try unfinishedState?.refresh(revision: state.historyRevision)
+            browserIssue = nil
+        } catch { browserIssue = "Could not open task history. Try again." }
+        updateBrowserVisibility()
+    }
+
+    private func updateBrowserVisibility() {
+        historyState?.setVisible(month: isWindowVisible && route == .history,
+                                 day: isWindowVisible && route == .history)
+        unfinishedState?.setVisible(isWindowVisible && route == .unfinished)
+    }
+
+    func stopForTermination() {
+        isTerminating = true
+        isWindowVisible = false
+        updateBrowserVisibility()
+    }
+
     struct DeletionTarget {
         let id: UUID
         let dayKey: String
@@ -36,13 +131,13 @@ final class TaskWindowPresentation {
 
     /// Also false while the category manager is open, so no task command acts behind it.
     func canAddTask(state: DailyNotesState) -> Bool {
-        state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil &&
+        !isTerminating && state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil &&
             !isManagingCategories
     }
 
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
-        guard canAddTask(state: state) else { return false }
+        guard canAddTask(state: state), showToday(state: state) else { return false }
         newTaskRequestID = UUID()
         return true
     }
@@ -50,7 +145,7 @@ final class TaskWindowPresentation {
     func consumeNewTaskRequest() { newTaskRequestID = nil }
 
     func requestDeletion(id: UUID, state: DailyNotesState) {
-        guard !isManagingCategories else { return }
+        guard route == .today, !isManagingCategories, !isTerminating else { return }
         state.refreshIfDayChanged()
         guard state.availableProgress != nil,
               let note = state.notes.first(where: { $0.id == id }),
@@ -84,7 +179,7 @@ final class TaskWindowPresentation {
     /// The manager can open over a pending new-task draft, which it leaves
     /// alone, but not over an edit or a deletion confirmation.
     func canManageCategories(state: DailyNotesState) -> Bool {
-        state.availableCategories != nil && state.editingNoteID == nil && deletionTarget == nil
+        !isTerminating && route == .today && state.availableCategories != nil && state.editingNoteID == nil && deletionTarget == nil
     }
 
     @discardableResult
@@ -150,13 +245,14 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     static let minimumContentSize = NSSize(width: 600, height: 400)
     let state: DailyNotesState
     let presentation: TaskWindowPresentation
+    private var isTerminating = false
 
     init(state: DailyNotesState, onSettings: @escaping () -> Void) {
         self.state = state
         let presentation = TaskWindowPresentation()
         self.presentation = presentation
         let hostingController = NSHostingController(
-            rootView: TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
+            rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings)
         )
         hostingController.sizingOptions = []
         let window = NSWindow(
@@ -174,6 +270,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
+        refreshBrowserAndObserve()
     }
 
     @available(*, unavailable)
@@ -182,15 +279,33 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func showTasks() {
-        guard let window else { return }
+        guard !isTerminating, let window else { return }
         state.windowWillOpen()
+        guard presentation.showToday(state: state) else { return }
+        presentation.setWindowVisible(true, state: state)
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.contentMinSize = Self.minimumContentSize
     }
 
+    private func refreshBrowserAndObserve() {
+        guard !isTerminating else { return }
+        _ = withObservationTracking {
+            state.historyRevision
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.refreshBrowserAndObserve() }
+        }
+        presentation.refreshBrowser(state: state)
+    }
+
+    func stopForTermination() {
+        isTerminating = true
+        presentation.stopForTermination()
+    }
+
     func windowWillClose(_ notification: Notification) {
+        presentation.setWindowVisible(false, state: state)
         presentation.cancelDeletion()
         presentation.dismissCategoryManager()
     }

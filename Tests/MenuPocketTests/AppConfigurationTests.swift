@@ -18,6 +18,165 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testBrowserRoutesRetainDraftsAndBlockEditingDeletionAndManager() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        let presentation = controller.presentation
+        fixture.state.draft = "Pending Today draft"
+        XCTAssertFalse(fixture.state.addDraft())
+        XCTAssertEqual(fixture.state.issue, .add)
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        XCTAssertEqual(presentation.route, .history)
+        XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
+        XCTAssertEqual(presentation.route, .unfinished)
+        presentation.backToHistory(state: fixture.state)
+        XCTAssertTrue(presentation.showToday(state: fixture.state))
+        XCTAssertEqual(fixture.state.draft, "Pending Today draft")
+        XCTAssertEqual(fixture.state.issue, .add)
+        XCTAssertTrue(controller.window === window)
+        fixture.repository.allowAdd = true
+        XCTAssertTrue(fixture.state.addDraft())
+        let note = try XCTUnwrap(fixture.state.notes.first)
+        fixture.state.beginEditing(id: note.id)
+        for entry in [TaskWindowPresentation.HistoryEntry.calendar, .yesterday] {
+            XCTAssertFalse(presentation.showHistory(state: fixture.state, entry: entry))
+        }
+        fixture.state.cancelEditing()
+        presentation.requestDeletion(id: note.id, state: fixture.state)
+        XCTAssertFalse(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state, entry: .yesterday))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state, entry: .yesterday))
+        presentation.dismissCategoryManager()
+        XCTAssertTrue(presentation.showHistory(state: fixture.state, entry: .yesterday))
+        XCTAssertEqual(presentation.historyState?.selectedDay, try fixture.state.yesterdayForHistory())
+        XCTAssertEqual(presentation.historyState?.filter, .unfinished)
+    }
+
+    @MainActor
+    func testBrowserNativeTodayCommandsWindowReuseAndTermination() async throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        fixture.delegate.showTasks()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        let presentation = controller.presentation
+        fixture.state.draft = "Keep category and text"
+        let category = try XCTUnwrap(fixture.state.createCategory(name: "Work"))
+        fixture.state.draftCategoryID = category.id
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
+        fixture.delegate.showSettings()
+        XCTAssertEqual(presentation.route, .unfinished)
+        window.close()
+        fixture.delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true)
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertTrue(controller.window === window)
+        XCTAssertEqual(fixture.state.draftCategoryID, category.id)
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        fixture.delegate.addTask()
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertNotNil(presentation.newTaskRequestID)
+        XCTAssertEqual(fixture.state.draft, "Keep category and text")
+        XCTAssertTrue(fixture.state.notes.isEmpty)
+        presentation.consumeNewTaskRequest()
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        let revision = fixture.state.historyRevision
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        fixture.delegate.showTasks()
+        controller.showTasks()
+        presentation.refreshBrowser(state: fixture.state)
+        XCTAssertFalse(presentation.showToday(state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(presentation.requestNewTask(state: fixture.state))
+        XCTAssertFalse(window.isVisible)
+        XCTAssertEqual(fixture.state.historyRevision, revision)
+    }
+
+    @MainActor
+    func testBrowserRetainsMountedComposerAndScrollThroughNativeAddCommand() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.repository.saved = (1...60).map {
+            Note(id: UUID(), text: "Retained row \($0)", dayKey: NoteDay().keys().today,
+                 createdAt: Date(timeIntervalSince1970: 1_790_000_000), completedAt: nil)
+        }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let editor = try await focusedEditor(in: window)
+        editor.insertText("Mounted composer draft", replacementRange: NSRange(location: 0, length: 0))
+        func taskScroll(in view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, (scroll.documentView?.frame.height ?? 0) > 800 { return scroll }
+            return view.subviews.lazy.compactMap { taskScroll(in: $0) }.first
+        }
+        let scroll = try XCTUnwrap(taskScroll(in: XCTUnwrap(window.contentView)))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 650))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        let originalOffset = scroll.contentView.bounds.origin.y
+        XCTAssertGreaterThan(originalOffset, 100)
+        XCTAssertTrue(controller.presentation.showHistory(state: fixture.state))
+        XCTAssertTrue(controller.presentation.showUnfinished(state: fixture.state))
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertTrue(controller.presentation.showToday(state: fixture.state))
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(scroll.contentView.bounds.origin.y, originalOffset, accuracy: 1)
+        XCTAssertEqual(fixture.state.draft, "Mounted composer draft")
+        XCTAssertTrue(controller.presentation.showHistory(state: fixture.state))
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let restoredEditor = try await focusedEditor(in: window)
+        XCTAssertTrue(editor === restoredEditor)
+        XCTAssertEqual(restoredEditor.string, "Mounted composer draft")
+        XCTAssertEqual(controller.presentation.route, .today)
+        XCTAssertEqual(fixture.repository.saved.count, 60)
+    }
+
+    @MainActor
+    func testBrowserRefreshVisibilityAndMissingScrollAnchorFallback() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        let category = try XCTUnwrap(fixture.state.createCategory(name: "Removed group"))
+        presentation.todayScrollAnchor = TaskGroupID(categoryID: category.id)
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        let history = try XCTUnwrap(presentation.historyState)
+        XCTAssertNotNil(history.monthSummaries)
+        controller.window?.close()
+        fixture.state.refresh()
+        // Observation forwards settled revisions while the retained window is hidden.
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertTrue(history.monthDirty)
+        XCTAssertNil(history.monthSummaries)
+        XCTAssertTrue(fixture.state.removeCategory(id: category.id))
+        controller.showTasks()
+        XCTAssertEqual(presentation.todayScrollAnchor, fixture.state.groups.first?.id)
+        XCTAssertNotNil(presentation.todayScrollRestoreID)
+        XCTAssertTrue(history.monthDirty)
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(history.monthDirty)
+        XCTAssertNotNil(history.monthSummaries)
+        XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
+        let unfinished = try XCTUnwrap(presentation.unfinishedState)
+        let generation = unfinished.generation
+        fixture.state.refresh()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertGreaterThan(unfinished.generation, generation)
+        XCTAssertFalse(unfinished.dirty)
+        XCTAssertTrue(history.monthDirty)
+    }
+
+    @MainActor
     func testTaskWindowReusesWindowAndStateAcrossCloseMinimizeAndDockReopen() async throws {
         let suite = "local.menupocket.tests.TaskWindow.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -35,7 +194,7 @@ final class AppConfigurationTests: XCTestCase {
             window.close()
             delegate.settingsWindowController?.window?.close()
         }
-        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskWindowView>)
+        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskBrowserView>)
         XCTAssertTrue(host.rootView.state === state)
         XCTAssertTrue(controller.state === state)
         XCTAssertFalse(window.isReleasedWhenClosed)

@@ -41,7 +41,7 @@ All app-owned visible and accessibility copy is English, including dates indepen
 
 ## Category contract
 
-Each task belongs to zero or one custom category. General is the built-in fallback for no association (`categoryID == nil`), never a saved category row, and cannot be renamed or removed. Categories are shared across days; task day assignments and yesterday's unfinished count do not change. Categories introduce no carryover or history browsing.
+Each task belongs to zero or one custom category. General is the built-in fallback for no association (`categoryID == nil`), never a saved category row, and cannot be renamed or removed. Categories are shared across days; task day assignments and yesterday's unfinished count do not change. Categories introduce no carryover; the History navigation shell uses the current catalog without changing category preferences.
 
 Custom categories have stable identities and creation order independent of their names. Names are trimmed, nonblank, single-line, and unique under canonical Unicode normalization and case-insensitive comparison with a fixed locale; accents remain significant. General is reserved under that comparison. There is no arbitrary name-length limit; the interface must keep the full name accessible and essential controls usable.
 
@@ -94,3 +94,9 @@ Soft Focus presentation is complete for its UI-only scope. The [2026-10-04 integ
 The earlier MVP used an icon-only `MenuBarExtra` and compact daily checklist. Its CRUD, failure recovery, SQLite preservation, English copy, Settings, and local-only scope remain the baseline. The desktop task contract supersedes its completion-based ordering, compact-panel, icon-only label, and Settings-first explicit-launch presentation.
 
 The original [Notes MVP regression](NOTES_MVP_REGRESSION.md) and [Notes MVP acceptance](NOTES_MVP_ACCEPTANCE.md) retain their dated results and automation limitations. They do not establish acceptance of the desktop window or native status item. Detailed local plans are linked from the [documentation index](index.md).
+
+## History navigation shell — implemented 2026-10-06
+
+A calendar button beside Today's date opens a History placeholder in the same retained task window, with a visible heading and Back to Today. Unfinished is a child placeholder reached inside History; Back to History/Today stays in that window. The yesterday entry routes to exactly yesterday with the Unfinished filter. Full historical day/month browsing, filters, unfinished pagination, and the calendar grid remain planned.
+
+New-task draft text/category/error, composer visibility, and Today scroll position survive child visits within the process. Editing, deletion confirmation, and category management block calendar/yesterday navigation. Native Show Tasks/menu bar/Dock/explicit launch/Command-N routes target Today; History selection does not affect Today writes or menu-bar progress. No app-wide tabs, additional task windows, schema changes, or new saved preferences are added. Relaunch does not promise persistence of unsaved drafts or browser selection.

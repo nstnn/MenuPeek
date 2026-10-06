@@ -162,6 +162,17 @@ final class DailyNotesState {
         observers.append((center, token))
     }
 
+    /// Browser projections share this authority's civil clock and read facade.
+    func yesterdayForHistory() throws -> GregorianDay { try day.historyKeys().yesterday }
+
+    func makeHistoryState() throws -> TaskHistoryState {
+        try TaskHistoryState(dailyState: self, noteDay: day)
+    }
+
+    func makeUnfinishedState() throws -> UnfinishedTasksState {
+        try UnfinishedTasksState(dailyState: self, noteDay: day)
+    }
+
     // App lifecycle consumers can refresh without creating a view.
     func startup() { refresh() }
     func windowWillOpen() { refresh() }
