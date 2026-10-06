@@ -2299,6 +2299,131 @@ final class DailyNotesStateTests: XCTestCase {
         finalState.stopForTermination()
     }
 
+    func testIntegratedChangedDataReopenPreservesBothTablesAndScopedPreferences() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LaterIntegratedReopen-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let defaults = isolatedDefaults()
+        var appPreferences = AppPreferences.defaultValue
+        appPreferences.theme = .dark
+        appPreferences.quickAddEnabled = true
+        let preferencesBytes = try JSONEncoder().encode(appPreferences)
+        defaults.set(preferencesBytes, forKey: PreferencesStore.storageKey)
+        defaults.set(true, forKey: UserDefaultsOnboardingStore.storageKey)
+        let current = instant("2026-10-06T12:00:00-04:00")
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { current }), notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
+        }
+        // Read rowids as well as every saved field, independently of state snapshots.
+        func rows(_ table: String) throws -> [[String?]] {
+            var connection: OpaquePointer?
+            XCTAssertEqual(sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+            let database = try XCTUnwrap(connection)
+            defer { sqlite3_close(database) }
+            var prepared: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(database, "SELECT rowid, * FROM \(table) ORDER BY rowid",
+                                              -1, &prepared, nil), SQLITE_OK)
+            let statement = try XCTUnwrap(prepared)
+            defer { sqlite3_finalize(statement) }
+            var result: [[String?]] = []
+            var step = sqlite3_step(statement)
+            while step == SQLITE_ROW {
+                result.append((0..<sqlite3_column_count(statement)).map {
+                    sqlite3_column_text(statement, $0).map { String(cString: $0) }
+                })
+                step = sqlite3_step(statement)
+            }
+            XCTAssertEqual(step, SQLITE_DONE)
+            return result
+        }
+        let state = makeState()
+        defer { state.stopForTermination() }
+        state.startup()
+        let work = try XCTUnwrap(state.createCategory(name: "Work"))
+        let personal = try XCTUnwrap(state.createCategory(name: "Personal"))
+        let history = Note(id: UUID(), text: "Saved history", dayKey: "2026-10-05",
+                           createdAt: Date(timeIntervalSince1970: 10),
+                           completedAt: Date(timeIntervalSince1970: 20), categoryID: work.id)
+        do {
+            let repository = try SQLiteNoteRepository(databaseURL: url)
+            try repository.add(history)
+        }
+        state.draft = "Existing Today"
+        state.draftCategoryID = personal.id
+        XCTAssertTrue(state.addDraft())
+        let todayBefore = try rows("notes")
+        state.categoryPreferences.setCollapsed(true, for: .general, in: .today)
+        let todayChoice = defaults.object(forKey: TaskCategoryPreferences.lastUsedCategoryIDKey) as? String
+        let todayCollapse = defaults.object(forKey: TaskCategoryPreferences.collapsedGroupIDsKey) as? [String]
+        state.laterDraft = "Complete and edit"
+        state.laterDraftCategoryID = work.id
+        XCTAssertTrue(state.addLaterDraft())
+        let completed = try XCTUnwrap(state.laterTasks.first)
+        state.laterDraft = "Move once"
+        state.laterDraftCategoryID = personal.id
+        XCTAssertTrue(state.addLaterDraft())
+        let moved = try XCTUnwrap(state.laterTasks.last)
+        state.laterDraft = "Keep in Later"
+        state.laterDraftCategoryID = work.id
+        XCTAssertTrue(state.addLaterDraft())
+        let retained = try XCTUnwrap(state.laterTasks.last)
+        XCTAssertTrue(state.setLaterCompleted(id: completed.id, completed: true))
+        state.beginEditingLater(id: completed.id)
+        state.laterEditDraft = "Edited ' task 📝"
+        XCTAssertTrue(state.saveLaterEdit())
+        XCTAssertEqual(try rows("notes"), todayBefore)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+        XCTAssertTrue(state.moveLaterToToday(id: moved.id))
+        XCTAssertFalse(state.moveLaterToToday(id: moved.id))
+        XCTAssertEqual(state.notes.last?.id, moved.id)
+        XCTAssertEqual(state.notes.last?.createdAt, moved.createdAt)
+        XCTAssertEqual(state.notes.last?.dayKey, "2026-10-06")
+        XCTAssertNotNil(state.renameCategory(id: personal.id, name: "Home"))
+        XCTAssertEqual(state.categoryUsageCount(id: work.id), 3)
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertEqual(state.laterTasks, [
+            LaterTask(id: completed.id, text: "Edited ' task 📝", createdAt: completed.createdAt,
+                      completedAt: current),
+            LaterTask(id: retained.id, text: retained.text, createdAt: retained.createdAt, completedAt: nil)
+        ])
+        XCTAssertEqual(state.categories.map(\.name), ["Home"])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
+        XCTAssertEqual(state.availableLaterRemainingCount, 1)
+        // Shared removal only clears assignments; history metadata and rowids survive.
+        XCTAssertEqual(try rows("notes").map { Array($0.prefix(6)) }.prefix(2),
+                       todayBefore.map { Array($0.prefix(6)) }.prefix(2))
+        XCTAssertNil(try rows("notes").first?.last ?? nil)
+        let notesAfter = try rows("notes")
+        let laterAfter = try rows("later_tasks")
+        let categoriesAfter = try rows("categories")
+        let defaultsAfter = defaults.dictionaryRepresentation() as NSDictionary
+        let savedToday = state.notes
+        let savedLater = state.laterTasks
+        state.stopForTermination()
+
+        // Fresh connection and preference owner; no seed runs on reopen.
+        let reopened = makeState()
+        defer { reopened.stopForTermination() }
+        reopened.startup()
+        XCTAssertEqual(reopened.notes, savedToday)
+        XCTAssertEqual(reopened.laterTasks, savedLater)
+        XCTAssertEqual(reopened.categories.map(\.name), ["Home"])
+        XCTAssertEqual(try rows("notes"), notesAfter)
+        XCTAssertEqual(try rows("later_tasks"), laterAfter)
+        XCTAssertEqual(try rows("categories"), categoriesAfter)
+        XCTAssertEqual(defaults.dictionaryRepresentation() as NSDictionary, defaultsAfter)
+        XCTAssertEqual(defaults.data(forKey: PreferencesStore.storageKey), preferencesBytes)
+        XCTAssertTrue(defaults.bool(forKey: UserDefaultsOnboardingStore.storageKey))
+        XCTAssertEqual(defaults.string(forKey: TaskCategoryPreferences.lastUsedCategoryIDKey), todayChoice)
+        XCTAssertEqual(defaults.stringArray(forKey: TaskCategoryPreferences.collapsedGroupIDsKey), todayCollapse)
+        XCTAssertEqual(reopened.categoryPreferences.lastUsedCategoryID, personal.id)
+        XCTAssertNil(reopened.categoryPreferences.laterLastUsedCategoryID)
+    }
+
     func testLaterReadFailureDoesNotInvalidateTodayOrMenuBarProgress() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 0)
         let today = note("Today note", day: "2026-09-27", createdAt: 1)

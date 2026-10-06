@@ -59,6 +59,7 @@ struct TaskWindowView: View {
 
     private enum FocusControl: Hashable {
         case add, manageCategories, settings, retry, save, draft, category, cancelDelete, confirmDelete
+        case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
         case actions(UUID)
@@ -79,6 +80,12 @@ struct TaskWindowView: View {
     @FocusState private var focusedControl: FocusControl?
     @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Add and inline Edit mount different native fields. Separate focus values
+    /// ensure replacing one field also requests focus for the other.
+    private var textFocusControl: FocusControl {
+        editingID.map(FocusControl.edit) ?? .draft
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -676,7 +683,7 @@ struct TaskWindowView: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel(editingID == nil ? "New task" : "Edit task")
                 .accessibilityIdentifier(isLater ? (editingID == nil ? "newLaterTaskDraft" : "editLaterTaskDraft") : (editingID == nil ? "newTaskDraft" : "editTaskDraft"))
-                .focused($focusedControl, equals: .draft)
+                .focused($focusedControl, equals: textFocusControl)
                 .onSubmit(saveDraft)
                 .onExitCommand(perform: cancelDraft)
             HStack(spacing: 12) {
@@ -848,7 +855,7 @@ struct TaskWindowView: View {
         Task { @MainActor in
             await Task.yield()
             guard focusRequestID == requestID else { return }
-            focusedControl = .draft
+            focusedControl = textFocusControl
         }
     }
 
