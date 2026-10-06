@@ -105,7 +105,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-27"), 2)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
         XCTAssertEqual(Array(try legacyRows().prefix(before.count)), before)
-        XCTAssertEqual(try schemaVersion(), 3)
+        XCTAssertEqual(try schemaVersion(), 4)
         XCTAssertEqual(try laterRows(), [])
     }
 
@@ -114,17 +114,17 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             """
             CREATE TABLE future_data (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
             INSERT INTO future_data VALUES (1, 'Preserve unknown future data 📝');
-            PRAGMA user_version = 4;
+            PRAGMA user_version = 5;
             """
         )
         let originalBytes = try Data(contentsOf: databaseURL)
 
         XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
-            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(4) = error else {
+            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(5) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
         }
-        XCTAssertEqual(try schemaVersion(), 4)
+        XCTAssertEqual(try schemaVersion(), 5)
         XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
     }
 
@@ -133,7 +133,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         let yesterday = note("Yesterday", day: "2026-09-26", createdAt: 20)
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-            XCTAssertEqual(try schemaVersion(), 3)
+            XCTAssertEqual(try schemaVersion(), 4)
             XCTAssertEqual(try rawRows("SELECT * FROM categories"), [])
             XCTAssertEqual(try laterRows(), [])
             try store.add(today)
@@ -197,7 +197,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
-    func testVersionThreeReopenDoesNotChangeSchemaDataOrDatabaseBytes() throws {
+    func testVersionFourReopenDoesNotChangeSchemaDataOrDatabaseBytes() throws {
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             try store.add(note("Keep 📝", day: "2026-09-27", createdAt: 10))
@@ -212,7 +212,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         for _ in 0..<2 {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             XCTAssertEqual(try store.notes(for: "2026-09-27").count, 1)
-            XCTAssertEqual(try schemaVersion(), 3)
+            XCTAssertEqual(try schemaVersion(), 4)
             XCTAssertEqual(try schemaSnapshot(), schema)
             XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
             XCTAssertEqual(try laterRows(), later)
@@ -230,13 +230,14 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
 
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-            XCTAssertEqual(try schemaVersion(), 3)
-            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes ORDER BY rowid"), rows)
             XCTAssertEqual(try rawRows("SELECT * FROM categories ORDER BY creation_order"), categories)
             XCTAssertEqual(try laterRows(), [])
-            // The upgrade only adds objects; every v2 table, index, and definition is unchanged.
+            // Category and existing index definitions survive; notes gains one column.
             let upgraded = try schemaSnapshot()
-            XCTAssertEqual(upgraded.filter { $0[2] != "later_tasks" }, schema)
+            XCTAssertEqual(upgraded.filter { $0[2] != "later_tasks" && $0[1] != "notes" && $0[1] != "notes_day_display_order_idx" },
+                           schema.filter { $0[1] != "notes" })
             XCTAssertEqual(upgraded.filter { $0[2] == "later_tasks" }.map { $0[1] },
                            ["later_tasks_category_id_idx", "sqlite_autoindex_later_tasks_1", "later_tasks"])
             XCTAssertEqual(try store.notes(for: "2026-09-27").map(\.categoryID), [work, nil])
@@ -246,12 +247,94 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
 
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
-        XCTAssertEqual(try schemaVersion(), 3)
-        XCTAssertEqual(Array(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid").prefix(rows.count)), rows)
+        XCTAssertEqual(try schemaVersion(), 4)
+        XCTAssertEqual(Array(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes ORDER BY rowid").prefix(rows.count)), rows)
         XCTAssertEqual(try reopened.notes(for: "2026-09-27").map(\.text),
                        ["Today ' quote 📝", "Today completed", "Added after upgrade"])
         XCTAssertEqual(try reopened.categories().map(\.name), ["Work", "School"])
         XCTAssertEqual(try laterRows(), [])
+    }
+
+    func testAllHistoricalVersionsBackfillEachDayAndPreserveUnrelatedData() throws {
+        for version in 0...3 {
+            if version == 3 { try seedVersionThree() }
+            else if version == 2 { try seedVersionTwo() }
+            else { try seedLegacy(version: version) }
+            // Interleave assigned days in rowid order; completion/categories already differ.
+            try executeRaw("UPDATE notes SET day_key = '2026-09-26' WHERE rowid = 21; UPDATE notes SET day_key = '2026-09-27' WHERE rowid = 35;")
+            let before = try legacyRows()
+            let categories = version >= 2 ? try rawRows("SELECT * FROM categories ORDER BY creation_order") : []
+            let later = version == 3 ? try laterRows() : []
+            do {
+                let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+                XCTAssertEqual(try schemaVersion(), 4)
+                XCTAssertEqual(try legacyRows(), before)
+                XCTAssertEqual(try rawRows("SELECT rowid, display_order FROM notes ORDER BY rowid"),
+                               [["7", "0"], ["21", "0"], ["35", "1"], ["80", "1"]])
+                XCTAssertEqual(try store.notes(for: "2026-09-27").map(\.text),
+                               ["Today ' quote 📝", "Yesterday unfinished"])
+                XCTAssertEqual(try rawRows("SELECT * FROM categories ORDER BY creation_order"), categories)
+                XCTAssertEqual(try laterRows(), later)
+            }
+            // Sparse committed ranks survive reopen without normalization.
+            try executeRaw("UPDATE notes SET display_order = display_order + 10")
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let bytes = try Data(contentsOf: databaseURL)
+            do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+    }
+
+    func testFailureAfterOrderingBackfillRollsBackAllVersionsAndRetries() throws {
+        for version in 0...3 {
+            if version == 3 { try seedVersionThree() }
+            else if version == 2 { try seedVersionTwo() }
+            else { try seedLegacy(version: version) }
+            // Index-name collision occurs after ALTER and backfill, before version advance.
+            try executeRaw("CREATE INDEX notes_day_display_order_idx ON notes(text)")
+            let schema = try schemaSnapshot()
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let later = version == 3 ? try laterRows() : []
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL))
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try schemaVersion(), version)
+            if version == 3 { XCTAssertEqual(try laterRows(), later) }
+            try executeRaw("DROP INDEX notes_day_display_order_idx")
+            do {
+                _ = try SQLiteNoteRepository(databaseURL: databaseURL)
+                XCTAssertEqual(try schemaVersion(), 4)
+                XCTAssertEqual(try legacyRows(), rows.map { Array($0.prefix(6)) })
+                XCTAssertEqual(try laterRows(), later)
+            }
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+    }
+
+    func testMalformedVersionFourOrderIsRefusedWithoutRepair() throws {
+        let cases = [
+            "UPDATE notes SET display_order = -1 WHERE rowid = 7",
+            "PRAGMA ignore_check_constraints = ON; UPDATE notes SET display_order = 0.5 WHERE rowid = 7",
+            "DROP INDEX notes_day_display_order_idx",
+            "DROP INDEX notes_day_display_order_idx; CREATE INDEX notes_day_display_order_idx ON notes(day_key, display_order)",
+            "DROP INDEX notes_day_display_order_idx; CREATE UNIQUE INDEX notes_day_display_order_idx ON notes(display_order, day_key)",
+            "DROP INDEX notes_day_display_order_idx; CREATE UNIQUE INDEX notes_day_display_order_idx ON notes(day_key, display_order) WHERE display_order >= 0",
+            "DROP INDEX notes_day_display_order_idx; UPDATE notes SET display_order = 0"
+        ]
+        for sql in cases {
+            try seedVersionThree()
+            do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+            try executeRaw(sql)
+            let bytes = try Data(contentsOf: databaseURL)
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL), sql)
+            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+            try FileManager.default.removeItem(at: databaseURL)
+        }
     }
 
     func testIncompatibleLegacySchemasAreRejectedWithoutChangingDatabase() throws {
@@ -366,7 +449,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
                 : [[nil], [nil], [nil], [nil]]
             do {
                 let retried = try SQLiteNoteRepository(databaseURL: databaseURL)
-                XCTAssertEqual(try schemaVersion(), 3)
+                XCTAssertEqual(try schemaVersion(), 4)
                 XCTAssertEqual(try legacyRows(), beforeRows.map { Array($0.prefix(6)) })
                 XCTAssertEqual(try retried.incompleteCount(for: "2026-09-27"), 1)
                 XCTAssertEqual(try retried.incompleteCount(for: "2026-09-26"), 1)
@@ -1064,6 +1147,25 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             UPDATE notes SET category_id = '\(Self.workCategoryID)'
                 WHERE id IN ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003');
             PRAGMA user_version = 2;
+            """
+        )
+    }
+
+    /// Independent historical v3 fixture, including categorized/completed Later rows.
+    private func seedVersionThree() throws {
+        try seedVersionTwo()
+        try executeRaw(
+            """
+            CREATE TABLE later_tasks (
+                id TEXT PRIMARY KEY NOT NULL, text TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL,
+                category_id TEXT DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL
+            );
+            CREATE INDEX later_tasks_category_id_idx ON later_tasks(category_id);
+            INSERT INTO later_tasks VALUES
+                ('00000000-0000-0000-0000-0000000000B1', 'Later work', 60, NULL, '\(Self.workCategoryID)'),
+                ('00000000-0000-0000-0000-0000000000B2', 'Later done', 70, 75, NULL);
+            PRAGMA user_version = 3;
             """
         )
     }

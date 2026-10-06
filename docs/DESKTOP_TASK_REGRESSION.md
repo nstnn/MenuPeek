@@ -596,3 +596,26 @@ The initial run also passed 13/13; the final run rebuilt a simplified preservati
 Cleanup: the only temporary app created was this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`. After both completed runs, no process was running from that path. It was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 13-57-36-795.app`, then unregistered again after LaunchServices re-registration was observed. Final LaunchServices dump contains neither original nor Trash path; Spotlight lists neither temporary copy. The pre-existing main-checkout Debug executable hash was identical before/after cleanup. Another session's Later worktree host was preserved. Cleanup evidence is in `build/task-movement-task1/cleanup.log`, `launchservices-after.txt`, `spotlight-after.txt`, and `main-app-before.txt`/`main-app-after.txt`.
 
 This is focused automated contract evidence. No SQL migration, repository move, persisted ordering, visible drag/menu behavior, full-suite, Release, remote CI, or native/system acceptance is claimed for Task 1.
+
+## Daily ordering migration — 2026-10-06
+
+Movement Task 2 introduces SQLite v4 in [SQLiteNoteRepository.swift](../MenuPocket/Notes/SQLiteNoteRepository.swift): additive integer `notes.display_order`, per-day rowid backfill, unique `notes_day_display_order_idx(day_key, display_order)`, and schema/integrity/order validation before advancing the version. Category/Later steps are guarded by their original versions. Fresh stores and independent historical v0/v1/v2/v3 fixtures verify preserved task fields/rowids, interleaved assigned days/categories, completion, category catalog and Later rows. Index-name failure after backfill proves schema/data/version rollback and safe retry for every historical version. Sparse ranks survive byte-identical reopen; future v5 and malformed indexes/noninteger/negative order are refused without repair.
+
+Minimal append allocation was pulled forward from Task 3 so repeated Add and Quick Add remain valid under the new unique index. It uses the existing write transaction; Int64 exhaustion throws without a write. Task 3 still owns ordered reads/runtime rank validation, overflow compaction and the persisted move command. Reads remain rowid ordered; no visible movement/state action or Later transfer was implemented.
+
+Source baseline: `feat/task-movement`, HEAD `801eb96bf1bc1b505444613e2fa50d8342b05a96`, initially clean tracked tree. Dirty executable inputs: repository and repository tests only. Xcode 27.0; macOS 26.6.2 (25G83), arm64. The shared-scheme Debug hosted run passed **92/92**, zero failures/skips: 33 `SQLiteNoteRepositoryTests`, 51 `DailyNotesStateTests`, 8 `QuickAddPanelTests`.
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+Result: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.06_14-12-00--0400.xcresult`. Logs, summary, source/artifact hashes and cleanup evidence: `build/task-movement-task2/`. Initial sandboxed invocation failed in Xcode macro/test services; the authorized invocation above passed. Repository SHA-256: `f691b4f0da2fedfd140827f224de0137385223b76e255ab70a4757bfb1b9a0ca`; tests: `5ac0bc0dd5ab5a17f649f8256d956b609522fd0955538733bf620c7de51d34e3`. Host executable: `b08651d19c51aeaca3058f0e91f37ddc3839a7b8192c72563f834389b5afac75`; Debug dylib: `715b51f4fe966128540b9aca4ae3ac1e3f92452b1fa70485ce5339ed6b632d1d`. Diff whitespace check passed.
+
+Cleanup: no test host process remained after testing. The only created temporary app, this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`, was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 14-12-44-475.app`. Following automatic Trash-path re-registration it was unregistered again; final LaunchServices dump contains neither path, Spotlight contains neither temporary copy, and the original bundle is absent. Main-checkout Debug executable hash remained `8ee2320cf524a802568da6aad47209d84a7cf3d9e18ddce406e0a54caf3a1c67` before/after.
+
+This establishes isolated migration and focused regression evidence. No production database upgrade/launch, native movement interaction, oldest-OS run, full suite, Release, remote CI, or system acceptance was performed.

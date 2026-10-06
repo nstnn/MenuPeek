@@ -15,7 +15,7 @@ enum SQLiteNoteStoreError: Error {
 /// One connection to the app's local notes database. SQLite stores dates as
 /// seconds since the Unix epoch and keeps the assigned local day separately.
 final class SQLiteNoteRepository: NoteRepository {
-    static let schemaVersion = 3
+    static let schemaVersion = 4
 
     private let database: OpaquePointer
 
@@ -172,8 +172,22 @@ final class SQLiteNoteRepository: NoteRepository {
     func add(_ note: Note) throws {
         try transaction {
             if let id = note.categoryID { _ = try requireCategory(id) }
+            // The v4 unique index requires every existing add route to allocate a rank.
+            // Overflow compaction and explicit movement are implemented in TASK-003.
+            let orderStatement = try prepare("SELECT MAX(display_order) FROM notes WHERE day_key = ?")
+            defer { sqlite3_finalize(orderStatement) }
+            try bind(note.dayKey, at: 1, to: orderStatement)
+            try check(sqlite3_step(orderStatement), expected: SQLITE_ROW, operation: "read daily order")
+            var order: Int64 = 0
+            if sqlite3_column_type(orderStatement, 0) != SQLITE_NULL {
+                let next = sqlite3_column_int64(orderStatement, 0).addingReportingOverflow(1)
+                guard !next.overflow else {
+                    throw SQLiteNoteStoreError.incompatibleSchema("Daily display order exhausted")
+                }
+                order = next.partialValue
+            }
             let statement = try prepare(
-                "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id) VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id, display_order) VALUES (?, ?, ?, ?, ?, ?, ?)"
             )
             defer { sqlite3_finalize(statement) }
 
@@ -187,6 +201,7 @@ final class SQLiteNoteRepository: NoteRepository {
             } ?? sqlite3_bind_null(statement, 5)
             try check(completedResult, operation: "bind completed_at")
             try bindCategoryID(note.categoryID, at: 6, to: statement)
+            try check(sqlite3_bind_int64(statement, 7, order), operation: "bind display_order")
             try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "insert note")
         }
     }
@@ -508,7 +523,7 @@ final class SQLiteNoteRepository: NoteRepository {
         if !isFresh {
             let expected: [[String?]]
             switch version {
-            case 3: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
+            case 3, 4: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
             case 2: expected = [["table", "categories"], ["table", "notes"]]
             default: expected = [["table", "notes"]]
             }
@@ -529,7 +544,8 @@ final class SQLiteNoteRepository: NoteRepository {
             if version < 2 {
                 try addCategories(toFreshStore: isFresh, in: database)
             }
-            try addLaterTasks(in: database)
+            if version < 3 { try addLaterTasks(in: database) }
+            try addDisplayOrder(in: database)
             try validateSchema(version: schemaVersion, in: database)
             try validateIntegrity(in: database)
             try execute("PRAGMA user_version = \(schemaVersion)", in: database)
@@ -594,6 +610,55 @@ final class SQLiteNoteRepository: NoteRepository {
         try execute("CREATE INDEX later_tasks_category_id_idx ON later_tasks(category_id)", in: database)
     }
 
+    /// Additive v4 migration: preserve rowids and rank each assigned day independently.
+    private static func addDisplayOrder(in database: OpaquePointer) throws {
+        try execute(
+            "ALTER TABLE notes ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0 CHECK(typeof(display_order) = 'integer')",
+            in: database
+        )
+        try execute(
+            """
+            WITH ranks AS (
+                SELECT rowid AS note_rowid,
+                       ROW_NUMBER() OVER (PARTITION BY day_key ORDER BY rowid) - 1 AS rank
+                FROM notes
+            )
+            UPDATE notes SET display_order = (
+                SELECT rank FROM ranks WHERE note_rowid = notes.rowid
+            )
+            """, in: database
+        )
+        try execute("CREATE UNIQUE INDEX notes_day_display_order_idx ON notes(day_key, display_order)",
+                    in: database)
+    }
+
+    private static func validateDisplayOrder(in database: OpaquePointer) throws {
+        let indexes = try schemaRows("PRAGMA index_list(notes)", in: database)
+        guard let index = indexes.first(where: { $0[1] == "notes_day_display_order_idx" }),
+              index[2] == "1", index[4] == "0",
+              try schemaRows(
+                "SELECT name, desc, coll FROM pragma_index_xinfo('notes_day_display_order_idx') WHERE key = 1 ORDER BY seqno",
+                in: database
+              ) == [["day_key", "0", "BINARY"], ["display_order", "0", "BINARY"]] else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Unexpected daily ordering index")
+        }
+        let definitions = try schemaRows("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes'",
+                                         in: database)
+        let definition = definitions.first?.first.flatMap { $0 } ?? ""
+        let compact = definition.lowercased().filter { !$0.isWhitespace }
+        guard compact.contains("check(typeof(display_order)='integer')"),
+              try schemaRows(
+                "SELECT 1 FROM notes WHERE typeof(display_order) != 'integer' OR display_order < 0 LIMIT 1",
+                in: database
+              ).isEmpty,
+              try schemaRows(
+                "SELECT 1 FROM notes GROUP BY day_key, display_order HAVING COUNT(*) > 1 LIMIT 1",
+                in: database
+              ).isEmpty else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Invalid daily display order")
+        }
+    }
+
     private static func validateSchema(version: Int, in database: OpaquePointer) throws {
         // Defaults, nullability, primary keys, and hidden/generated columns are part
         // of the known format. Do not interpret an unknown v0 file as an empty store.
@@ -611,7 +676,11 @@ final class SQLiteNoteRepository: NoteRepository {
         if hasCategories {
             noteColumns.append(["category_id", "TEXT", "0", "NULL", "0", "0"])
         }
+        if version >= 4 {
+            noteColumns.append(["display_order", "INTEGER", "1", "0", "0", "0"])
+        }
         try validateColumns("notes", expected: noteColumns, in: database)
+        if version >= 4 { try validateDisplayOrder(in: database) }
         try validateRowidTable("notes", in: database)
         try validateIndex("notes_day_key_idx", table: "notes", column: "day_key",
                           required: hasCategories, in: database)
