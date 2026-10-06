@@ -7,9 +7,10 @@ import XCTest
 /// TaskWindowPresentation projections → HistoryMonthGrid cells.
 @MainActor
 final class TaskHistoryIntegrationTests: XCTestCase {
-    private var directory: URL!
-    private var suite: String!
-    private var defaults: UserDefaults!
+    // XCTest calls setUp/tearDown outside the main actor.
+    nonisolated(unsafe) private var directory: URL!
+    nonisolated(unsafe) private var suite: String!
+    nonisolated(unsafe) private var defaults: UserDefaults!
     private final class Clock { var now = "2026-10-06T12:00:00Z" }
     private let clock = Clock()
     private var databaseURL: URL { directory.appendingPathComponent("notes.sqlite") }
