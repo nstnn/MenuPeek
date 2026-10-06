@@ -59,6 +59,66 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testUnfinishedIndexOpensFilteredDayDetailAndKeepsPagesOnReturn() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let today = NoteDay().keys().today
+        let created = Date(timeIntervalSince1970: 1_790_000_000)
+        func note(_ text: String, _ dayKey: String, done: Bool) -> Note {
+            Note(id: UUID(), text: text, dayKey: dayKey, createdAt: created, completedAt: done ? created : nil)
+        }
+        fixture.repository.saved = [
+            note("Old open", "2025-01-15", done: false), note("Old done", "2025-01-15", done: true),
+            note("Old second", "2025-01-15", done: true), note("Finished day", "2025-02-03", done: true),
+            note("Today open", today, done: false),
+        ]
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController).presentation
+        fixture.state.draft = "Keep this draft"
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
+        let unfinished = try XCTUnwrap(presentation.unfinishedState)
+        // Only past days with unfinished work, whole-day counts, Today excluded.
+        XCTAssertEqual(unfinished.summaries?.map(\.dayKey), ["2025-01-15"])
+        XCTAssertEqual(unfinished.summaries?.first?.progress, NoteProgress(completed: 2, total: 3))
+        XCTAssertFalse(presentation.showUnfinishedDay(try GregorianDay(key: today), state: fixture.state))
+        XCTAssertFalse(presentation.showUnfinishedDay(try GregorianDay(key: "2025-02-03"), state: fixture.state))
+        XCTAssertEqual(presentation.route, .unfinished)
+
+        let generation = unfinished.generation
+        let day = try GregorianDay(key: "2025-01-15")
+        XCTAssertTrue(presentation.showUnfinishedDay(day, state: fixture.state))
+        XCTAssertEqual(presentation.route, .unfinishedDay)
+        let history = try XCTUnwrap(presentation.historyState)
+        XCTAssertEqual(history.selectedDay, day)
+        XCTAssertEqual(history.filter, .unfinished)
+        XCTAssertEqual(history.progress, NoteProgress(completed: 2, total: 3))
+        XCTAssertEqual(history.detailGroups.flatMap(\.visibleNotes).map(\.text), ["Old open"])
+        XCTAssertNil(unfinished.selectionIssue)
+
+        presentation.backToUnfinished(state: fixture.state)
+        XCTAssertEqual(presentation.route, .unfinished)
+        XCTAssertEqual(unfinished.generation, generation)
+        XCTAssertEqual(unfinished.summaries?.map(\.dayKey), ["2025-01-15"])
+
+        // A saved change while viewing the day resets the index and explains it.
+        XCTAssertTrue(presentation.showUnfinishedDay(day, state: fixture.state))
+        fixture.repository.saved[0] = note("Old open", "2025-01-15", done: true)
+        fixture.state.refresh()
+        presentation.refreshBrowser(state: fixture.state)
+        XCTAssertEqual(history.progress, NoteProgress(completed: 3, total: 3))
+        XCTAssertEqual(unfinished.selectionIssue, .noUnfinishedTasks)
+        XCTAssertGreaterThan(unfinished.generation, generation)
+        presentation.backToUnfinished(state: fixture.state)
+        XCTAssertEqual(unfinished.summaries, [])
+        presentation.backToHistory(state: fixture.state)
+        XCTAssertEqual(presentation.route, .history)
+        XCTAssertTrue(presentation.showToday(state: fixture.state))
+        XCTAssertEqual(fixture.state.draft, "Keep this draft")
+        XCTAssertEqual(fixture.state.todayKey, today)
+    }
+
+    @MainActor
     func testBrowserNativeTodayCommandsWindowReuseAndTermination() async throws {
         let fixture = try AppLifecycleFixture(context: .login)
         defer { fixture.cleanup() }

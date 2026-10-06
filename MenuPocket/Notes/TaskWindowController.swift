@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class TaskWindowPresentation {
-    enum Route { case today, history, unfinished }
+    enum Route { case today, history, unfinished, unfinishedDay }
     enum HistoryEntry { case calendar, yesterday }
 
     private(set) var route: Route = .today
@@ -50,6 +50,25 @@ final class TaskWindowPresentation {
         refreshBrowser(state: state)
     }
 
+    /// Opens the shared read-only detail at an indexed day with the Unfinished
+    /// filter. The index keeps its loaded pages for Back to Unfinished.
+    @discardableResult
+    func showUnfinishedDay(_ day: GregorianDay, state: DailyNotesState) -> Bool {
+        guard route == .unfinished, !isTerminating, let historyState,
+              unfinishedState?.select(day) != nil else { return false }
+        do { try historyState.select(day, filter: .unfinished) }
+        catch { return false }
+        route = .unfinishedDay
+        refreshBrowser(state: state)
+        return true
+    }
+
+    func backToUnfinished(state: DailyNotesState) {
+        guard route == .unfinishedDay, !isTerminating else { return }
+        route = .unfinished
+        refreshBrowser(state: state)
+    }
+
     @discardableResult
     func showToday(state: DailyNotesState) -> Bool {
         guard !isTerminating else { return false }
@@ -80,7 +99,7 @@ final class TaskWindowPresentation {
         unfinishedState?.setVisible(false)
         do {
             if route != .today && historyState == nil { historyState = try state.makeHistoryState() }
-            if route == .unfinished && unfinishedState == nil { unfinishedState = try state.makeUnfinishedState() }
+            if (route == .unfinished || route == .unfinishedDay) && unfinishedState == nil { unfinishedState = try state.makeUnfinishedState() }
             try historyState?.refresh(revision: state.historyRevision)
             try unfinishedState?.refresh(revision: state.historyRevision)
             browserIssue = nil
@@ -90,8 +109,18 @@ final class TaskWindowPresentation {
 
     private func updateBrowserVisibility() {
         historyState?.setVisible(month: isWindowVisible && route == .history,
-                                 day: isWindowVisible && route == .history)
+                                 day: isWindowVisible && (route == .history || route == .unfinishedDay))
         unfinishedState?.setVisible(isWindowVisible && route == .unfinished)
+        reconcileUnfinishedSelection()
+    }
+
+    /// The selected day's full snapshot tells the index whether that day still
+    /// holds unfinished work. Uses the current generation after any refresh.
+    private func reconcileUnfinishedSelection() {
+        guard route == .unfinishedDay, let unfinishedState, let day = unfinishedState.selectedDay,
+              let snapshot = historyState?.daySnapshot, snapshot.summary.day == day else { return }
+        unfinishedState.reconcileSelection(UnfinishedDaySelection(day: day, generation: unfinishedState.generation),
+                                           snapshot: snapshot)
     }
 
     func stopForTermination() {
