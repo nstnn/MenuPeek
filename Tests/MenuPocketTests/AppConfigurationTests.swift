@@ -1179,6 +1179,18 @@ private final class TaskWindowReadFixture: NoteRepository {
         return try HistoryDaySnapshot(dayKey: dayKey, notes: notes(for: dayKey), categories: catalog)
     }
 
+    func unfinishedDayPage(before: GregorianDay, limit: Int) throws -> UnfinishedDayPage {
+        guard limit > 0, limit < Int.max else { throw TaskHistoryDomainError.invalidPage }
+        if failRead { throw CocoaError(.fileReadUnknown) }
+        let notes = try saved.filter { try GregorianDay(key: $0.dayKey) < before }
+        let summaries = try Dictionary(grouping: notes, by: \.dayKey).keys.sorted(by: >).map { dayKey in
+            try DayTaskSummary(dayKey: dayKey, progress: NoteProgress(notes: notes, for: dayKey))
+        }.filter { $0.incomplete > 0 }
+        return try UnfinishedDayPage(before: before, limit: limit,
+                                     summaries: Array(summaries.prefix(limit)),
+                                     hasMore: summaries.count > limit)
+    }
+
     func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
         if failRead { throw CocoaError(.fileReadUnknown) }
         let notes = try saved.filter { range.contains(try GregorianDay(key: $0.dayKey)) }

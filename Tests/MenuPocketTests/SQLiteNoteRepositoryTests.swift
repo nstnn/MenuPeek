@@ -946,6 +946,135 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(afterCommit.notes.first?.text, "Changed")
     }
 
+    func testUnfinishedPagesCoverPriorYearsWithWholeDayCountsAndPreserveStorage() throws {
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        let expected = ["2026-10-05", "2026-09-01", "2025-12-31", "2024-02-29", "2001-01-01"]
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            for day in expected.reversed() {
+                try store.add(note("Unfinished", day: day, createdAt: 1, categoryID: category.id))
+            }
+            // The newest day is 3/5, even when filtering for unfinished days.
+            try store.add(note("Another unfinished", day: expected[0], createdAt: 2))
+            for index in 0..<3 {
+                try store.add(note("Completed", day: expected[0], createdAt: Double(index),
+                                   completedAt: Date(timeIntervalSince1970: 999)))
+            }
+            try store.add(note("Completed-only day", day: "2026-10-04", createdAt: 1,
+                               completedAt: Date(timeIntervalSince1970: 0)))
+            for day in [cutoff.key, "2027-01-01"] {
+                try store.add(note("Excluded", day: day, createdAt: 1))
+            }
+            try executeRaw("INSERT INTO later_tasks (id, text, created_at) VALUES ('\(UUID().uuidString)', 'Later', 2)")
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let catalog = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+            let later = try laterRows()
+            let schema = try schemaSnapshot()
+            let version = try schemaVersion()
+            var before = cutoff
+            var days: [String] = []
+            repeat {
+                let page = try store.unfinishedDayPage(before: before, limit: 2)
+                days += page.summaries.map(\.dayKey)
+                if days.count == 2 {
+                    XCTAssertEqual(page.summaries[0].progress, NoteProgress(completed: 3, total: 5))
+                    XCTAssertEqual(page.summaries[0].incomplete, 2)
+                    XCTAssertEqual(page.nextBefore?.key, expected[1])
+                }
+                guard let next = page.nextBefore else { break }
+                before = next
+            } while days.count <= expected.count
+            XCTAssertEqual(days, expected)
+            let end = try store.unfinishedDayPage(before: GregorianDay(key: expected.last!), limit: 2)
+            XCTAssertEqual(end.summaries, [])
+            XCTAssertNil(end.nextBefore)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), catalog)
+            XCTAssertEqual(try laterRows(), later)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try schemaVersion(), version)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let exact = try reopened.unfinishedDayPage(before: cutoff, limit: expected.count)
+        XCTAssertEqual(exact.summaries.map(\.dayKey), expected)
+        XCTAssertNil(exact.nextBefore)
+        let single = try reopened.unfinishedDayPage(before: cutoff, limit: 1)
+        XCTAssertEqual(single.summaries.map(\.dayKey), [expected[0]])
+        XCTAssertEqual(single.nextBefore?.key, expected[0])
+        let plan = try rawRows("""
+            EXPLAIN QUERY PLAN SELECT day_key, COUNT(*), COUNT(completed_at)
+            FROM notes WHERE day_key < '2026-10-06'
+            GROUP BY day_key HAVING COUNT(*) > COUNT(completed_at)
+            ORDER BY day_key DESC LIMIT 3
+            """)
+        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+    }
+
+    func testUnfinishedPageRejectsInvalidLimitsAndEmptySuccessIsDistinctFromFailure() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        for limit in [-1, 0, Int.max] {
+            XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: limit)) { error in
+                XCTAssertEqual(error as? TaskHistoryDomainError, .invalidPage)
+            }
+        }
+        let empty = try store.unfinishedDayPage(before: cutoff, limit: 31)
+        XCTAssertEqual(empty.summaries, [])
+        XCTAssertNil(empty.nextBefore)
+        try executeRaw("DROP TABLE notes")
+        XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: 31)) { error in
+            guard case SQLiteNoteStoreError.databaseError = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testUnfinishedPageValidatesCompletionIncludingCompletedOnlyDaysAndLookahead() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        try store.add(note("Newest", day: "2026-10-05", createdAt: 1))
+        try store.add(note("Lookahead", day: "2026-10-04", createdAt: 1))
+        try store.add(note("Outside cutoff", day: cutoff.key, createdAt: 1))
+        try executeRaw("UPDATE notes SET completed_at = 'invalid' WHERE day_key = '2026-10-06'")
+        XCTAssertEqual(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore?.key, "2026-10-05")
+        for representation in ["'invalid'", "X'0102'", "1e999", "-1e999"] {
+            // This day has no NULL completion left, but corruption cannot hide as completed-only.
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2026-10-04'")
+            XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: 1))
+        }
+        for representation in ["0", "-1", "1.5"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2026-10-04'")
+            XCTAssertNil(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore)
+        }
+        try executeRaw("UPDATE notes SET completed_at = NULL WHERE day_key = '2026-10-04'")
+        XCTAssertEqual(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore?.key, "2026-10-05")
+    }
+
+    func testUnfinishedLoadMoreThrowsOnMalformedDayThenCanRetrySameCursor() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        for day in ["2026-10-05", "2026-10-04", "2025-02-28"] {
+            try store.add(note("Saved", day: day, createdAt: 1))
+        }
+        let first = try store.unfinishedDayPage(before: cutoff, limit: 1)
+        let next = try XCTUnwrap(first.nextBefore)
+        // Add a malformed day in the next page's lookahead after the first read.
+        try store.add(note("Malformed", day: "2025-02-30", createdAt: 1))
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        XCTAssertThrowsError(try store.unfinishedDayPage(before: next, limit: 1)) { error in
+            XCTAssertEqual(error as? TaskHistoryDomainError, .invalidDayKey("2025-02-30"))
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+        try executeRaw("DELETE FROM notes WHERE day_key = '2025-02-30'")
+        let retry = try store.unfinishedDayPage(before: next, limit: 1)
+        XCTAssertEqual(retry.summaries.map(\.dayKey), ["2026-10-04"])
+        XCTAssertEqual(retry.nextBefore?.key, "2026-10-04")
+        let last = try store.unfinishedDayPage(before: XCTUnwrap(retry.nextBefore), limit: 1)
+        XCTAssertEqual(last.summaries.map(\.dayKey), ["2025-02-28"])
+        XCTAssertNil(last.nextBefore)
+    }
+
     private func note(_ text: String, day: String, createdAt: TimeInterval,
                       completedAt: Date? = nil, categoryID: UUID? = nil) -> Note {
         Note(id: UUID(), text: text, dayKey: day,

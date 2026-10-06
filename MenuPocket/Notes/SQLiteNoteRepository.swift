@@ -268,20 +268,56 @@ final class SQLiteNoteRepository: NoteRepository {
             let step = sqlite3_step(statement)
             if step == SQLITE_DONE { return summaries }
             try check(step, expected: SQLITE_ROW, operation: "read day summaries")
-            guard sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
-                  sqlite3_column_type(statement, 2) == SQLITE_INTEGER,
-                  sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
-                  sqlite3_column_int64(statement, 3) == 0,
-                  let total = Int(exactly: sqlite3_column_int64(statement, 1)),
-                  let completed = Int(exactly: sqlite3_column_int64(statement, 2)),
-                  total > 0 else {
-                throw SQLiteNoteStoreError.invalidNoteRow
-            }
-            let summary = try DayTaskSummary(dayKey: text(at: 0, from: statement),
-                                             progress: NoteProgress(completed: completed, total: total))
+            let summary = try daySummary(from: statement)
             guard range.contains(summary.day) else { throw SQLiteNoteStoreError.invalidNoteRow }
             summaries.append(summary)
         }
+    }
+
+    func unfinishedDayPage(before: GregorianDay, limit: Int) throws -> UnfinishedDayPage {
+        guard limit > 0, limit < Int.max else { throw TaskHistoryDomainError.invalidPage }
+        let statement = try prepare(
+            """
+            SELECT day_key, COUNT(*), COUNT(completed_at),
+                   SUM(CASE WHEN completed_at IS NULL OR
+                       (typeof(completed_at) IN ('integer', 'real') AND
+                        completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                       THEN 0 ELSE 1 END) AS invalid_completion
+            FROM notes WHERE day_key < ?
+            GROUP BY day_key
+            HAVING COUNT(*) > COUNT(completed_at) OR invalid_completion > 0
+            ORDER BY day_key DESC LIMIT ?
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(before.key, at: 1, to: statement)
+        try check(sqlite3_bind_int64(statement, 2, Int64(limit + 1)), operation: "bind unfinished limit")
+
+        var summaries: [DayTaskSummary] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { break }
+            try check(step, expected: SQLITE_ROW, operation: "read unfinished day page")
+            // Validate the lookahead too: corrupt data must not imply a valid next page.
+            summaries.append(try daySummary(from: statement))
+        }
+        return try UnfinishedDayPage(before: before, limit: limit,
+                                     summaries: Array(summaries.prefix(limit)),
+                                     hasMore: summaries.count > limit)
+    }
+
+    private func daySummary(from statement: OpaquePointer) throws -> DayTaskSummary {
+        guard sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
+              sqlite3_column_type(statement, 2) == SQLITE_INTEGER,
+              sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
+              sqlite3_column_int64(statement, 3) == 0,
+              let total = Int(exactly: sqlite3_column_int64(statement, 1)),
+              let completed = Int(exactly: sqlite3_column_int64(statement, 2)),
+              total > 0 else {
+            throw SQLiteNoteStoreError.invalidNoteRow
+        }
+        return try DayTaskSummary(dayKey: text(at: 0, from: statement),
+                                  progress: NoteProgress(completed: completed, total: total))
     }
 
     func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
