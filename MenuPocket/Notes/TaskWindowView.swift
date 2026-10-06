@@ -58,7 +58,7 @@ struct TaskWindowView: View {
     }
 
     private enum FocusControl: Hashable {
-        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete
+        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete, history, yesterday
         case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
@@ -71,7 +71,6 @@ struct TaskWindowView: View {
 
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
-    let onSettings: () -> Void
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
@@ -129,11 +128,26 @@ struct TaskWindowView: View {
                                                 .id(group.id)
                                         }
                                     }
+                                    .scrollTargetLayout()
                                 }
                                 if !isLater, state.yesterdayIncompleteCount > 0 {
-                                    Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                        .font(.callout.weight(.semibold))
-                                        .foregroundStyle(.red)
+                                    Button {
+                                        openHistory(.yesterday)
+                                    } label: {
+                                        Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
+                                            .font(.callout.weight(.semibold))
+                                            .foregroundStyle(.red)
+                                    }
+                                    .focusable()
+                                    .keyboardFocusAppearance()
+                                    .focused($focusedControl, equals: .yesterday)
+                                    .onKeyPress(keys: [.space, .return]) { _ in
+                                        openHistory(.yesterday)
+                                        return .handled
+                                    }
+                                    .disabled(!presentation.canBrowse(state: state))
+                                    .help("View yesterday's unfinished tasks")
+                                    .accessibilityIdentifier("yesterdayHistoryEntry")
                                 }
                             } else {
                                 unavailableState
@@ -145,11 +159,19 @@ struct TaskWindowView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .scrollPosition(id: Binding(
+                        // The retained anchor belongs to Today's groups only.
+                        get: { isLater ? nil : presentation.todayScrollAnchor },
+                        set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
+                    ))
                     .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
                     .id(destination)
                     .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
                     .contentShape(Rectangle())
                     .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+                    .onChange(of: presentation.todayScrollRestoreID) { _, _ in
+                        if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
+                    }
                     .onChange(of: geometry.size) { _, _ in
                         guard let id = editingID else { return }
                         let requestID = focusRequestID
@@ -171,14 +193,14 @@ struct TaskWindowView: View {
                             let requestID = editFocusRequestID ?? focusRequestID
                             Task { @MainActor in
                                 await Task.yield()
-                                guard focusRequestID == requestID else { return }
+                                guard presentation.route == .today, focusRequestID == requestID else { return }
                                 if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
                                     // Entry/exit changes the space above the list.
                                     // Mount the group before targeting its row.
                                     scroll.scrollTo(group.id, anchor: .top)
                                     await Task.yield()
                                 }
-                                guard focusRequestID == requestID else { return }
+                                guard presentation.route == .today, focusRequestID == requestID else { return }
                                 scroll.scrollTo(id, anchor: .center)
                                 if new != nil { focusDraft(requestID: requestID) }
                                 else { restoreRowFocus(id, requestID: requestID) }
@@ -199,24 +221,26 @@ struct TaskWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { canvasBackground }
-        // Bridged into the window's unified title bar by TaskWindowController.
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                destinationControl
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                }
-                .help("Open Settings (⌘,)")
-                .accessibilityLabel("Open Settings")
-                .disabled(presentation.deletionTarget != nil)
-            }
-        }
         // Attached to this window, so it blocks the rows and actions behind it.
         .sheet(isPresented: Binding(
             get: { presentation.isManagingCategories },
             set: { if !$0 { presentation.dismissCategoryManager() } }
         )) {
             TaskCategoryManagerView(state: state, presentation: presentation)
+        }
+        .onChange(of: presentation.route) { old, new in
+            focusRequestID = UUID()
+            if new != .today { focusedControl = nil }
+            else if old != .today {
+                let requestID = focusRequestID
+                Task { @MainActor in
+                    await Task.yield()
+                    guard presentation.route == .today, focusRequestID == requestID else { return }
+                    if isLater { focusSelectedList(); return }
+                    focusedControl = state.availableProgress == nil ? .retry
+                        : (presentation.historyEntry == .yesterday && state.yesterdayIncompleteCount > 0 ? .yesterday : .history)
+                }
+            }
         }
         .onChange(of: presentation.isManagingCategories) { wasManaging, isManaging in
             if wasManaging, !isManaging { focusManageCategories() }
@@ -233,11 +257,8 @@ struct TaskWindowView: View {
             editFocusRequestID = nil
             rowActionOrigin = nil
             focusedControl = nil
-            switch presentation.focusAfterSelection(state: state) {
-            case .draft: focusDraft()
-            case .retry: focusedControl = .retry
-            default: focusedControl = .add
-            }
+            // Leaving History for another list focuses after the route settles.
+            if presentation.route == .today { focusSelectedList() }
         }
         .task(id: moveNoticeID) {
             guard isMoveNoticeVisible else { return }
@@ -318,26 +339,6 @@ struct TaskWindowView: View {
         }
     }
 
-    private var destinationControl: some View {
-        Picker("Task list", selection: Binding(
-            get: { destination },
-            set: { _ = presentation.selectDestination($0, state: state) }
-        )) {
-            Text("Today").tag(TaskListDestination.today)
-                .accessibilityIdentifier("todayTab")
-            Text("Later").tag(TaskListDestination.later)
-                .accessibilityIdentifier("laterTab")
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
-                  presentation.deletionTarget != nil || presentation.isManagingCategories)
-        .accessibilityLabel("Task list")
-        .accessibilityValue(isLater ? "Later" : "Today")
-        .accessibilityIdentifier("taskDestination")
-    }
-
     @ViewBuilder
     private var listHeading: some View {
         if isLater {
@@ -356,9 +357,25 @@ struct TaskWindowView: View {
     private var dateHeading: some View {
         let labels = dayLabels
         return VStack(alignment: .leading, spacing: 8) {
-            Text(labels.date)
-                .font(.system(size: 24, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 12) {
+                Text(labels.date)
+                    .font(.system(size: 24, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Button { openHistory(.calendar) } label: {
+                    Image(systemName: "calendar").frame(width: 28, height: 28)
+                }
+                .focusable()
+                .keyboardFocusAppearance()
+                .focused($focusedControl, equals: .history)
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    openHistory(.calendar)
+                    return .handled
+                }
+                .disabled(!presentation.canBrowse(state: state))
+                .help("View task history")
+                .accessibilityLabel("View task history")
+                .accessibilityIdentifier("taskHistoryEntry")
+            }
             Text(labels.weekday)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
@@ -827,7 +844,7 @@ struct TaskWindowView: View {
         let requestID = requestID ?? focusRequestID
         Task { @MainActor in
             await Task.yield()
-            guard focusRequestID == requestID else { return }
+            guard presentation.route == .today, focusRequestID == requestID else { return }
             focusedControl = focusAfterLeavingRow(id, fallbackGroup: originGroup)
         }
     }
@@ -851,9 +868,24 @@ struct TaskWindowView: View {
         focusRequestID = requestID
         Task { @MainActor in
             await Task.yield()
-            guard focusRequestID == requestID else { return }
+            guard presentation.route == .today, focusRequestID == requestID else { return }
             focusedControl = textFocusControl
         }
+    }
+
+    private func focusSelectedList() {
+        switch presentation.focusAfterSelection(state: state) {
+        case .draft: focusDraft()
+        case .retry: focusedControl = .retry
+        default: focusedControl = .add
+        }
+    }
+
+    private func openHistory(_ entry: TaskWindowPresentation.HistoryEntry) {
+        guard presentation.showHistory(state: state, entry: entry) else { return }
+        focusRequestID = UUID()
+        focusedControl = nil
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     private func showComposer() {

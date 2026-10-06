@@ -353,3 +353,85 @@ The fixture was quit after verification. The exact checkout Debug app at `build/
 Earlier artifacts additionally exercised native undo/redo during focused typing, category changes without Save, a successful retry after simulated failure, and same-process window close/reopen retaining the edit/error. Those observations support unchanged editor/state behavior; they are not final-v4 independent UI acceptance. Read-only final SQLite inspection retains task UUIDs and rowids 17/65, their unchanged completion status, and 100 Today tasks after the saves. The hosted native Return/failure/Escape test and existing state contracts passed in the final [91-test regression](DESKTOP_TASK_REGRESSION.md#inline-task-editing--2026-10-04).
 
 The independent reviewer examined the final source, test results and author-operated native records separately; its own Computer Use acquisition stalled, so an independently operated final native pass is not claimed. The production app and saved user data were not replaced or edited. Full-suite, Release, remote CI, spoken VoiceOver and genuine system-service acceptance were not run for this change. Task-owned app cleanup is recorded in `build/inline-edit/cleanup.json`; sources, databases and evidence remain.
+
+## 2026-10-06 — Retained History navigation shell (TASK-008)
+
+Scoped native fixture, not full History/calendar feature acceptance. Source base `f37eadffa0021c94007a6b7d758897178e3d18cf` plus TaskBrowserView/controller/Today state and command changes. Harness compiles the current production views/state/delegate using Swift 6, Debug, macOS 14 target, separate SQLite/defaults and fake login/hotkey services. Fixed Toronto October 6 clock; 70 Today tasks and one unfinished yesterday task. Bundle `local.menupocket.task008.fixture`, unsandboxed fixture arrangement. Executable SHA-256 `3b81ed31b819567860de8f2fb7fa8b9df3bc45e59bdb877ad76d93437db39131`; harness SHA-256 `d5caf0ddeac596768c6451c47d7a1c955e54d1a784a8928cac94cc22d25d9347`. Exact paths, source hashes, build arguments, screenshots and harness remain under ignored `build/task-history-task008/`; runnable bundles were removed after verification. The native snapshot predates only restoration of the yesterday reminder's original red styling; the final Debug build includes it.
+
+| Journey | Result and evidence |
+| --- | --- |
+| Calendar → History → nested Unfinished → Back chain | Pass: same visible task window, headings and back controls, no exposed hidden Today controls in AX tree. `unfinished-final.png`, `history-minimum-final.png`. These are placeholders. |
+| Pending draft/composer and long-list offset | Pass: `Final retained draft` remained visible after the chain; Task 19 remained the first visible row and AX scrollbar stayed exactly `0.2756831018165166`. `today-before-final.png`, `today-after-final.png`. |
+| Keyboard entry/back focus | Pass: Return on Back to History/Today; focus returned to the calendar entry, Space reopened History. Initial group-focus fallback was repaired and rechecked. |
+| Native Command-N/W/comma/Q | Pass: Command-N from History returned to Today and its text field; Command-W then Command-N reused the window and draft; Command-comma opened retained Settings; Command-Q stopped the fixture. |
+| Default and minimum layout, appearances | Pass: 800 × 560 and 600 × 400 content sizes observed; Today and History controls remained usable in Dark/System and Light. `today-minimum-final.png`, `history-minimum-final.png`, `history-light-minimum-final.png`. |
+| Saved rows/schema during browsing | Pass for the recorded scoped journey: all tables/rowids/order/fields/schema compare equal in `preservation-before.json` and `preservation-after.json`. Theme/onboarding changes were confined to the fixture suite. |
+| Native menu-bar/Dock clicks, missing-anchor removal, manager/edit/delete guard UI, VoiceOver, real day/wake/time-zone changes | Not tested here. Route/guard/fallback/termination/quiet-login paths have focused hosted evidence; this does not establish genuine system or accessibility acceptance. |
+
+The initial fixture crashed because the harness chose its bundle identifier as a defaults suite; a distinct suite fixed startup. It did not indicate a production app crash. Subsequent native checks used the repaired identified artifact. Final-feature layouts and integrated production-identity acceptance remain subsequent work.
+
+## 2026-10-06 — History date list and day detail (TASK-009)
+
+Scoped native fixture, not full History/calendar feature acceptance. Source: uncommitted working tree on base `4c4c81f03716894322bb2948d4c57525c487b1d6`, including newest-first list order and the Select a day heading. Harness `build/task-history-task009/FixtureMain.swift` compiles the current production views/state/delegate (Swift 6, Debug, macOS 14 target) with separate SQLite/defaults, fake login/hotkey services, and a fixed Toronto clock (Tuesday, October 6, 2026). Bundle `local.menupocket.task009.fixture`; first run executable SHA-256 `82c5f9d9efc4c630a0cafa6181b524c00f56aa5ddeb693f0f3e65d7da0507371`, fix recheck `14d4b83f1462b8ba78fb715d9e521b112891d72497d6c3873d4b67494475f2c8` (committed source). Driven by Claude through Computer Use background app control with the user's permission; steps follow ignored `build/task-history-task009/TEST-PLAN.md`.
+
+| Journey | Result |
+| --- | --- |
+| Calendar entry → History in the same window, heading, Back to Today, Unfinished entry, month header | Pass |
+| Date list newest first with counts (Oct 20 0/1, Oct 6 0/2, Oct 5 3/5 selected, Oct 3 2/2, Oct 1 0/3); detail beside list at 800 pt | Pass |
+| Read-only detail: date, 3/5, groups Work 1/2 / long category 1/1 / General 1/2 in creation order, status icons, no checkboxes/actions; long task and category text wrap | Pass |
+| Unfinished/Completed filters keep 3/5 and group counts; switching day keeps filter; "No completed/unfinished tasks for this day." | Pass |
+| Saved future day (Oct 20) readable; empty day (Sep 5) 0/0 "No saved tasks for this day."; 100/125 day with 125 rows | Pass |
+| Previous/Next across Dec 2025 ↔ Jan 2026; This month selects Oct 6 with All; future November shows "No saved tasks this month." and Select a day | Pass |
+| History disclosure does not change Today groups; yesterday reminder opens Oct 5 with Unfinished | Pass |
+| Narrow stacked layout (list above detail, scrollable) | Pass at ≈504 × 276 content. The test tool's resize bypassed the 600 × 400 minimum, so the real-drag minimum was not observed. |
+| Keyboard: Tab to month controls, This month, day rows, filter (one Tab stop with Keyboard navigation off); Space/Return activate; Right arrow moves one filter option | Pass. Initial finding: the scroll view did not follow keyboard focus. Fixed; recheck Pass — tabbing to the General header below the fold scrolled it into view. |
+| Light (fixture Theme setting) and Dark | Pass for readability. Initial finding: Light cards blended into the plain background. Fixed with Today's tinted canvas; recheck Pass. |
+| Draft "Draft kept through History" survives History visit; Back focuses the calendar entry | Pass |
+| Group disclosure per day | Initial observation: collapsing General on Oct 20 also collapsed it on Oct 5. Fixed: choosing another day starts expanded; refresh of the same day keeps it. Recheck Pass. |
+| Edit/delete/manager guard UI, VoiceOver, macOS Keyboard navigation on, real-drag minimum size | Not tested here. Guards have focused hosted evidence from TASK-008. |
+
+The fixture was quit; it and the Debug test host were unregistered from LaunchServices and moved to Trash, and the Trash paths were unregistered. No production data/defaults/login/hotkey state was touched.
+
+## 2026-10-06 — History month calendar (TASK-012)
+
+Scoped native fixture, not full feature acceptance (TASK-014). Source: uncommitted working tree on base `c8d1fae`. Harness `build/task-history-task012/FixtureMain.swift` (TASK-009 harness and sample data; separate SQLite/defaults, fake login/hotkey, fixed Toronto clock Tuesday, October 6, 2026), compiled with all production sources except `MenuPocketApp.swift`. Bundle `local.menupocket.task012.fixture`; first build executable SHA-256 `2894be55…dcae`, fixed recheck `8aae167e5c005e60b0e13323d3b95bdf3d7449416c6d679b8397b816bde5c2c3`. Driven by Claude through Computer Use background app control with the user's permission (fixture bundle only), Dark appearance.
+
+| Journey | Result |
+| --- | --- |
+| Calendar entry → History; Sun–Sat header; October 2026 starts Thursday; cells 1 0/3, 2 0/0, 3 2/2, 4 0/0, 5 3/5, 6 0/2, saved future 20 0/1, other future days —; Today = filled circle on 6; selection = outline on 5; detail beside grid at 800 pt | Pass after fix. Initial finding: blank padding cells grew vertically and pushed the weeks below the fold. Fixed by excluding padding from grid sizing; recheck Pass. |
+| Click Oct 3 with Unfinished filter → filter kept, 2/2, "No unfinished tasks for this day."; saved future Oct 20 opens read-only detail; empty future Oct 21 click does nothing | Pass |
+| This month selects Oct 6 with All | Pass |
+| Keyboard: Tab reaches Previous/Next/This month then calendar cells; Down/Right move by week/day; Return on empty future does nothing; Up past the 1st moves to September with focus on Sep 25; Space selects Sep 30 (1/2, Work 1/1, Home 0/1) | Pass. Crossing months applies the existing month-change selection clamp (selection moved to Sep 6 before Space). |
+| August 2026 starts Saturday; Aug 12 shows 100/125 in full; January 2026 starts Thursday with Jan 1 1/1; December 2025 starts Monday with Dec 31 1/2 | Pass |
+| Accessibility label of the Today cell exactly "Today, Tuesday, October 6, 2026, 0 of 2 complete"; empty future cells are not exposed as buttons | Pass (tool withholds other titles) |
+| Narrow stacked layout: calendar above detail, scrollable to detail | Pass at ≈502 × 302; the tool's resize bypassed the 600 × 400 minimum, so the real-drag minimum was not observed |
+| Unavailable month + Retry, Light appearance, VoiceOver, macOS Keyboard navigation setting on | Not tested natively. Unavailable cell state has hosted model coverage (TASK-011). |
+
+The fixture and Debug hosts were quit, unregistered from LaunchServices, and moved to Trash; Trash paths were unregistered. No production data/defaults/login/hotkey state was touched.
+
+## 2026-10-06 — Final History feature native acceptance (TASK-014)
+
+Final-feature native fixture for History, Unfinished, and the month calendar. Source: committed HEAD `4a8b679f0de7aec5d7a827f6640eef002e7fa1e6`, clean worktree. Harness `build/task-history-task014/FixtureMain.swift` (SHA-256 `a51ce5a7…8263`) extends the TASK-012 sample data with 30 Today tasks and 40 unfinished June/July days. It wraps the production SQLite repository so History month, day, and Unfinished-page reads throw only while a flag file exists (injected failures, not real storage faults). Separate SQLite/defaults suite `local.menupocket.task014.fixture.defaults`, fake login/hotkey, fixed Toronto clock Tuesday, October 6, 2026. Swift 6.4, Debug (`-Onone`), macOS 14 target, all production sources except `MenuPocketApp.swift`. Bundle `local.menupocket.task014.fixture`; executable SHA-256 `aa6c4dc92e5d9995fc29eb10b53de970a5b958318a9138267988d4935fc63d5b`. Claude drove the fixture through Computer Use background control, with the user's permission and access limited to the fixture bundle. The user ran the system-input checks themselves and reported Pass.
+
+| Journey | Result |
+| --- | --- |
+| Calendar icon → History in the same window (one window ID throughout), heading, Back to Today; Today cell 0/30 matches Today progress | Pass (Claude) |
+| History → Unfinished → day → Back to Unfinished → Back to History → Go to Today; read-only day detail with the Unfinished filter; History shows the selected Unfinished day | Pass (Claude) |
+| Focus return: the selected Unfinished row (scrolled into view, Dec 31, 2025 after Load more), the Unfinished entry, the calendar icon, and the yesterday entry; Space activates each | Pass (Claude) |
+| Unfinished index: newest first, past days only (no Oct 6/Oct 20), first page 31 days ending Jun 23, Load more reaches Dec 31, 2025 with no duplicate and no further Load more; Back to Unfinished keeps appended pages | Pass (Claude) |
+| Injected failures: Load more failure keeps loaded rows and shows "Could not load more days" + Retry; month failure shows message + Retry with Unavailable cells (no zeros); day failure shows its own message + Retry; each Retry recovers only its pane | Pass (Claude) |
+| Draft "Draft kept through TASK-014", open composer, and Today scroll offset survive every History/Unfinished round trip, Close/Show Tasks, and Minimize/Show Tasks | Pass (Claude) |
+| Yesterday entry → Oct 5 with Unfinished filter (2 tasks); Back to Today restores the bottom offset | Pass (Claude) |
+| Today completion → History Oct 6 cell and detail both 1/30, Home 1/10 | Pass (Claude) |
+| File > Add Task from History → Today with the draft field focused; Close/Minimize then Show Tasks → Today in the same window; Settings from History and the app menu reuse one window | Pass (Claude) |
+| Category manager sheet open → calendar icon dimmed and unreachable | Pass (Claude) |
+| Light theme on History and Unfinished; Dark on all screens | Pass (Claude) |
+| Quit (process exit confirmed) and relaunch without reseeding: completed task, Light theme, and 800 × 560 window kept; unsaved draft cleared as designed | Pass (Claude) |
+| Fixture menu bar item click and Dock icon click from History → Today in the same window | Pass (user-reported) |
+| Real corner drag to minimum: stops at 600 × 400 content, History stacks and scrolls | Pass (user-reported). Claude's tool resize bypassed the minimum (102 × 102), as in TASK-009/012; this is not product evidence. |
+| VoiceOver across calendar days and Unfinished rows | Pass (user-reported) |
+| Saved data | Pass: schema, every row with rowid, and the defaults suite compared seed → before quit → stopped → after relaunch → final. Only the intentional Today completion and theme change differ. Browsing, injected failures, Retries, and the user's checks wrote nothing. |
+
+Observation: one raw-input click on blank space in the Unfinished list left the window on History rather than opening a day. It did not reproduce with element presses or keyboard; the code has no route change on activation/refresh. Treated as a tool artifact, not a defect.
+
+Not tested: genuine day change/wake/time-zone change (hosted coverage only), edit/delete guard UI (hosted coverage), macOS Keyboard navigation setting on, production-identity app. The fixture was quit, unregistered from LaunchServices, moved to Trash, and its Trash path unregistered. The user's `/Applications/MenuPocket.app` and its data were not touched; the user quit it themselves during the session. Evidence: ignored `build/task-history-task014/` (screenshots, preservation snapshots, artifact identity).

@@ -5,6 +5,134 @@ import SwiftUI
 @MainActor
 @Observable
 final class TaskWindowPresentation {
+    enum Route { case today, history, unfinished, unfinishedDay }
+    enum HistoryEntry { case calendar, yesterday }
+
+    private(set) var route: Route = .today
+    private(set) var historyEntry: HistoryEntry = .calendar
+    private(set) var historyState: TaskHistoryState?
+    private(set) var unfinishedState: UnfinishedTasksState?
+    private(set) var browserIssue: String?
+    /// The top visible group is a fallback if retained scroll content disappears.
+    var todayScrollAnchor: TaskGroupID?
+    private(set) var todayScrollRestoreID: UUID?
+    @ObservationIgnored private var isWindowVisible = false
+    @ObservationIgnored private var isTerminating = false
+
+    /// History is a child of the Today list; Later never browses history.
+    func canBrowse(state: DailyNotesState) -> Bool {
+        !isTerminating && selectedDestination == .today && !hasGuardedInteraction(state: state)
+    }
+
+    /// Task-list commands act only on the visible Today/Later list.
+    private var isShowingList: Bool { !isTerminating && route == .today }
+
+    @discardableResult
+    func showHistory(state: DailyNotesState, entry: HistoryEntry = .calendar) -> Bool {
+        guard canBrowse(state: state) else { return false }
+        historyEntry = entry
+        route = .history
+        refreshBrowser(state: state)
+        if entry == .yesterday, let historyState {
+            do { try historyState.select(state.yesterdayForHistory(), filter: .unfinished) }
+            catch { browserIssue = "Could not open yesterday. Try again." }
+        }
+        return true
+    }
+
+    @discardableResult
+    func showUnfinished(state: DailyNotesState) -> Bool {
+        guard route == .history, canBrowse(state: state) else { return false }
+        route = .unfinished
+        refreshBrowser(state: state)
+        return true
+    }
+
+    func backToHistory(state: DailyNotesState) {
+        guard route == .unfinished, !isTerminating else { return }
+        route = .history
+        refreshBrowser(state: state)
+    }
+
+    /// Opens the shared read-only detail at an indexed day with the Unfinished
+    /// filter. The index keeps its loaded pages for Back to Unfinished.
+    @discardableResult
+    func showUnfinishedDay(_ day: GregorianDay, state: DailyNotesState) -> Bool {
+        guard route == .unfinished, !isTerminating, let historyState,
+              unfinishedState?.select(day) != nil else { return false }
+        do { try historyState.select(day, filter: .unfinished) }
+        catch { return false }
+        route = .unfinishedDay
+        refreshBrowser(state: state)
+        return true
+    }
+
+    func backToUnfinished(state: DailyNotesState) {
+        guard route == .unfinishedDay, !isTerminating else { return }
+        route = .unfinished
+        refreshBrowser(state: state)
+    }
+
+    @discardableResult
+    func showToday(state: DailyNotesState) -> Bool {
+        guard !isTerminating else { return false }
+        if route != .today {
+            guard canBrowse(state: state) else { return false }
+            // Keep the exact native offset when content survives. If the saved
+            // anchor vanished, explicitly restore the first surviving group.
+            if let anchor = todayScrollAnchor, !state.groups.contains(where: { $0.id == anchor }) {
+                todayScrollAnchor = state.groups.first?.id
+                todayScrollRestoreID = UUID()
+            }
+            route = .today
+        }
+        updateBrowserVisibility()
+        return true
+    }
+
+    func setWindowVisible(_ visible: Bool, state: DailyNotesState) {
+        guard !isTerminating else { return }
+        isWindowVisible = visible
+        refreshBrowser(state: state)
+    }
+
+    func refreshBrowser(state: DailyNotesState) {
+        guard !isTerminating else { return }
+        // Hide before invalidation so only the pane being presented reads.
+        historyState?.setVisible(month: false, day: false)
+        unfinishedState?.setVisible(false)
+        do {
+            if route != .today && historyState == nil { historyState = try state.makeHistoryState() }
+            if (route == .unfinished || route == .unfinishedDay) && unfinishedState == nil { unfinishedState = try state.makeUnfinishedState() }
+            try historyState?.refresh(revision: state.historyRevision)
+            try unfinishedState?.refresh(revision: state.historyRevision)
+            browserIssue = nil
+        } catch { browserIssue = "Could not open task history. Try again." }
+        updateBrowserVisibility()
+    }
+
+    private func updateBrowserVisibility() {
+        historyState?.setVisible(month: isWindowVisible && route == .history,
+                                 day: isWindowVisible && (route == .history || route == .unfinishedDay))
+        unfinishedState?.setVisible(isWindowVisible && route == .unfinished)
+        reconcileUnfinishedSelection()
+    }
+
+    /// The selected day's full snapshot tells the index whether that day still
+    /// holds unfinished work. Uses the current generation after any refresh.
+    private func reconcileUnfinishedSelection() {
+        guard route == .unfinishedDay, let unfinishedState, let day = unfinishedState.selectedDay,
+              let snapshot = historyState?.daySnapshot, snapshot.summary.day == day else { return }
+        unfinishedState.reconcileSelection(UnfinishedDaySelection(day: day, generation: unfinishedState.generation),
+                                           snapshot: snapshot)
+    }
+
+    func stopForTermination() {
+        isTerminating = true
+        isWindowVisible = false
+        updateBrowserVisibility()
+    }
+
     struct NewTaskRequest: Equatable {
         let id: UUID
         let destination: TaskListDestination
@@ -53,10 +181,14 @@ final class TaskWindowPresentation {
 
     @discardableResult
     func selectDestination(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
-        if destination == selectedDestination { return true }
-        guard !hasGuardedInteraction(state: state) else { return false }
-        selectedDestination = destination
-        newTaskRequest = nil
+        if destination == selectedDestination && route == .today { return true }
+        guard !isTerminating, !hasGuardedInteraction(state: state) else { return false }
+        // Selecting either list leaves History, which only lives under Today.
+        guard showToday(state: state) else { return false }
+        if destination != selectedDestination {
+            selectedDestination = destination
+            newTaskRequest = nil
+        }
         return true
     }
 
@@ -86,7 +218,7 @@ final class TaskWindowPresentation {
 
     /// Also false while the category manager is open, so no task command acts behind it.
     func canAddTask(state: DailyNotesState) -> Bool {
-        isAvailable(selectedDestination, state: state) && !hasGuardedInteraction(state: state)
+        !isTerminating && isAvailable(selectedDestination, state: state) && !hasGuardedInteraction(state: state)
     }
 
     @discardableResult
@@ -117,7 +249,8 @@ final class TaskWindowPresentation {
 
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
-        guard showComposer(in: selectedDestination, state: state) else { return false }
+        guard canAddTask(state: state), showToday(state: state),
+              showComposer(in: selectedDestination, state: state) else { return false }
         newTaskRequest = NewTaskRequest(id: UUID(), destination: selectedDestination)
         return true
     }
@@ -128,7 +261,7 @@ final class TaskWindowPresentation {
 
     @discardableResult
     func requestDeletion(id: UUID, state: DailyNotesState) -> Bool {
-        guard !hasGuardedInteraction(state: state) else { return false }
+        guard isShowingList, !hasGuardedInteraction(state: state) else { return false }
         state.refreshIfDayChanged()
         switch selectedDestination {
         case .today:
@@ -141,7 +274,7 @@ final class TaskWindowPresentation {
 
     @discardableResult
     func requestDeletion(_ target: TaskActionTarget, state: DailyNotesState) -> Bool {
-        guard !hasGuardedInteraction(state: state) else { return false }
+        guard isShowingList, !hasGuardedInteraction(state: state) else { return false }
         state.refreshIfDayChanged()
         guard target.destination == selectedDestination, isValid(target, state: state) else { return false }
         deletionTarget = target
@@ -219,7 +352,7 @@ final class TaskWindowPresentation {
     /// The manager can open over a pending new-task draft, which it leaves
     /// alone, but not over an edit or a deletion confirmation.
     func canManageCategories(state: DailyNotesState) -> Bool {
-        state.availableCategories != nil && state.editingNoteID == nil &&
+        isShowingList && state.availableCategories != nil && state.editingNoteID == nil &&
             state.editingLaterTaskID == nil && deletionTarget == nil
     }
 
@@ -286,13 +419,14 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     static let minimumContentSize = NSSize(width: 600, height: 400)
     let state: DailyNotesState
     let presentation: TaskWindowPresentation
+    private var isTerminating = false
 
     init(state: DailyNotesState, onSettings: @escaping () -> Void) {
         self.state = state
         let presentation = TaskWindowPresentation()
         self.presentation = presentation
         let hostingController = NSHostingController(
-            rootView: TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
+            rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings)
         )
         hostingController.sizingOptions = []
         hostingController.sceneBridgingOptions = [.toolbars]
@@ -312,6 +446,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
+        refreshBrowserAndObserve()
     }
 
     @available(*, unavailable)
@@ -320,8 +455,12 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func showTasks() {
-        guard let window else { return }
+        guard !isTerminating, let window else { return }
         state.windowWillOpen()
+        // Native routes leave History for the retained Today/Later list, and
+        // still bring the window forward if an active interaction blocks that.
+        presentation.showToday(state: state)
+        presentation.setWindowVisible(true, state: state)
         presentation.validateDeletion(state: state)
         presentation.validateCategoryRemoval(state: state)
         if window.isMiniaturized { window.deminiaturize(nil) }
@@ -334,12 +473,28 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     /// selection. Native routes use this in TASK-009, rather than forcing a tab.
     @discardableResult
     func showToday() -> Bool {
-        guard window != nil else { return false }
+        guard !isTerminating, window != nil else { return false }
         showTasks()
         return presentation.selectDestination(.today, state: state)
     }
 
+    private func refreshBrowserAndObserve() {
+        guard !isTerminating else { return }
+        _ = withObservationTracking {
+            state.historyRevision
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.refreshBrowserAndObserve() }
+        }
+        presentation.refreshBrowser(state: state)
+    }
+
+    func stopForTermination() {
+        isTerminating = true
+        presentation.stopForTermination()
+    }
+
     func windowWillClose(_ notification: Notification) {
+        presentation.setWindowVisible(false, state: state)
         presentation.windowWillClose()
     }
 }
