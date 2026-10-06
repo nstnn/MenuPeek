@@ -1,6 +1,10 @@
 import AppKit
 import Observation
 
+enum HistoryReadError: Error, Equatable {
+    case terminated
+}
+
 enum DailyNotesIssue: Equatable {
     case load
     case add
@@ -75,6 +79,10 @@ final class DailyNotesState {
         /// nil for General, or for an ID the catalog did not contain.
         let categoryName: String?
     }
+
+    /// Invalidate browse projections after committed writes or settled refresh
+    /// attempts, including failed reads. History reads never advance this value.
+    private(set) var historyRevision: UInt64 = 0
 
     private(set) var todayKey: String?
     private(set) var categories: [TaskCategory] = []
@@ -171,6 +179,7 @@ final class DailyNotesState {
 
     func refresh() {
         guard !isTerminating else { return }
+        defer { historyRevision += 1 }
         let keys = day.keys()
         if todayKey != keys.today {
             // Invalidate the old snapshot before asking storage for the new day.
@@ -223,6 +232,7 @@ final class DailyNotesState {
         do {
             let saved = try repository.createCategory(name: name)
             categories.append(saved)
+            historyRevision += 1
             return saved
         } catch {
             recordCategoryError(error, fallback: .create)
@@ -242,6 +252,7 @@ final class DailyNotesState {
         do {
             let saved = try repository.renameCategory(id: id, name: name)
             categories[index] = saved
+            historyRevision += 1
             return saved
         } catch {
             recordCategoryError(error, fallback: .rename)
@@ -281,6 +292,7 @@ final class DailyNotesState {
             reconcileSelections(available: Set(categories.map(\.id)).subtracting([id]))
             categories.removeAll { $0.id == id }
             categoryPreferences.prune(keeping: Set(categories.map(\.id)))
+            historyRevision += 1
             return true
         } catch {
             recordCategoryError(error, fallback: .remove)
@@ -376,6 +388,7 @@ final class DailyNotesState {
         do {
             try repository.add(note)
             notes.append(note)
+            historyRevision += 1
             return .added
         } catch {
             return .writeFailed
@@ -395,6 +408,7 @@ final class DailyNotesState {
                                 createdAt: saved.createdAt, completedAt: completedAt,
                                 categoryID: saved.categoryID)
             taskIssue = nil
+            historyRevision += 1
             return true
         } catch {
             taskIssue = .complete
@@ -443,6 +457,7 @@ final class DailyNotesState {
             }
             cancelEditing()
             taskIssue = nil
+            historyRevision += 1
             return true
         } catch {
             taskIssue = .edit
@@ -459,6 +474,7 @@ final class DailyNotesState {
             notes.removeAll { $0.id == id }
             if editingNoteID == id { cancelEditing() }
             taskIssue = nil
+            historyRevision += 1
             return true
         } catch {
             taskIssue = .delete
@@ -513,11 +529,27 @@ final class DailyNotesState {
     }
 
     private func readyForWrite(on key: String) -> Bool {
+        guard !isTerminating else { return false }
         if todayKey != key || !hasLoadedToday { refresh() }
         return todayKey == key && hasLoadedToday
     }
 
+    /// Read-only access to the shared connection. These calls intentionally skip
+    /// Today readiness, refresh, and all draft/error publication.
+    func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
+        try openRepository().daySummaries(in: range)
+    }
+
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
+        try openRepository().historyDaySnapshot(for: dayKey)
+    }
+
+    func unfinishedDayPage(before: GregorianDay, limit: Int) throws -> UnfinishedDayPage {
+        try openRepository().unfinishedDayPage(before: before, limit: limit)
+    }
+
     private func openRepository() throws -> any NoteRepository {
+        guard !isTerminating else { throw HistoryReadError.terminated }
         if let repository { return repository }
         let opened = try repositoryFactory()
         repository = opened

@@ -53,7 +53,7 @@ The Manage categories icon in the header, next to Add task, opens [`TaskCategory
 
 ## Daily state and persistence
 
-The repository now exposes `historyDaySnapshot(for:)` for read-only day detail. It validates the Gregorian day, then reads the current category catalog and the day's tasks in saved rowid order within one `BEGIN DEFERRED` transaction on the existing connection. Required reads and snapshot validation must all succeed before commit and return; failures roll back and throw. The snapshot derives whole-day progress and groups from every saved task, uses current category labels, and introduces no writes or schema change (the current repository schema is v3). This storage API has no History state or UI wiring yet.
+The repository now exposes `historyDaySnapshot(for:)` for read-only day detail. It validates the Gregorian day, then reads the current category catalog and the day's tasks in saved rowid order within one `BEGIN DEFERRED` transaction on the existing connection. Required reads and snapshot validation must all succeed before commit and return; failures roll back and throw. The snapshot derives whole-day progress and groups from every saved task, uses current category labels, and introduces no writes or schema change (the current repository schema is v3). History reads are exposed through the shared DailyNotesState connection; browse state and UI are not wired yet.
 
 `unfinishedDayPage(before:limit:)` reads newest-first day summaries strictly before a Gregorian cutoff (initially Today), across all prior months and years. One indexed grouped query keeps whole-day completed/total counts, includes only days with unfinished tasks, and fetches at most `limit + 1` summaries. The positive limit must be below `Int.max`; the extra validated row determines whether `nextBefore` is the oldest published day. Invalid completion values also enter validation rather than disappearing as completed-only days. Failed/malformed reads throw; an empty page is a successful end of the chain. Pages use exclusive day cursors rather than OFFSET or task cursors, and do not share a snapshot across requests: consumers must reset the chain after mutations or cutoff changes. Reads preserve schema v3 and stored rows; no Unfinished state or UI is wired yet.
 
@@ -88,6 +88,12 @@ The app does not rewrite or vacuum the notes table. Any future table rebuild or 
 State-owned calendar-day, system-clock, time-zone, and workspace-wake observers work without an open window. Startup reads before the status controller is created; activation and every explicit window presentation refresh the same state. Retry also goes through that boundary.
 
 A changed day invalidates the old snapshot before reading the new one and never reassigns saved day keys or carries tasks forward. Existing-row actions detecting rollover refresh and reject the stale action. Day/target changes cancel editing, preserve text in `recoveredEditDraft`, and expose `refreshNotice`. New-task text and its category selection remain separate and receive the day only on explicit save.
+
+### History read facade and invalidation
+
+`DailyNotesState.daySummaries(in:)`, `historyDaySnapshot(for:)`, and `unfinishedDayPage(before:limit:)` delegate directly through its private cached repository. They throw failures to the caller without Today readiness or refresh, and leave Today snapshots, progress availability, scoped errors, and both drafts unchanged. Reads may open the shared connection before startup without loading Today; subsequent daily/history access reuses it. No repository handle is exposed.
+
+The observable `historyRevision` advances after each committed daily task/category write and after each settled refresh attempt, including failed reads. A rejected write does not add a committed-data signal; a readiness refresh remains its own event. History reads, category usage reads, draft changes, and unchanged-day checks do not advance it. Future browse states consume this revision and the existing lifecycle refresh signals rather than installing duplicate system observers. Termination releases the cached handle and rejects all facade reads with `HistoryReadError.terminated`; queued refresh callbacks cannot reopen storage. This seam adds no schema, saved data, preferences, or visible UI changes.
 
 ## Presentation and native commands
 
