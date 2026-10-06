@@ -44,6 +44,18 @@ Category preferences use `local.menupocket.app.taskCategories.lastUsedCategoryID
 
 Record automated, native-fixture, production-identity, and genuine-system outcomes separately. The [category handoff](TASK_CATEGORIES_HANDOFF.md) owns the current evidence summary and remaining gate; the dated desktop records retain the detailed results. TASK-012 documentation completion does not substitute for TASK-011 interface acceptance.
 
+## Today / Later verification
+
+Use the shared scheme for schema v3 migration, Later repository/transfer transactions, per-list availability, Later state/drafts, scoped presentation, and native routing. For native scenarios, use the production `AppDelegate`, views, and state with an isolated SQLite database and defaults suite, an injected clock, fake login/hotkey services, and injectable read/write failures. Record the fixture's path, PID, bundle/hash, database, and defaults before changing data.
+
+Exercise both tabs at minimum and normal size in light and dark; Later add/complete/edit/delete/cancel; Move to Today success and failure (no duplicate, both counts updated); shared category rename/removal across both tabs; drafts across tab switches and close/reopen; guards on tab switching; a Later edit across an injected day change; Command-N routing; status-item click while Later is idle and while guarded; Quick Add while Later is selected; large, empty, and all-completed lists; per-list read failure; and a changed-data quit/relaunch of the same artifact. Record automated results in [Later regression](LATER_TASKS_REGRESSION.md) and interface results in [Later acceptance](LATER_TASKS_ACCEPTANCE.md). A renamed fixture does not establish production-identity status item, Dock, global hotkey, login, or sandbox behavior.
+
+## Schema v3 upgrade preparation
+
+Schema v3 adds `later_tasks` to the existing file; known unversioned/v1/v2 stores upgrade in one transaction and v3 reopens without rewriting. Before the first real-data launch of a v3 build, quit every MenuPocket copy completely, then make a verified, consistent recoverable copy of the sandbox's `notes.sqlite`, for example with `sqlite3 notes.sqlite ".backup <path>"` followed by `PRAGMA integrity_check` on the copy. The app uses SQLite's default rollback journal; if a `-journal` file remains beside the database, do not copy the files by hand. Record the backup location, source schema version, and the build that will open it. Verification so far used only isolated databases; no v3 build has been launched against the user's database.
+
+A v2 binary cannot reopen a v3 store. Do not downgrade, reset, or hand-edit the schema; restoring the pre-upgrade backup is a separate deliberate action that loses Later tasks and any other post-backup changes.
+
 ## Schema v2 upgrade preparation
 
 Migration verification uses only temporary databases through the shared scheme; the Debug XCTest host does not initialize production storage. Before the first real-data launch of a v2 build, quit the app completely and prepare a verified, consistent recoverable copy of `notes.sqlite` and any relevant SQLite sidecars. Record the backup location and database/build identity. Task 2 verifies isolated migration fixtures only; it does not launch a v2 app against the user's database or prepare/restore that backup.
@@ -74,7 +86,7 @@ The expected product path is `build/DerivedData/Build/Products/Release/MenuPocke
 
 Keep source, build/test result, app identity, and hands-on UI observations together when making an acceptance claim. A rebuild after source changes makes earlier artifact and UI evidence stale.
 
-Record automated results in [Desktop regression](DESKTOP_TASK_REGRESSION.md) and actual-interface results in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md). Identify the source revision and dirty inputs, configuration, toolchain, version/build, app path, executable/bundle hashes, timestamp, and running path/PID as applicable. Distinguish an installed production-identity app from fixtures using another bundle ID, database, defaults suite, or sandbox arrangement. Keep screenshots/observations tied to the artifact; a process snapshot alone does not identify which UI action succeeded.
+Record automated results in [Desktop regression](DESKTOP_TASK_REGRESSION.md) and actual-interface results in [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md), or in the Later records for Today/Later work. Identify the source revision and dirty inputs, configuration, toolchain, version/build, app path, executable/bundle hashes, timestamp, and running path/PID as applicable. Distinguish an installed production-identity app from fixtures using another bundle ID, database, defaults suite, or sandbox arrangement. Keep screenshots/observations tied to the artifact; a process snapshot alone does not identify which UI action succeeded.
 
 Use Pass, Fail, Not tested, or Blocked for checks with recorded outcomes. A dependency completion assumption is not an observed result. A genuine login, day transition, display configuration, or VoiceOver check needs its own evidence; injected contexts and registration status remain supporting automated facts. Retain the essential identity and results in tracked documents even when raw logs, app bundles, or screenshots remain under ignored `build/`.
 
