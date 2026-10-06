@@ -1430,9 +1430,11 @@ final class DailyNotesStateTests: XCTestCase {
         let presentation = TaskWindowPresentation()
         state.startup()
         state.draft = "Window draft"
+        presentation.requestDeletion(id: target.id, state: state)
+        // Simulate retained contexts directly; UI guards prevent opening a
+        // deletion confirmation over an edit. Independent capture preserves both.
         state.beginEditing(id: edited.id)
         state.editDraft = "Unsaved edit"
-        presentation.requestDeletion(id: target.id, state: state)
 
         XCTAssertEqual(state.add(text: "Captured"), .added)
         XCTAssertEqual(state.editingNoteID, edited.id)

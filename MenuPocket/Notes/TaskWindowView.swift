@@ -17,7 +17,6 @@ struct TaskWindowView: View {
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
     let onSettings: () -> Void
-    @State private var isComposerVisible = false
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
@@ -132,9 +131,22 @@ struct TaskWindowView: View {
             if wasManaging, !isManaging { focusManageCategories() }
         }
         .onChange(of: presentation.newTaskRequestID, initial: true) { _, request in
-            if request != nil {
+            if request != nil, presentation.newTaskRequest?.destination == .today {
                 showComposer()
-                presentation.consumeNewTaskRequest()
+                presentation.consumeNewTaskRequest(in: .today)
+            }
+        }
+        .onChange(of: presentation.selectedDestination) { _, destination in
+            // Supersede delayed focus/scroll work from the previous list. The
+            // Later surface and its focus mapping are added in TASK-008.
+            focusRequestID = UUID()
+            focusedControl = nil
+            if destination == .today {
+                switch presentation.focusAfterSelection(state: state) {
+                case .draft: focusDraft()
+                case .retry: focusedControl = .retry
+                default: focusedControl = .add
+                }
             }
         }
         .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
@@ -146,8 +158,10 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
-        .onChange(of: presentation.deletionTarget?.id) { old, new in
-            if let old, new == nil { restoreRowFocus(old) }
+        .onChange(of: state.laterTasks) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: state.hasLoadedLater) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: presentation.deletionTarget) { old, new in
+            if let old, new == nil, old.destination == .today { restoreRowFocus(old.id) }
         }
     }
 
@@ -272,7 +286,7 @@ struct TaskWindowView: View {
 
     private var hasComposer: Bool {
         presentation.deletionTarget == nil && state.editingNoteID == nil &&
-            (isComposerVisible || !state.draft.isEmpty)
+            presentation.hasNewTaskComposer(in: .today, state: state)
     }
 
     private var topWriteError: String? {
@@ -290,6 +304,7 @@ struct TaskWindowView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let target = presentation.deletionTarget,
+               target.destination == .today,
                let note = state.notes.first(where: { $0.id == target.id }) {
                 deletionConfirmation(note)
             }
@@ -675,14 +690,13 @@ struct TaskWindowView: View {
     /// Return to the row menu or collapsed group; if the task disappeared,
     /// prefer its surviving group, then Add. Unavailable data always uses Retry.
     private func focusAfterLeavingRow(_ id: UUID, fallbackGroup: TaskGroupID?) -> FocusControl {
-        guard state.availableProgress != nil else { return .retry }
-        guard let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else {
-            if let fallbackGroup, state.groups.contains(where: { $0.id == fallbackGroup }) {
-                return .group(fallbackGroup)
-            }
-            return .add
+        let target = TaskActionTarget.daily(id: id, dayKey: state.todayKey ?? "")
+        switch presentation.focusAfterLeavingRow(target, fallbackGroup: fallbackGroup, state: state) {
+        case .row: return .actions(id)
+        case .group(_, let groupID): return .group(groupID)
+        case .retry: return .retry
+        default: return .add
         }
-        return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .actions(id)
     }
 
     private func focusDraft(requestID: UUID? = nil) {
@@ -698,11 +712,7 @@ struct TaskWindowView: View {
     }
 
     private func showComposer() {
-        guard presentation.canAddTask(state: state) else { return }
-        // Only a genuinely new draft takes the last-used category. A pending one,
-        // from repeated Command-N or a reopened window, keeps its selection.
-        if !isComposerVisible && state.draft.isEmpty { state.startNewDraft() }
-        isComposerVisible = true
+        guard presentation.showComposer(in: .today, state: state) else { return }
         focusDraft()
     }
 
@@ -723,7 +733,7 @@ struct TaskWindowView: View {
         if state.editingNoteID != nil {
             _ = state.saveEdit()
         } else if state.addDraft() {
-            isComposerVisible = false
+            presentation.hideComposer(in: .today)
             focusedControl = .add
         }
     }
@@ -734,7 +744,7 @@ struct TaskWindowView: View {
             return
         }
         state.cancelDraft()
-        isComposerVisible = false
+        presentation.hideComposer(in: .today)
         focusedControl = .add
     }
 

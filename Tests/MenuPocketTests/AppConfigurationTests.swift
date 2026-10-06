@@ -120,12 +120,17 @@ final class AppConfigurationTests: XCTestCase {
         controller.showTasks()
         state.draft = "Separate new draft"
         state.draftCategoryID = home.id
+        controller.presentation.requestDeletion(id: note.id, state: state)
+        XCTAssertNotNil(controller.presentation.deletionTarget)
+        controller.window?.close()
+        XCTAssertNil(controller.presentation.deletionTarget)
+        XCTAssertFalse(controller.presentation.confirmDeletion(state: state))
+        controller.showTasks()
         state.beginEditing(id: note.id)
         XCTAssertEqual(state.editCategoryID, work.id)
         state.editDraft = "Retain this edit"
         state.editCategoryID = nil
-        controller.presentation.requestDeletion(id: note.id, state: state)
-        XCTAssertNotNil(controller.presentation.deletionTarget)
+        XCTAssertFalse(controller.presentation.requestDeletion(id: note.id, state: state))
         controller.window?.close()
         XCTAssertNil(controller.presentation.deletionTarget)
         XCTAssertFalse(controller.presentation.confirmDeletion(state: state))
@@ -138,6 +143,274 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertNil(state.refreshNotice)
         XCTAssertEqual(store.saved, [note])
         XCTAssertEqual(store.deleteAttempts, 0)
+    }
+
+    @MainActor
+    func testTabSelectionRetainsIndependentComposerDraftCategoryAndWriteErrorContexts() throws {
+        let store = TaskWindowReadFixture()
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        store.savedCategories = [work]
+        let state = makeTabState(store)
+        state.categoryPreferences.rememberLastUsed(work.id, in: .today)
+        let presentation = TaskWindowPresentation()
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertTrue(presentation.showComposer(in: .today, state: state))
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        state.draft = "Today draft"
+        XCTAssertFalse(state.addDraft())
+        let todayIssue = state.issue
+
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        XCTAssertFalse(presentation.isComposerVisible(in: .later))
+        XCTAssertEqual(presentation.focusAfterSelection(state: state), .add(.later))
+        XCTAssertTrue(presentation.requestNewTask(state: state))
+        XCTAssertEqual(presentation.newTaskRequest?.destination, .later)
+        presentation.consumeNewTaskRequest(in: .today)
+        XCTAssertNotNil(presentation.newTaskRequest)
+        state.laterDraftCategoryID = work.id
+        // Even with empty text, the open composer's category is a pending choice.
+        XCTAssertTrue(presentation.selectDestination(.today, state: state))
+        XCTAssertNil(presentation.newTaskRequest)
+        XCTAssertEqual(presentation.focusAfterSelection(state: state), .draft(.today))
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        XCTAssertTrue(presentation.showComposer(in: .later, state: state))
+        XCTAssertEqual(state.laterDraftCategoryID, work.id)
+        state.laterDraft = "Later draft"
+        XCTAssertFalse(state.addLaterDraft())
+        let laterIssue = state.laterIssue
+        XCTAssertTrue(presentation.selectDestination(.today, state: state))
+        XCTAssertEqual(state.draft, "Today draft")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.issue, todayIssue)
+        XCTAssertEqual(state.laterDraft, "Later draft")
+        XCTAssertEqual(state.laterDraftCategoryID, work.id)
+        XCTAssertEqual(state.laterIssue, laterIssue)
+        XCTAssertTrue(presentation.isComposerVisible(in: .today))
+        XCTAssertTrue(presentation.isComposerVisible(in: .later))
+        presentation.hideComposer(in: .today)
+        XCTAssertFalse(presentation.isComposerVisible(in: .today))
+        XCTAssertTrue(presentation.isComposerVisible(in: .later))
+        XCTAssertTrue(presentation.hasNewTaskComposer(in: .today, state: state))
+    }
+
+    @MainActor
+    func testTabGuardsPreserveEditsConfirmationsAndCategorySheetUntilResolved() throws {
+        let store = TaskWindowReadFixture()
+        let state = makeTabState(store)
+        let note = Note(id: UUID(), text: "Today", dayKey: try XCTUnwrap(state.todayKey),
+                        createdAt: Date(), completedAt: nil)
+        let later = LaterTask(id: UUID(), text: "Later", createdAt: Date(), completedAt: nil)
+        store.saved = [note]
+        store.savedLater = [later]
+        state.refresh()
+        let presentation = TaskWindowPresentation()
+        state.beginEditing(id: note.id)
+        state.editDraft = "Unsaved Today edit"
+        XCTAssertFalse(presentation.selectDestination(.later, state: state))
+        XCTAssertFalse(presentation.requestDeletion(id: note.id, state: state))
+        XCTAssertEqual(state.editDraft, "Unsaved Today edit")
+        state.cancelEditing()
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        state.beginEditingLater(id: later.id)
+        state.laterEditDraft = "Unsaved Later edit"
+        XCTAssertFalse(presentation.selectDestination(.today, state: state))
+        XCTAssertFalse(presentation.canAddTask(state: state))
+        XCTAssertFalse(presentation.showCategoryManager(state: state))
+        XCTAssertFalse(presentation.requestDeletion(id: later.id, state: state))
+        XCTAssertEqual(state.editingLaterTaskID, later.id)
+        XCTAssertEqual(state.laterEditDraft, "Unsaved Later edit")
+        state.cancelEditingLater()
+        XCTAssertTrue(presentation.requestDeletion(id: later.id, state: state))
+        XCTAssertFalse(presentation.selectDestination(.today, state: state))
+        XCTAssertFalse(presentation.requestDeletion(.daily(id: note.id, dayKey: note.dayKey), state: state))
+        XCTAssertEqual(presentation.deletionTarget, .later(id: later.id))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertFalse(presentation.selectDestination(.today, state: state))
+        XCTAssertTrue(presentation.isManagingCategories)
+        presentation.dismissCategoryManager()
+        XCTAssertTrue(presentation.selectDestination(.today, state: state))
+        XCTAssertFalse(presentation.requestDeletion(.later(id: later.id), state: state))
+        XCTAssertEqual(store.deleteAttempts, 0)
+    }
+
+    @MainActor
+    func testLaterDeletionSurvivesMidnightAndConsumesConfirmationBeforeFailureAndRetry() throws {
+        let store = TaskWindowReadFixture()
+        var instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let state = makeTabState(store, now: { instant })
+        let id = UUID()
+        let daily = Note(id: id, text: "Same UUID in Today", dayKey: try XCTUnwrap(state.todayKey),
+                         createdAt: instant, completedAt: nil)
+        let later = LaterTask(id: id, text: "Delete Later only", createdAt: instant, completedAt: nil)
+        store.saved = [daily]
+        store.savedLater = [later]
+        state.refresh()
+        let presentation = TaskWindowPresentation()
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        XCTAssertTrue(presentation.requestDeletion(id: id, state: state))
+        instant = instant.addingTimeInterval(86400)
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertEqual(presentation.deletionTarget, .later(id: id))
+        store.onDelete = { XCTAssertNil(presentation.deletionTarget) }
+        store.failDelete = true
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(state.laterTasks, [later])
+        XCTAssertEqual(state.availableLaterRemainingCount, 1)
+        XCTAssertEqual(state.laterIssue, .delete)
+        store.failDelete = false
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 1)
+        XCTAssertTrue(presentation.requestDeletion(id: id, state: state))
+        XCTAssertTrue(presentation.confirmDeletion(state: state))
+        XCTAssertEqual(store.deleteAttempts, 2)
+        XCTAssertEqual(store.saved, [daily])
+        XCTAssertTrue(store.savedLater.isEmpty)
+        XCTAssertEqual(state.availableLaterRemainingCount, 0)
+    }
+
+    @MainActor
+    func testLaterConfirmationUsesScopedAvailabilityAndCancelsForMissingTargets() throws {
+        let store = TaskWindowReadFixture()
+        let later = LaterTask(id: UUID(), text: "Later", createdAt: Date(), completedAt: nil)
+        store.savedLater = [later]
+        let state = makeTabState(store)
+        let presentation = TaskWindowPresentation()
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        XCTAssertTrue(presentation.requestDeletion(id: later.id, state: state))
+        store.failTodayRead = true
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertEqual(presentation.deletionTarget, .later(id: later.id))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.canAddTask(state: state))
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        presentation.dismissCategoryManager()
+        XCTAssertTrue(presentation.requestDeletion(id: later.id, state: state))
+        store.failLaterRead = true
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertNil(presentation.deletionTarget)
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        XCTAssertFalse(presentation.canAddTask(state: state))
+        XCTAssertEqual(presentation.focusAfterSelection(state: state), .retry(.later))
+        store.failTodayRead = false
+        store.failLaterRead = false
+        state.refresh()
+        XCTAssertTrue(presentation.requestDeletion(id: later.id, state: state))
+        store.savedLater = []
+        state.refresh()
+        presentation.validateDeletion(state: state)
+        XCTAssertNil(presentation.deletionTarget)
+        XCTAssertFalse(presentation.requestDeletion(id: later.id, state: state))
+        // An unrelated Later failure must not disable Today commands.
+        XCTAssertTrue(presentation.selectDestination(.today, state: state))
+        store.failLaterRead = true
+        state.refresh()
+        XCTAssertTrue(presentation.canAddTask(state: state))
+        XCTAssertEqual(store.deleteAttempts, 0)
+    }
+
+    @MainActor
+    func testRetainedWindowKeepsLaterSessionAndSafeTodayRequestDoesNotDiscardWork() throws {
+        let store = TaskWindowReadFixture()
+        let category = try TaskCategory(name: "Work", creationOrder: 0)
+        let later = LaterTask(id: UUID(), text: "Later", createdAt: Date(), completedAt: nil,
+                              categoryID: category.id)
+        store.savedCategories = [category]
+        store.savedLater = [later]
+        let state = makeTabState(store)
+        let controller = TaskWindowController(state: state, onSettings: {})
+        defer { controller.close() }
+        controller.showTasks()
+        let window = try XCTUnwrap(controller.window)
+        let presentation = controller.presentation
+        XCTAssertTrue(presentation.showComposer(in: .today, state: state))
+        state.draft = "Today draft"
+        XCTAssertTrue(presentation.selectDestination(.later, state: state))
+        XCTAssertTrue(presentation.showComposer(in: .later, state: state))
+        state.laterDraft = "Later draft"
+        state.laterDraftCategoryID = category.id
+        XCTAssertTrue(presentation.requestDeletion(id: later.id, state: state))
+        window.close()
+        XCTAssertNil(presentation.deletionTarget)
+        XCTAssertFalse(presentation.confirmDeletion(state: state))
+        controller.showTasks()
+        XCTAssertTrue(controller.window === window)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        state.beginEditingLater(id: later.id)
+        state.laterEditDraft = "Unsaved Later edit"
+        window.close()
+        XCTAssertFalse(controller.showToday())
+        XCTAssertTrue(window.isVisible)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(state.editingLaterTaskID, later.id)
+        XCTAssertEqual(state.laterEditDraft, "Unsaved Later edit")
+        XCTAssertEqual(state.laterEditCategoryID, category.id)
+        XCTAssertEqual(state.laterDraftCategoryID, category.id)
+        XCTAssertEqual(state.draft, "Today draft")
+        XCTAssertEqual(state.laterDraft, "Later draft")
+        XCTAssertTrue(presentation.isComposerVisible(in: .today))
+        XCTAssertTrue(presentation.isComposerVisible(in: .later))
+        state.cancelEditingLater()
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertTrue(presentation.requestCategoryRemoval(id: category.id, state: state))
+        XCTAssertFalse(controller.showToday())
+        XCTAssertNotNil(presentation.categoryRemovalTarget)
+        window.close()
+        XCTAssertFalse(presentation.isManagingCategories)
+        XCTAssertNil(presentation.categoryRemovalTarget)
+        controller.showTasks()
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertTrue(controller.showToday())
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertEqual(TaskWindowPresentation().selectedDestination, .today)
+        XCTAssertEqual(store.deleteAttempts, 0)
+        XCTAssertEqual(store.removeAttempts, 0)
+    }
+
+    @MainActor
+    func testScopedFocusFallbackUsesTheOwningListAndItsCollapsePreferences() throws {
+        let store = TaskWindowReadFixture()
+        let category = try TaskCategory(name: "Work", creationOrder: 0)
+        let id = UUID()
+        let later = LaterTask(id: id, text: "Later", createdAt: Date(), completedAt: nil,
+                              categoryID: category.id)
+        store.savedCategories = [category]
+        store.savedLater = [later]
+        let state = makeTabState(store)
+        store.saved = [Note(id: id, text: "Today", dayKey: try XCTUnwrap(state.todayKey),
+                            createdAt: Date(), completedAt: nil)]
+        state.refresh()
+        let presentation = TaskWindowPresentation()
+        let target = TaskActionTarget.later(id: id)
+        let group = TaskGroupID.category(category.id)
+        XCTAssertEqual(presentation.focusAfterLeavingRow(target, fallbackGroup: group, state: state), .row(target))
+        state.categoryPreferences.setCollapsed(true, for: group, in: .later)
+        XCTAssertEqual(presentation.focusAfterLeavingRow(target, fallbackGroup: group, state: state), .group(.later, group))
+        let daily = TaskActionTarget.daily(id: id, dayKey: try XCTUnwrap(state.todayKey))
+        XCTAssertEqual(presentation.focusAfterLeavingRow(daily, fallbackGroup: nil, state: state), .row(daily))
+        store.savedLater = [LaterTask(id: UUID(), text: "Surviving group", createdAt: Date(),
+                                     completedAt: nil, categoryID: category.id)]
+        state.refresh()
+        XCTAssertEqual(presentation.focusAfterLeavingRow(target, fallbackGroup: group, state: state), .group(.later, group))
+        store.savedLater = []
+        state.refresh()
+        XCTAssertEqual(presentation.focusAfterLeavingRow(target, fallbackGroup: group, state: state), .add(.later))
+        store.failLaterRead = true
+        state.refresh()
+        XCTAssertEqual(presentation.focusAfterLeavingRow(target, fallbackGroup: group, state: state), .retry(.later))
+    }
+
+    @MainActor
+    private func makeTabState(_ store: TaskWindowReadFixture, now: @escaping () -> Date = { Date() }) -> DailyNotesState {
+        let state = DailyNotesState(repositoryFactory: { store }, day: NoteDay(now: now),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        state.startup()
+        return state
     }
 
     @MainActor
@@ -1165,6 +1438,8 @@ private final class TaskWindowReadFixture: NoteRepository {
     var savedLater: [LaterTask] = []
     var savedCategories: [TaskCategory] = []
     var failRead = false
+    var failTodayRead = false
+    var failLaterRead = false
     var failDelete = false
     var deleteAttempts = 0
     var onDelete: (() -> Void)?
@@ -1212,7 +1487,7 @@ private final class TaskWindowReadFixture: NoteRepository {
 
     func notes(for dayKey: String) throws -> [Note] {
         readAttempts += 1
-        if failRead { throw CocoaError(.fileReadUnknown) }
+        if failRead || failTodayRead { throw CocoaError(.fileReadUnknown) }
         return saved.filter { $0.dayKey == dayKey }
     }
 
@@ -1239,7 +1514,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     }
 
     func laterTasks() throws -> [LaterTask] {
-        if failRead { throw CocoaError(.fileReadUnknown) }
+        if failRead || failLaterRead { throw CocoaError(.fileReadUnknown) }
         return savedLater
     }
     func addLater(_ task: LaterTask) throws {
