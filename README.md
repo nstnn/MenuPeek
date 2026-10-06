@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a local macOS desktop and menu bar app for daily tasks. Manage today's checklist in one resizable task window and see saved completed/total progress in the menu bar. Tasks stay in local SQLite storage. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. See the [product requirements](docs/REQUIREMENTS.md) for scope and the [desktop acceptance record](docs/DESKTOP_TASK_ACCEPTANCE.md) for verification status.
+MenuPocket is a local macOS desktop and menu bar app for daily tasks. Manage today's checklist in one resizable task window, browse earlier days read-only in History, and see saved completed/total progress in the menu bar. Tasks stay in local SQLite storage. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. See the [product requirements](docs/REQUIREMENTS.md) for scope and the [desktop acceptance record](docs/DESKTOP_TASK_ACCEPTANCE.md) for verification status.
 
 ## Requirements
 
@@ -41,19 +41,29 @@ Current-day new and edit drafts retain text and category across window close/reo
 
 The menu bar shows saved completed/total progress, including `0/0` after a successful empty read. Unloaded or failed reads show `—`; open the window and use Retry. Failed writes retain the last saved count. Progress refresh remains active with the window closed. The previous compact editable popup is no longer exposed.
 
-Tasks keep their assigned local day; unfinished tasks do not carry forward. Yesterday's unfinished count is informational. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
+Tasks keep their assigned local day; unfinished tasks do not carry forward. The yesterday reminder opens History at yesterday with the Unfinished filter. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
 
 Settings provides Open at Login, a Theme choice, a Quick Add switch, app information, and Quit. Theme defaults to System, which follows the macOS appearance; Light or Dark applies to the whole app immediately and is remembered across launches. Login startup initializes menu bar progress without raising tasks or Settings; the Dock icon remains visible. Actual login and interface evidence is recorded separately in [desktop acceptance](docs/DESKTOP_TASK_ACCEPTANCE.md).
 
 | Shortcut | Action |
 | --- | --- |
-| Command-N | Restore the task window and focus Add task; unavailable during editing, deletion confirmation, while Manage categories is open, or with unavailable data. |
+| Command-N | Restore the task window on Today and focus Add task; unavailable during editing, deletion confirmation, while Manage categories is open, or with unavailable data. |
 | Command-comma | Open the reusable Settings window. |
 | Command-W | Close the active window while the app keeps running. |
 | Command-Q | Quit the app. |
 | Control-Option-N | With Quick Add on, show the capture panel from any app. |
 
 Focused text fields support native cut/copy/paste/select-all and text undo/redo. Saved-task undo is outside this increment.
+
+## Browse history
+
+Click the calendar button beside Today's date (View task history) to open History in the same window. It replaces the Today content with a History heading and Back to Today; Today's unsaved new-task draft, open composer, and scroll position are kept for your return. History is read-only: old tasks cannot be completed, edited, deleted, or moved.
+
+History opens on yesterday in a Sunday-first month calendar. Each day shows completed/total for the tasks currently saved on that day: `0/0` for a past day with none, `—` for an empty future day, and Unavailable with Retry if the month could not be read. Use Previous month, Next month, and This month, or arrow keys, to move; click a day, or press Space or Return, to show its detail. Detail lists the day's tasks by current category in saved order. All, Unfinished, and Completed change only the rows shown; the day's count always covers every task.
+
+Counts use each task's assigned day, not the day it was completed, and reflect tasks currently saved: deleted tasks are not counted, and renamed or removed categories show their current label or General. They are not a frozen end-of-day record.
+
+Unfinished from previous days, inside History, lists every earlier day that still has unfinished tasks, newest first, 31 days at a time with Load more. Choosing a day opens its detail with the Unfinished filter; Back to Unfinished returns to the same list, and Go to Today returns to Today. The yesterday reminder on Today opens exactly yesterday with the Unfinished filter. Command-N, the menu bar count, the Dock, and Show Tasks always return to Today. History and Unfinished cannot be opened while you are editing a task, confirming a deletion, or managing categories.
 
 ## Quick Add
 
