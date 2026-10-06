@@ -1832,6 +1832,14 @@ private final class FakeNoteRepository: NoteRepository {
         savedCategories = categories
     }
 
+    func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
+        if failSnapshotRead != nil { throw FakeFailure.failed }
+        let notes = try saved.filter { range.contains(try GregorianDay(key: $0.dayKey)) }
+        return try Dictionary(grouping: notes, by: \.dayKey).keys.sorted().map { dayKey in
+            try DayTaskSummary(dayKey: dayKey, progress: NoteProgress(notes: notes, for: dayKey))
+        }
+    }
+
     func categories() throws -> [TaskCategory] {
         readAttempts += 1
         onCategoryRead?()

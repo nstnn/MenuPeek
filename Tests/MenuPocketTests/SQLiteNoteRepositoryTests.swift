@@ -744,6 +744,101 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try store.categories().first?.id, category.id)
     }
 
+    func testDaySummariesAreSparseOrderedAssignedDayCountsAndPreserveStorage() throws {
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2025-12-15"))
+        let beforeMonth = note("Excluded", day: "2025-11-30", createdAt: 1)
+        let first = note("First", day: "2025-12-01", createdAt: 2)
+        let nextMonth = note("Excluded next", day: "2026-01-01", createdAt: 3)
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            let done = note("Done outside assigned month", day: "2025-12-01", createdAt: 4,
+                            completedAt: Date(timeIntervalSince1970: 1), categoryID: category.id)
+            let last = note("All completed", day: "2025-12-31", createdAt: 5,
+                            completedAt: Date(timeIntervalSince1970: 2))
+            let middle = note("All incomplete", day: "2025-12-15", createdAt: 6)
+            for row in [last, nextMonth, beforeMonth, done, middle, first] { try store.add(row) }
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let categories = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+            let later = try laterRows()
+            let schema = try schemaSnapshot()
+            let version = try schemaVersion()
+            let suite = "HistorySummaryTests-\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("Keep", forKey: "unrelated")
+            let preferences = defaults.persistentDomain(forName: suite)
+
+            let summaries = try store.daySummaries(in: range)
+            XCTAssertEqual(summaries.map(\.dayKey), ["2025-12-01", "2025-12-15", "2025-12-31"])
+            XCTAssertEqual(summaries.map(\.progress), [NoteProgress(completed: 1, total: 2),
+                                                      NoteProgress(completed: 0, total: 1),
+                                                      NoteProgress(completed: 1, total: 1)])
+            for summary in summaries {
+                XCTAssertEqual(summary.progress,
+                               NoteProgress(notes: try store.notes(for: summary.dayKey), for: summary.dayKey))
+            }
+            XCTAssertEqual(try store.daySummaries(in: .month(containing: GregorianDay(key: "2026-01-20")))
+                .map(\.dayKey), ["2026-01-01"])
+            XCTAssertEqual(try store.daySummaries(in: .month(containing: GregorianDay(key: "2024-02-29"))), [])
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), categories)
+            XCTAssertEqual(try laterRows(), later)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try schemaVersion(), version)
+            XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, preferences as NSDictionary?)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.daySummaries(in: range).map(\.dayKey),
+                       ["2025-12-01", "2025-12-15", "2025-12-31"])
+        let plan = try rawRows("""
+            EXPLAIN QUERY PLAN SELECT day_key, COUNT(*), COUNT(completed_at),
+            SUM(CASE WHEN completed_at IS NULL OR
+                (typeof(completed_at) IN ('integer', 'real') AND
+                 completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                THEN 0 ELSE 1 END)
+            FROM notes WHERE day_key >= '2025-12-01' AND day_key < '2026-01-01'
+            GROUP BY day_key ORDER BY day_key ASC
+            """)
+        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+        print("History summary query plan: \(plan)")
+    }
+
+    func testDaySummariesRejectInvalidCompletionOnlyWithinRequestedRange() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(note("In range", day: "2024-02-29", createdAt: 1))
+        try store.add(note("Outside", day: "2024-03-01", createdAt: 2))
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2024-02-29"))
+        try executeRaw("UPDATE notes SET completed_at = 'invalid' WHERE day_key = '2024-03-01'")
+        XCTAssertEqual(try store.daySummaries(in: range).first?.progress, NoteProgress(completed: 0, total: 1))
+        for representation in ["'invalid'", "X'0102'", "1e999", "-1e999"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2024-02-29'")
+            XCTAssertThrowsError(try store.daySummaries(in: range)) { error in
+                guard case SQLiteNoteStoreError.invalidNoteRow = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+        for representation in ["0", "-1", "1.5", "NULL"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2024-02-29'")
+            XCTAssertEqual(try store.daySummaries(in: range).first?.progress.completed,
+                           representation == "NULL" ? 0 : 1)
+        }
+    }
+
+    func testDaySummariesRejectMalformedInRangeDayAndQueryFailures() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(note("Malformed day", day: "2025-02-30", createdAt: 1))
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2025-02-01"))
+        XCTAssertThrowsError(try store.daySummaries(in: range))
+        try executeRaw("DELETE FROM notes; DROP TABLE notes")
+        XCTAssertThrowsError(try store.daySummaries(in: range)) { error in
+            guard case SQLiteNoteStoreError.databaseError = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
     private func note(_ text: String, day: String, createdAt: TimeInterval,
                       completedAt: Date? = nil, categoryID: UUID? = nil) -> Note {
         Note(id: UUID(), text: text, dayKey: day,

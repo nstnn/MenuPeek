@@ -246,6 +246,44 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    /// One statement gives a coherent snapshot and uses notes_day_key_idx.
+    func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
+        let statement = try prepare(
+            """
+            SELECT day_key, COUNT(*), COUNT(completed_at),
+                   SUM(CASE WHEN completed_at IS NULL OR
+                       (typeof(completed_at) IN ('integer', 'real') AND
+                        completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                       THEN 0 ELSE 1 END)
+            FROM notes WHERE day_key >= ? AND day_key < ?
+            GROUP BY day_key ORDER BY day_key ASC
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(range.start.key, at: 1, to: statement)
+        try bind(range.end.key, at: 2, to: statement)
+
+        var summaries: [DayTaskSummary] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return summaries }
+            try check(step, expected: SQLITE_ROW, operation: "read day summaries")
+            guard sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
+                  sqlite3_column_type(statement, 2) == SQLITE_INTEGER,
+                  sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
+                  sqlite3_column_int64(statement, 3) == 0,
+                  let total = Int(exactly: sqlite3_column_int64(statement, 1)),
+                  let completed = Int(exactly: sqlite3_column_int64(statement, 2)),
+                  total > 0 else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            let summary = try DayTaskSummary(dayKey: text(at: 0, from: statement),
+                                             progress: NoteProgress(completed: completed, total: total))
+            guard range.contains(summary.day) else { throw SQLiteNoteStoreError.invalidNoteRow }
+            summaries.append(summary)
+        }
+    }
+
     func incompleteCount(for dayKey: String) throws -> Int {
         let statement = try prepare(
             "SELECT COUNT(*) FROM notes WHERE day_key = ? AND completed_at IS NULL"
