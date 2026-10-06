@@ -1832,6 +1832,12 @@ private final class FakeNoteRepository: NoteRepository {
         savedCategories = categories
     }
 
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
+        _ = try GregorianDay(key: dayKey)
+        let catalog = try categories()
+        return try HistoryDaySnapshot(dayKey: dayKey, notes: notes(for: dayKey), categories: catalog)
+    }
+
     func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
         if failSnapshotRead != nil { throw FakeFailure.failed }
         let notes = try saved.filter { range.contains(try GregorianDay(key: $0.dayKey)) }

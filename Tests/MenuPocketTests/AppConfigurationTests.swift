@@ -1173,6 +1173,12 @@ private final class TaskWindowReadFixture: NoteRepository {
     var removeAttempts = 0
     var onRemove: (() -> Void)?
 
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
+        _ = try GregorianDay(key: dayKey)
+        let catalog = try categories()
+        return try HistoryDaySnapshot(dayKey: dayKey, notes: notes(for: dayKey), categories: catalog)
+    }
+
     func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
         if failRead { throw CocoaError(.fileReadUnknown) }
         let notes = try saved.filter { range.contains(try GregorianDay(key: $0.dayKey)) }

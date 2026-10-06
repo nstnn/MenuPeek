@@ -284,6 +284,15 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
+        let day = try GregorianDay(key: dayKey)
+        return try readTransaction {
+            let catalog = try categories()
+            let orderedNotes = try notes(for: day.key)
+            return try HistoryDaySnapshot(dayKey: day.key, notes: orderedNotes, categories: catalog)
+        }
+    }
+
     func incompleteCount(for dayKey: String) throws -> Int {
         let statement = try prepare(
             "SELECT COUNT(*) FROM notes WHERE day_key = ? AND completed_at IS NULL"
@@ -341,6 +350,20 @@ final class SQLiteNoteRepository: NoteRepository {
     func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
         throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+    }
+
+    /// The first SELECT establishes the snapshot shared by all required reads.
+    /// Unlike mutation transactions, this does not reserve the writer lock.
+    private func readTransaction<Result>(_ body: () throws -> Result) throws -> Result {
+        try Self.execute("BEGIN DEFERRED", in: database)
+        do {
+            let result = try body()
+            try Self.execute("COMMIT", in: database)
+            return result
+        } catch {
+            try? Self.execute("ROLLBACK", in: database)
+            throw error
+        }
     }
 
     private func transaction<Result>(_ body: () throws -> Result) throws -> Result {

@@ -38,6 +38,9 @@ protocol NoteRepository {
     /// Sparse whole-day counts, ordered oldest first, in [start, end).
     /// A failed or malformed read throws; only successful reads may be empty.
     func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary]
+    /// Current catalog and ordered tasks from one coherent, read-only snapshot.
+    /// Required-read or validation failures throw, never publish a partial day.
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot
     func incompleteCount(for dayKey: String) throws -> Int
     /// Appends a task after the day's existing tasks.
     func add(_ note: Note) throws
