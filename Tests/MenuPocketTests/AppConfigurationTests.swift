@@ -521,7 +521,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(presentation.categoryRemovalTarget,
                        Target(id: work.id, name: "Work", usageCount: 2, countChanged: false))
         XCTAssertTrue(TaskCategoryManagerView.removalMessage(usageCount: 2)
-            .hasPrefix("2 tasks, across all days, use this category. They will move to General"))
+            .hasPrefix("2 tasks, across all saved days and Later, use this category. They will move to General"))
         presentation.cancelCategoryRemoval()
         XCTAssertEqual(presentation.confirmCategoryRemoval(state: state), .notRemoved)
         XCTAssertEqual(store.removeAttempts, 0)
@@ -871,6 +871,81 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertNil(fixture.delegate.settingsWindowController)
         XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
         XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+    }
+
+    @MainActor
+    func testLaterNativeComposerSwitchReopenFailureAndReturnUseOnlyLaterContext() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        fixture.state.draft = "Pending Today"
+        XCTAssertTrue(controller.presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertTrue(controller.presentation.requestNewTask(state: fixture.state))
+        let editor = try await focusedEditor(in: window)
+        editor.insertText("Pending Later", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        XCTAssertEqual(fixture.state.laterDraft, "Pending Later")
+        XCTAssertEqual(fixture.state.draft, "Pending Today")
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.state.laterIssue == .add }
+        XCTAssertEqual(fixture.state.laterDraft, "Pending Later")
+        XCTAssertNil(fixture.state.issue)
+        XCTAssertTrue(fixture.repository.savedLater.isEmpty)
+
+        XCTAssertTrue(controller.presentation.selectDestination(.today, state: fixture.state))
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == "Pending Today" }
+        XCTAssertTrue(controller.presentation.selectDestination(.later, state: fixture.state))
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == "Pending Later" }
+        window.performClose(nil)
+        controller.showTasks()
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == "Pending Later" }
+        XCTAssertEqual(controller.presentation.selectedDestination, .later)
+        fixture.repository.allowAdd = true
+        try await focusedEditor(in: window).doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.state.laterDraft.isEmpty }
+        XCTAssertEqual(fixture.repository.savedLater.map(\.text), ["Pending Later"])
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+        XCTAssertEqual(fixture.state.draft, "Pending Today")
+        XCTAssertFalse(controller.presentation.isLaterComposerVisible)
+        XCTAssertNil(fixture.state.laterIssue)
+    }
+
+    @MainActor
+    func testLaterInlineEditorEscapeAndReturnPreserveTodayDraftAndSavedCompletion() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let task = LaterTask(id: UUID(), text: "Completed Later", createdAt: Date(),
+                             completedAt: Date(), categoryID: nil)
+        fixture.repository.savedLater = [task]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        fixture.state.draft = "Today draft"
+        fixture.state.laterDraft = "Later draft"
+        XCTAssertTrue(controller.presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.beginEditingLater(id: task.id)
+        let editor = try await focusedEditor(in: window)
+        XCTAssertEqual(editor.string, task.text)
+        editor.insertText("Cancelled edit", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        XCTAssertFalse(controller.presentation.selectDestination(.today, state: fixture.state))
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { fixture.state.editingLaterTaskID == nil }
+        XCTAssertEqual(fixture.repository.savedLater, [task])
+        XCTAssertTrue(controller.presentation.requestNewTask(state: fixture.state))
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == "Later draft" }
+        try await focusedEditor(in: window).doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { fixture.state.laterDraft.isEmpty }
+        fixture.state.beginEditingLater(id: task.id)
+        await waitUntil { (window.firstResponder as? NSTextView)?.string == task.text }
+        let savedEditor = try await focusedEditor(in: window)
+        savedEditor.insertText("Saved edit", replacementRange: NSRange(location: 0, length: savedEditor.string.utf16.count))
+        savedEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.state.editingLaterTaskID == nil }
+        XCTAssertEqual(fixture.repository.savedLater.first?.text, "Saved edit")
+        XCTAssertEqual(fixture.repository.savedLater.first?.completedAt, task.completedAt)
+        XCTAssertEqual(fixture.state.draft, "Today draft")
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
     }
 
     @MainActor
