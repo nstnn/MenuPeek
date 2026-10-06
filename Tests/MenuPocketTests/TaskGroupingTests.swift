@@ -94,9 +94,58 @@ final class TaskGroupingTests: XCTestCase {
         }
     }
 
+    func testLaterGroupsFollowCategoryCreationOrderAndKeepSavedOrderWithGeneralLast() throws {
+        let school = try TaskCategory(name: "School", creationOrder: 0)
+        let work = try TaskCategory(name: "Work", creationOrder: 2)
+        let reply = laterTask("Reply to client", work, completed: true)
+        let groceries = laterTask("Buy groceries", nil)
+        let math = laterTask("Finish math", school, completed: true)
+        let report = laterTask("Finish report", work)
+        let desk = laterTask("Clean desk", nil)
+        let biology = laterTask("Read biology", school)
+        let saved = [reply, groceries, math, report, desk, biology]
+
+        let groups = LaterTaskGroup.groups(categories: [work, school], tasks: saved)
+
+        XCTAssertEqual(groups.map(\.id), [.category(school.id), .category(work.id), .general])
+        XCTAssertEqual(groups.map(\.name), ["School", "Work", "General"])
+        XCTAssertEqual(groups.map(\.tasks), [[math, biology], [reply, report], [groceries, desk]])
+        XCTAssertEqual(groups.map(\.remainingCount), [1, 1, 2])
+    }
+
+    func testLaterGroupsWithOnlyCompletedTasksRemainVisibleWithZeroRemaining() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let completedWork = laterTask("Done work", work, completed: true)
+        let pendingGeneral = laterTask("Pending general", nil, completed: false)
+
+        let groups = LaterTaskGroup.groups(categories: [work], tasks: [completedWork, pendingGeneral])
+
+        XCTAssertEqual(groups.map(\.id), [.category(work.id), .general])
+        XCTAssertEqual(groups[0].remainingCount, 0)
+        XCTAssertEqual(groups[0].tasks.count, 1)
+        XCTAssertEqual(groups[1].remainingCount, 1)
+    }
+
+    func testLaterEmptyGroupsDoNotAppear() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let task = laterTask("Only work", work)
+
+        let groups = LaterTaskGroup.groups(categories: [work, home], tasks: [task])
+
+        XCTAssertEqual(groups.map(\.id), [.category(work.id)])
+        XCTAssertEqual(groups.map(\.name), ["Work"])
+    }
+
     private func note(_ text: String, _ category: TaskCategory?, completed: Bool = false) -> Note {
         let instant = Date(timeIntervalSince1970: 1_790_000_000)
         return Note(id: UUID(), text: text, dayKey: day, createdAt: instant,
                     completedAt: completed ? instant : nil, categoryID: category?.id)
+    }
+
+    private func laterTask(_ text: String, _ category: TaskCategory?, completed: Bool = false) -> LaterTask {
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        return LaterTask(id: UUID(), text: text, createdAt: instant,
+                         completedAt: completed ? instant : nil, categoryID: category?.id)
     }
 }

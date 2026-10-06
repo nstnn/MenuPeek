@@ -27,10 +27,11 @@ protocol NoteRepository {
     func createCategory(name: String) throws -> TaskCategory
     /// Keeps the category's identity and creation order.
     func renameCategory(id: UUID, name: String) throws -> TaskCategory
-    /// Includes completed and incomplete tasks across every saved day.
-    /// A missing category throws, rather than reporting an unused category.
+    /// Includes completed and incomplete tasks across every saved day and the
+    /// Later list. A missing category throws, rather than reporting an unused category.
     func categoryUsageCount(id: UUID) throws -> Int
-    /// Preserves every task and clears its association, atomically across all days.
+    /// Preserves every task and clears its association, atomically across all
+    /// days and the Later list.
     func removeCategory(id: UUID) throws
 
     /// Returns tasks in saved insertion order, independent of completion or timestamps.
@@ -54,10 +55,13 @@ protocol NoteRepository {
     func delete(id: UUID) throws
 
     /// Later tasks in saved insertion order, including completed ones.
+    /// A malformed row or dangling category association throws; nothing is repaired.
     func laterTasks() throws -> [LaterTask]
-    /// Appends a task after the existing Later tasks.
+    /// Appends a task after the existing Later tasks. A duplicate ID throws
+    /// without replacing the saved task.
     func addLater(_ task: LaterTask) throws
-    /// Preserves identity, text, category, creation instant, and order.
+    /// Preserves identity, text, category, creation instant, and order. The
+    /// Later write methods throw `LaterTaskRepositoryError.notFound` for a missing ID.
     func setLaterCompleted(id: UUID, completedAt: Date?) throws
     /// Saves both fields together, preserving timestamps, completion, and order.
     func updateLater(id: UUID, text: String, categoryID: UUID?) throws

@@ -62,3 +62,37 @@ struct TaskGroup: Identifiable, Equatable {
         return custom + [TaskGroup(id: .general, name: TaskCategoryName.general, notes: general)]
     }
 }
+
+/// Presentation derived from the saved Later snapshot on each read; groups and
+/// their counts are never saved.
+struct LaterTaskGroup: Identifiable, Equatable {
+    let id: TaskGroupID
+    let name: String
+    /// Every task in the group in saved insertion order, whether or not the
+    /// group is collapsed.
+    let tasks: [LaterTask]
+
+    /// Unfinished tasks in this group. Groups containing only completed rows
+    /// remain visible with zero remaining.
+    var remainingCount: Int {
+        tasks.count { !$0.isCompleted }
+    }
+
+    /// Custom categories in saved creation order, then General. Only groups
+    /// with tasks appear. Each group filters the canonical task array, so a
+    /// reassigned task takes its original relative position in its new group.
+    /// The state never publishes a task whose category is missing from the
+    /// catalog, so every task lands in exactly one group.
+    static func groups(categories: [TaskCategory], tasks: [LaterTask]) -> [LaterTaskGroup] {
+        let custom = categories
+            .sorted { $0.creationOrder < $1.creationOrder }
+            .compactMap { category -> LaterTaskGroup? in
+                let rows = tasks.filter { $0.categoryID == category.id }
+                return rows.isEmpty ? nil : LaterTaskGroup(id: .category(category.id), name: category.name, tasks: rows)
+            }
+        let general = tasks.filter { $0.categoryID == nil }
+        guard !general.isEmpty else { return custom }
+        return custom + [LaterTaskGroup(id: .general, name: TaskCategoryName.general, tasks: general)]
+    }
+}
+

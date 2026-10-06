@@ -14,12 +14,25 @@ struct TaskBrowserView: View {
 
     var body: some View {
         ZStack {
-            TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
+            TaskWindowView(state: state, presentation: presentation)
                 .opacity(presentation.route == .today ? 1 : 0)
                 .allowsHitTesting(presentation.route == .today)
                 .disabled(presentation.route != .today)
                 .accessibilityHidden(presentation.route != .today)
             if presentation.route != .today { browserContent }
+        }
+        // Bridged into the window's unified title bar by TaskWindowController.
+        // Owned here so it stays active while History hides the task list.
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                destinationControl
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                }
+                .help("Open Settings (⌘,)")
+                .accessibilityLabel("Open Settings")
+                .disabled(presentation.deletionTarget != nil)
+            }
         }
         .task(id: presentation.route) {
             let previous = lastRoute
@@ -37,6 +50,28 @@ struct TaskBrowserView: View {
                 backFocused = route != .today
             }
         }
+    }
+
+    /// Selecting either list from History returns to that list.
+    private var destinationControl: some View {
+        let destination = presentation.selectedDestination
+        return Picker("Task list", selection: Binding(
+            get: { destination },
+            set: { _ = presentation.selectDestination($0, state: state) }
+        )) {
+            Text("Today").tag(TaskListDestination.today)
+                .accessibilityIdentifier("todayTab")
+            Text("Later").tag(TaskListDestination.later)
+                .accessibilityIdentifier("laterTab")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
+                  presentation.deletionTarget != nil || presentation.isManagingCategories)
+        .accessibilityLabel("Task list")
+        .accessibilityValue(destination == .later ? "Later" : "Today")
+        .accessibilityIdentifier("taskDestination")
     }
 
     private func goBack() {
@@ -86,10 +121,6 @@ struct TaskBrowserView: View {
                                     .historyKeyAction { presentation.showToday(state: state) }
                                     .accessibilityIdentifier("taskBrowserToday")
                             }
-                            Button(action: onSettings) { Image(systemName: "gearshape") }
-                                .keyboardFocusAppearance()
-                                .accessibilityLabel("Settings")
-                                .help("Settings (⌘,)")
                         }
                         Text(isUnfinishedRoute ? "Unfinished" : "History")
                             .font(.system(size: 24, weight: .semibold))

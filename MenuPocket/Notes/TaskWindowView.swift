@@ -3,8 +3,63 @@ import SwiftUI
 
 /// Desktop checklist backed by the app-owned saved snapshot and draft.
 struct TaskWindowView: View {
+    private struct Row: Identifiable {
+        let id: UUID
+        let text: String
+        let isCompleted: Bool
+        let categoryID: UUID?
+    }
+
+    private struct Group: Identifiable {
+        let id: TaskGroupID
+        let name: String
+        let notes: [Row]
+        var progress: NoteProgress {
+            NoteProgress(completed: notes.count { $0.isCompleted }, total: notes.count)
+        }
+    }
+
+    private var destination: TaskListDestination { presentation.selectedDestination }
+    private var isLater: Bool { destination == .later }
+    private var isAvailable: Bool { isLater ? state.availableLaterTasks != nil : state.availableProgress != nil }
+    private var editingID: UUID? { isLater ? state.editingLaterTaskID : state.editingNoteID }
+    private var issue: DailyNotesIssue? { isLater ? state.laterIssue : state.issue }
+    private var rows: [Row] {
+        if isLater {
+            return state.laterTasks.map { Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID) }
+        }
+        return state.notes.map { Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID) }
+    }
+    private var groups: [Group] {
+        if isLater {
+            return state.laterGroups.map { group in
+                Group(id: group.id, name: group.name, notes: group.tasks.map {
+                    Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID)
+                })
+            }
+        }
+        return state.groups.map { group in
+            Group(id: group.id, name: group.name, notes: group.notes.map {
+                Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID)
+            })
+        }
+    }
+    private var draftBinding: Binding<String> {
+        if isLater { return editingID == nil ? $state.laterDraft : $state.laterEditDraft }
+        return editingID == nil ? $state.draft : $state.editDraft
+    }
+    private func categoryBinding(editing: Bool) -> Binding<UUID?> {
+        if isLater { return editing ? $state.laterEditCategoryID : $state.laterDraftCategoryID }
+        return editing ? $state.editCategoryID : $state.draftCategoryID
+    }
+    private func identifier(_ today: String, _ later: String) -> String { isLater ? later : today }
+    private func actionTarget(_ id: UUID) -> TaskActionTarget {
+        isLater ? .later(id: id) : .daily(id: id, dayKey: state.todayKey ?? "")
+    }
+
     private enum FocusControl: Hashable {
-        case add, manageCategories, settings, retry, save, draft, category, cancelDelete, confirmDelete, history, yesterday
+        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete, history, yesterday
+        case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
         case actions(UUID)
@@ -16,14 +71,20 @@ struct TaskWindowView: View {
 
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
-    let onSettings: () -> Void
-    @State private var isComposerVisible = false
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
+    @State private var moveNoticeID = UUID()
+    @State private var isMoveNoticeVisible = false
     @FocusState private var focusedControl: FocusControl?
     @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Add and inline Edit mount different native fields. Separate focus values
+    /// ensure replacing one field also requests focus for the other.
+    private var textFocusControl: FocusControl {
+        editingID.map(FocusControl.edit) ?? .draft
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -39,6 +100,11 @@ struct TaskWindowView: View {
                 if hasTopInteractionContent {
                     VStack(alignment: .leading, spacing: 12) {
                         if hasComposer { composer }
+                        if hasMoveNotice {
+                            Text("Moved task to Today.")
+                                .font(.callout)
+                                .accessibilityIdentifier("laterMoveNotice")
+                        }
                         if let message = topWriteError { taskWriteError(message) }
                     }
                     .padding(16)
@@ -52,19 +118,19 @@ struct TaskWindowView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 24) {
                             recoveryNotice
-                            if let progress = state.availableProgress {
-                                if progress.total == 0 {
+                            if isAvailable {
+                                if rows.isEmpty {
                                     emptyState
                                 } else {
                                     LazyVStack(alignment: .leading, spacing: 24) {
-                                        ForEach(state.groups) { group in
+                                        ForEach(groups) { group in
                                             groupSurface(group)
                                                 .id(group.id)
                                         }
                                     }
                                     .scrollTargetLayout()
                                 }
-                                if state.yesterdayIncompleteCount > 0 {
+                                if !isLater, state.yesterdayIncompleteCount > 0 {
                                     Button {
                                         openHistory(.yesterday)
                                     } label: {
@@ -94,17 +160,29 @@ struct TaskWindowView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollPosition(id: Binding(
-                        get: { presentation.todayScrollAnchor },
-                        set: { if presentation.route == .today { presentation.todayScrollAnchor = $0 } }
+                        // The retained anchor belongs to Today's groups only.
+                        get: { isLater ? nil : presentation.todayScrollAnchor },
+                        set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
                     ))
-                    .accessibilityIdentifier("todayTaskList")
+                    .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
+                    .id(destination)
                     .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
                     .contentShape(Rectangle())
                     .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
                     .onChange(of: presentation.todayScrollRestoreID) { _, _ in
-                        if let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
+                        if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
                     }
-                    .onChange(of: state.editingNoteID, initial: true) { old, new in
+                    .onChange(of: geometry.size) { _, _ in
+                        guard let id = editingID else { return }
+                        let requestID = focusRequestID
+                        let owner = destination
+                        Task { @MainActor in
+                            await Task.yield()
+                            guard focusRequestID == requestID, destination == owner, editingID == id else { return }
+                            scroll.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    .onChange(of: editingID, initial: true) { old, new in
                         // Keep the editor or its saved destination visible when
                         // the Add composer changes the list's available height.
                         if let id = new ?? old {
@@ -116,7 +194,7 @@ struct TaskWindowView: View {
                             Task { @MainActor in
                                 await Task.yield()
                                 guard presentation.route == .today, focusRequestID == requestID else { return }
-                                if let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) {
+                                if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
                                     // Entry/exit changes the space above the list.
                                     // Mount the group before targeting its row.
                                     scroll.scrollTo(group.id, anchor: .top)
@@ -158,6 +236,7 @@ struct TaskWindowView: View {
                 Task { @MainActor in
                     await Task.yield()
                     guard presentation.route == .today, focusRequestID == requestID else { return }
+                    if isLater { focusSelectedList(); return }
                     focusedControl = state.availableProgress == nil ? .retry
                         : (presentation.historyEntry == .yesterday && state.yesterdayIncompleteCount > 0 ? .yesterday : .history)
                 }
@@ -167,31 +246,54 @@ struct TaskWindowView: View {
             if wasManaging, !isManaging { focusManageCategories() }
         }
         .onChange(of: presentation.newTaskRequestID, initial: true) { _, request in
-            if request != nil {
+            if request != nil, presentation.newTaskRequest?.destination == destination {
                 showComposer()
-                presentation.consumeNewTaskRequest()
+                presentation.consumeNewTaskRequest(in: destination)
             }
+        }
+        .onChange(of: destination) { _, _ in
+            // Supersede every delayed focus/scroll request from the previous list.
+            focusRequestID = UUID()
+            editFocusRequestID = nil
+            rowActionOrigin = nil
+            focusedControl = nil
+            // Leaving History for another list focuses after the route settles.
+            if presentation.route == .today { focusSelectedList() }
+        }
+        .task(id: moveNoticeID) {
+            guard isMoveNoticeVisible else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            isMoveNoticeVisible = false
         }
         .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: state.notes) { old, new in
             presentation.validateDeletion(state: state)
-            if let id = focusedNoteID, !new.contains(where: { $0.id == id }),
+            if !isLater, let id = focusedNoteID, !new.contains(where: { $0.id == id }),
                let note = old.first(where: { $0.id == id }) {
                 restoreRowFocus(id, fallbackGroup: TaskGroupID(categoryID: note.categoryID))
             }
         }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
-        .onChange(of: presentation.deletionTarget?.id) { old, new in
-            if let old, new == nil { restoreRowFocus(old) }
+        .onChange(of: state.laterTasks) { old, new in
+            presentation.validateDeletion(state: state)
+            if isLater, let id = focusedNoteID, !new.contains(where: { $0.id == id }),
+               let task = old.first(where: { $0.id == id }) {
+                restoreRowFocus(id, fallbackGroup: TaskGroupID(categoryID: task.categoryID))
+            }
+        }
+        .onChange(of: state.hasLoadedLater) { _, _ in presentation.validateDeletion(state: state) }
+        .onChange(of: presentation.deletionTarget) { old, new in
+            if let old, new == nil, old.destination == destination { restoreRowFocus(old.id) }
         }
     }
 
     private var writeError: String? {
-        switch state.issue {
+        switch issue {
         case .add: "Could not save task. Try again."
         case .complete: "Could not update task. Try again."
         case .edit: "Could not save edit. Try again."
         case .delete: "Could not delete task. Try again."
+        case .move: "Could not move task to Today. Try again."
         default: nil
         }
     }
@@ -199,40 +301,57 @@ struct TaskWindowView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 24) {
-                    dateHeading
+                HStack(alignment: .center, spacing: 24) {
+                    listHeading
                     Spacer(minLength: 16)
                     topActions
                 }
                 VStack(alignment: .leading, spacing: 16) {
-                    dateHeading
+                    listHeading
                     topActions
                 }
             }
-            HStack(spacing: 12) {
-                if let progress = state.availableProgress {
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.quaternary)
-                        Capsule().fill(Color.accentColor)
-                            .frame(width: 160 * Double(progress.completed) / Double(max(progress.total, 1)))
+            if !isLater {
+                HStack(spacing: 12) {
+                    if let progress = state.availableProgress {
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.quaternary)
+                            Capsule().fill(Color.accentColor)
+                                .frame(width: 160 * Double(progress.completed) / Double(max(progress.total, 1)))
+                        }
+                        .frame(width: 160, height: 4)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Today's task progress")
+                        .accessibilityValue("\(progress.completed) of \(progress.total) complete")
+                        Text("\(progress.completed)/\(progress.total) complete")
+                            .font(.system(size: 12).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("todayProgress")
+                    } else {
+                        Text("—")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Task progress unavailable")
+                            .accessibilityIdentifier("todayProgress")
                     }
-                    .frame(width: 160, height: 4)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Today's task progress")
-                    .accessibilityValue("\(progress.completed) of \(progress.total) complete")
-                    Text("\(progress.completed)/\(progress.total) complete")
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("todayProgress")
-                } else {
-                    Text("—")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Task progress unavailable")
-                        .accessibilityIdentifier("todayProgress")
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var listHeading: some View {
+        if isLater {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Later")
+                    .font(.system(size: 24, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text(state.availableLaterRemainingCount.map { "\($0) \($0 == 1 ? "task" : "tasks") remaining" } ?? "Tasks unavailable")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("laterRemainingCount")
+            }
+        } else { dateHeading }
     }
 
     private var dateHeading: some View {
@@ -301,20 +420,6 @@ struct TaskWindowView: View {
             .help("Manage categories")
             .accessibilityLabel("Manage categories")
             .accessibilityIdentifier("manageCategories")
-            Button(action: onSettings) {
-                Image(systemName: "gearshape")
-            }
-            .focusable()
-            .keyboardFocusAppearance()
-            .focused($focusedControl, equals: .settings)
-            .onKeyPress(keys: [.space, .return]) { _ in
-                onSettings()
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .settings) }
-            .help("Open Settings (⌘,)")
-            .accessibilityLabel("Open Settings")
-            .disabled(presentation.deletionTarget != nil)
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
@@ -322,16 +427,18 @@ struct TaskWindowView: View {
     }
 
     private var hasComposer: Bool {
-        presentation.deletionTarget == nil && state.editingNoteID == nil &&
-            (isComposerVisible || !state.draft.isEmpty)
+        presentation.deletionTarget == nil && editingID == nil &&
+            presentation.hasNewTaskComposer(in: destination, state: state)
     }
 
     private var topWriteError: String? {
-        state.editingNoteID != nil && state.issue == .edit ? nil : writeError
+        editingID != nil && issue == .edit ? nil : writeError
     }
 
+    private var hasMoveNotice: Bool { isLater && isMoveNoticeVisible && issue != .move }
+
     private var hasTopInteractionContent: Bool {
-        presentation.deletionTarget == nil && (hasComposer || topWriteError != nil)
+        presentation.deletionTarget == nil && (hasComposer || hasMoveNotice || topWriteError != nil)
     }
 
     private var hasFooterContent: Bool {
@@ -341,7 +448,8 @@ struct TaskWindowView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let target = presentation.deletionTarget,
-               let note = state.notes.first(where: { $0.id == target.id }) {
+               target.destination == destination,
+               let note = rows.first(where: { $0.id == target.id }) {
                 deletionConfirmation(note)
             }
             if let message = writeError {
@@ -353,7 +461,7 @@ struct TaskWindowView: View {
     private func taskWriteError(_ message: String) -> some View {
         Text(message)
             .foregroundStyle(.red)
-            .accessibilityIdentifier("taskWriteError")
+            .accessibilityIdentifier(identifier("taskWriteError", "laterTaskWriteError"))
     }
 
     private var dayLabels: (date: String, weekday: String) {
@@ -377,19 +485,19 @@ struct TaskWindowView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("No tasks yet")
                 .font(.title3.weight(.semibold))
-            Text("Today's tasks will appear here.")
+            Text(isLater ? "Tasks saved for later will appear here." : "Today's tasks will appear here.")
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 24)
-        .accessibilityIdentifier("todayEmptyState")
+        .accessibilityIdentifier(identifier("todayEmptyState", "laterEmptyState"))
     }
 
     private var unavailableState: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tasks are unavailable")
                 .font(.title3.weight(.semibold))
-                .accessibilityIdentifier("todayUnavailableState")
-            Text("Could not load today's tasks. Try again.")
+                .accessibilityIdentifier(identifier("todayUnavailableState", "laterUnavailableState"))
+            Text(isLater ? "Could not load Later tasks. Try again." : "Could not load today's tasks. Try again.")
                 .foregroundStyle(.secondary)
             Button("Retry") { state.refresh() }
                 .focusable()
@@ -400,18 +508,19 @@ struct TaskWindowView: View {
                     return .handled
                 }
                 .overlay { focusOutline(focusedControl == .retry) }
-                .accessibilityIdentifier("retryTodayTasks")
+                .accessibilityIdentifier(identifier("retryTodayTasks", "retryLaterTasks"))
         }
         .padding(.vertical, 24)
     }
 
     @ViewBuilder
     private var recoveryNotice: some View {
-        if let notice = state.refreshNotice {
+        if let notice = isLater ? state.laterRefreshNotice : state.refreshNotice,
+           notice != "Moved task to Today." {
             VStack(alignment: .leading, spacing: 8) {
                 Text(notice)
                     .font(.callout)
-                if let recovered = state.recoveredEdit {
+                if let recovered = isLater ? state.laterRecoveredEdit : state.recoveredEdit {
                     Text("Unsaved edit")
                         .font(.callout.weight(.semibold))
                     Text(recovered.text)
@@ -430,13 +539,13 @@ struct TaskWindowView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .accessibilityIdentifier("todayRecoveryNotice")
+            .accessibilityIdentifier(identifier("todayRecoveryNotice", "laterRecoveryNotice"))
         }
     }
 
     /// The count covers every task in the group, including rows hidden by collapse.
-    private func groupSurface(_ group: TaskGroup) -> some View {
-        let collapsed = state.categoryPreferences.isCollapsed(group.id)
+    private func groupSurface(_ group: Group) -> some View {
+        let collapsed = state.categoryPreferences.isCollapsed(group.id, in: destination)
         return VStack(alignment: .leading, spacing: 0) {
             groupHeader(group, collapsed: collapsed)
             // Remove collapsed rows from keyboard and accessibility traversal.
@@ -459,9 +568,9 @@ struct TaskWindowView: View {
         }
     }
 
-    private func groupHeader(_ group: TaskGroup, collapsed: Bool) -> some View {
+    private func groupHeader(_ group: Group, collapsed: Bool) -> some View {
         let progress = group.progress
-        let containsEdit = group.notes.contains { $0.id == state.editingNoteID }
+        let containsEdit = group.notes.contains { $0.id == editingID }
         return Button {
             toggleGroup(group)
         } label: {
@@ -474,7 +583,7 @@ struct TaskWindowView: View {
                     .font(.system(size: 13, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text("\(progress.completed)/\(progress.total)")
+                Text(isLater ? "\(progress.total - progress.completed) remaining" : "\(progress.completed)/\(progress.total)")
                     .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .fixedSize()
@@ -493,15 +602,15 @@ struct TaskWindowView: View {
         .overlay { focusOutline(focusedControl == .group(group.id)) }
         .disabled(containsEdit)
         .help(containsEdit ? "Finish editing before hiding this group" : (collapsed ? "Show tasks" : "Hide tasks"))
-        .accessibilityLabel("\(group.name), \(progress.completed) of \(progress.total) complete")
+        .accessibilityLabel(isLater ? "\(group.name), \(progress.total - progress.completed) remaining" : "\(group.name), \(progress.completed) of \(progress.total) complete")
         .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
         .accessibilityHint(collapsed ? "Shows this group's tasks" : "Hides this group's tasks")
-        .accessibilityIdentifier("taskGroup-\(group.id.storageKey)")
+        .accessibilityIdentifier("\(isLater ? "laterTaskGroup" : "taskGroup")-\(group.id.storageKey)")
     }
 
-    private func toggleGroup(_ group: TaskGroup) {
-        let collapse = !state.categoryPreferences.isCollapsed(group.id)
-        state.categoryPreferences.setCollapsed(collapse, for: group.id)
+    private func toggleGroup(_ group: Group) {
+        let collapse = !state.categoryPreferences.isCollapsed(group.id, in: destination)
+        state.categoryPreferences.setCollapsed(collapse, for: group.id, in: destination)
         // Its rows leave the view, so keep keyboard focus on the header.
         if collapse, let id = focusedNoteID, group.notes.contains(where: { $0.id == id }) {
             focusedControl = .group(group.id)
@@ -516,11 +625,11 @@ struct TaskWindowView: View {
     }
 
     @ViewBuilder
-    private func taskRow(_ note: Note) -> some View {
-        if state.editingNoteID == note.id {
+    private func taskRow(_ note: Row) -> some View {
+        if editingID == note.id {
             VStack(alignment: .leading, spacing: 8) {
                 composer
-                if state.issue == .edit, let message = writeError {
+                if issue == .edit, let message = writeError {
                     taskWriteError(message)
                 }
             }
@@ -528,7 +637,7 @@ struct TaskWindowView: View {
             .foregroundStyle(.primary)
             .padding(.vertical, 10)
             .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("taskRow-\(note.id)")
+            .accessibilityIdentifier("\(isLater ? "laterTaskRow" : "taskRow")-\(note.id)")
             .id(note.id)
         } else {
             savedTaskRow(note)
@@ -536,11 +645,11 @@ struct TaskWindowView: View {
         }
     }
 
-    private func savedTaskRow(_ note: Note) -> some View {
+    private func savedTaskRow(_ note: Row) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Toggle(isOn: Binding(
-                get: { state.notes.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
-                set: { state.setCompleted(id: note.id, completed: $0) }
+                get: { rows.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
+                set: { setCompleted(id: note.id, completed: $0) }
             )) { Text(note.text) }
                 .toggleStyle(.checkbox)
                 .labelsHidden()
@@ -548,50 +657,51 @@ struct TaskWindowView: View {
                 .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .completion(note.id))
                 .onKeyPress(keys: [.space, .return]) { _ in
-                    if let saved = state.notes.first(where: { $0.id == note.id }) {
-                        state.setCompleted(id: note.id, completed: !saved.isCompleted)
+                    if let saved = rows.first(where: { $0.id == note.id }) {
+                        setCompleted(id: note.id, completed: !saved.isCompleted)
                     }
                     return .handled
                 }
                 .overlay { focusOutline(focusedControl == .completion(note.id)) }
                 .accessibilityLabel(note.text)
-                .accessibilityIdentifier("taskCompletion-\(note.id)")
+                .accessibilityIdentifier("\(isLater ? "laterTaskCompletion" : "taskCompletion")-\(note.id)")
             Text(note.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             TaskActionsMenu(onOpen: { focusedControl = .actions(note.id) },
-                            onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) })
+                            onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) },
+                            onMove: isLater && !note.isCompleted ? { moveToToday(note.id) } : nil)
             .focused($focusedControl, equals: .actions(note.id))
             .overlay { focusOutline(focusedControl == .actions(note.id)) }
-            .disabled(state.editingNoteID != nil)
+            .disabled(editingID != nil)
             .help("Task actions")
             .accessibilityLabel("Actions for task: \(note.text)")
-            .accessibilityHint("Opens Edit and Delete actions")
-            .accessibilityIdentifier("taskActions-\(note.id)")
+            .accessibilityHint(isLater && !note.isCompleted ? "Opens Move to Today, Edit and Delete actions" : "Opens Edit and Delete actions")
+            .accessibilityIdentifier("\(isLater ? "laterTaskActions" : "taskActions")-\(note.id)")
         }
         .font(.system(size: 14))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("taskRow-\(note.id)")
+        .accessibilityIdentifier("\(isLater ? "laterTaskRow" : "taskRow")-\(note.id)")
     }
 
     /// The field takes its own row, so the category and actions stay usable at
     /// the minimum window width.
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField(state.editingNoteID == nil ? "Write a task" : "Edit task",
-                      text: state.editingNoteID == nil ? $state.draft : $state.editDraft)
+            TextField(editingID == nil ? "Write a task" : "Edit task",
+                      text: draftBinding)
                 .textFieldStyle(.roundedBorder)
-                .accessibilityLabel(state.editingNoteID == nil ? "New task" : "Edit task")
-                .accessibilityIdentifier(state.editingNoteID == nil ? "newTaskDraft" : "editTaskDraft")
-                .focused($focusedControl, equals: .draft)
+                .accessibilityLabel(editingID == nil ? "New task" : "Edit task")
+                .accessibilityIdentifier(isLater ? (editingID == nil ? "newLaterTaskDraft" : "editLaterTaskDraft") : (editingID == nil ? "newTaskDraft" : "editTaskDraft"))
+                .focused($focusedControl, equals: textFocusControl)
                 .onSubmit(saveDraft)
                 .onExitCommand(perform: cancelDraft)
             HStack(spacing: 12) {
-                categoryPicker(editing: state.editingNoteID != nil)
+                categoryPicker(editing: editingID != nil)
                 Spacer(minLength: 0)
                 Button("Save", action: saveDraft)
                     .focusable()
@@ -601,13 +711,13 @@ struct TaskWindowView: View {
                         saveDraft()
                         return .handled
                     }
-                    .disabled((state.editingNoteID == nil ? state.draft : state.editDraft)
-                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.availableProgress == nil)
-                    .accessibilityIdentifier("saveTask")
+                    .disabled(draftBinding.wrappedValue
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isAvailable)
+                    .accessibilityIdentifier(identifier("saveTask", "saveLaterTask"))
                 Button("Cancel", action: cancelDraft)
                     .keyboardFocusAppearance()
                     .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(state.editingNoteID == nil ? "cancelNewTask" : "cancelTaskEdit")
+                    .accessibilityIdentifier(editingID == nil ? "cancelNewTask" : "cancelTaskEdit")
             }
         }
     }
@@ -616,7 +726,7 @@ struct TaskWindowView: View {
     /// last as in Today. With keyboard focus, Up and Down step the selection.
     /// Return does nothing here, so choosing a category never saves the draft.
     private func categoryPicker(editing: Bool) -> some View {
-        Picker("Category", selection: editing ? $state.editCategoryID : $state.draftCategoryID) {
+        Picker("Category", selection: categoryBinding(editing: editing)) {
             ForEach(state.categories) { category in
                 Text(category.name).tag(UUID?.some(category.id))
             }
@@ -634,18 +744,18 @@ struct TaskWindowView: View {
         .frame(maxWidth: 280, alignment: .leading)
         .disabled(state.availableCategories == nil)
         .help(editing ? "Category for this task" : "Category for the new task")
-        .accessibilityIdentifier(editing ? "editTaskCategory" : "newTaskCategory")
+        .accessibilityIdentifier(isLater ? (editing ? "editLaterTaskCategory" : "newLaterTaskCategory") : (editing ? "editTaskCategory" : "newTaskCategory"))
     }
 
     private func stepCategory(by offset: Int, editing: Bool) {
         let options = state.categories.map { UUID?.some($0.id) } + [nil]
-        let current = editing ? state.editCategoryID : state.draftCategoryID
+        let current = categoryBinding(editing: editing).wrappedValue
         guard state.availableCategories != nil, let index = options.firstIndex(of: current) else { return }
         let next = options[min(max(index + offset, 0), options.count - 1)]
-        if editing { state.editCategoryID = next } else { state.draftCategoryID = next }
+        categoryBinding(editing: editing).wrappedValue = next
     }
 
-    private func deletionConfirmation(_ note: Note) -> some View {
+    private func deletionConfirmation(_ note: Row) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Delete task?").font(.headline)
             Text(note.text)
@@ -691,21 +801,37 @@ struct TaskWindowView: View {
         }
     }
 
-    private func beginEditing(_ id: UUID) {
-        guard canUseRowActions, let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+    private func setCompleted(id: UUID, completed: Bool) {
+        if isLater { _ = state.setLaterCompleted(id: id, completed: completed) }
+        else { state.setCompleted(id: id, completed: completed) }
+    }
+
+    private func moveToToday(_ id: UUID) {
+        guard isLater, canUseRowActions,
+              let group = groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
         rowActionOrigin = (id, group.id)
-        state.beginEditing(id: id)
+        if state.moveLaterToToday(id: id) {
+            isMoveNoticeVisible = true
+            moveNoticeID = UUID()
+            restoreRowFocus(id, fallbackGroup: group.id)
+        }
+    }
+
+    private func beginEditing(_ id: UUID) {
+        guard canUseRowActions, let group = groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+        rowActionOrigin = (id, group.id)
+        if isLater { state.beginEditingLater(id: id) } else { state.beginEditing(id: id) }
     }
 
     private var canUseRowActions: Bool {
-        state.availableProgress != nil && state.editingNoteID == nil &&
+        isAvailable && editingID == nil &&
             presentation.deletionTarget == nil && !presentation.isManagingCategories
     }
 
     private func requestDeletion(_ id: UUID) {
-        guard canUseRowActions, let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+        guard canUseRowActions, let group = groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
         rowActionOrigin = (id, group.id)
-        presentation.requestDeletion(id: id, state: state)
+        presentation.requestDeletion(actionTarget(id), state: state)
     }
 
     private func confirmDeletion() {
@@ -726,14 +852,13 @@ struct TaskWindowView: View {
     /// Return to the row menu or collapsed group; if the task disappeared,
     /// prefer its surviving group, then Add. Unavailable data always uses Retry.
     private func focusAfterLeavingRow(_ id: UUID, fallbackGroup: TaskGroupID?) -> FocusControl {
-        guard state.availableProgress != nil else { return .retry }
-        guard let group = state.groups.first(where: { $0.notes.contains { $0.id == id } }) else {
-            if let fallbackGroup, state.groups.contains(where: { $0.id == fallbackGroup }) {
-                return .group(fallbackGroup)
-            }
-            return .add
+        let target = actionTarget(id)
+        switch presentation.focusAfterLeavingRow(target, fallbackGroup: fallbackGroup, state: state) {
+        case .row: return .actions(id)
+        case .group(_, let groupID): return .group(groupID)
+        case .retry: return .retry
+        default: return .add
         }
-        return state.categoryPreferences.isCollapsed(group.id) ? .group(group.id) : .actions(id)
     }
 
     private func focusDraft(requestID: UUID? = nil) {
@@ -744,7 +869,15 @@ struct TaskWindowView: View {
         Task { @MainActor in
             await Task.yield()
             guard presentation.route == .today, focusRequestID == requestID else { return }
-            focusedControl = .draft
+            focusedControl = textFocusControl
+        }
+    }
+
+    private func focusSelectedList() {
+        switch presentation.focusAfterSelection(state: state) {
+        case .draft: focusDraft()
+        case .retry: focusedControl = .retry
+        default: focusedControl = .add
         }
     }
 
@@ -756,11 +889,7 @@ struct TaskWindowView: View {
     }
 
     private func showComposer() {
-        guard presentation.canAddTask(state: state) else { return }
-        // Only a genuinely new draft takes the last-used category. A pending one,
-        // from repeated Command-N or a reopened window, keeps its selection.
-        if !isComposerVisible && state.draft.isEmpty { state.startNewDraft() }
-        isComposerVisible = true
+        guard presentation.showComposer(in: destination, state: state) else { return }
         focusDraft()
     }
 
@@ -778,21 +907,21 @@ struct TaskWindowView: View {
     }
 
     private func saveDraft() {
-        if state.editingNoteID != nil {
-            _ = state.saveEdit()
-        } else if state.addDraft() {
-            isComposerVisible = false
+        if editingID != nil {
+            if isLater { _ = state.saveLaterEdit() } else { _ = state.saveEdit() }
+        } else if isLater ? state.addLaterDraft() : state.addDraft() {
+            presentation.hideComposer(in: destination)
             focusedControl = .add
         }
     }
 
     private func cancelDraft() {
-        if state.editingNoteID != nil {
-            state.cancelEditing()
+        if editingID != nil {
+            if isLater { state.cancelEditingLater() } else { state.cancelEditing() }
             return
         }
-        state.cancelDraft()
-        isComposerVisible = false
+        if isLater { state.cancelLaterDraft() } else { state.cancelDraft() }
+        presentation.hideComposer(in: destination)
         focusedControl = .add
     }
 
@@ -835,6 +964,7 @@ private struct TaskActionsMenu: View {
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    var onMove: (() -> Void)? = nil
     @State private var anchor = TaskMenuAnchor.Reference()
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
@@ -882,6 +1012,11 @@ private struct TaskActionsMenu: View {
         let actions = Actions()
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if onMove != nil {
+            let move = menu.addItem(withTitle: "Move to Today", action: #selector(Actions.move), keyEquivalent: "")
+            move.target = actions
+            menu.addItem(.separator())
+        }
         let edit = menu.addItem(withTitle: "Edit", action: #selector(Actions.edit), keyEquivalent: "")
         edit.target = actions
         let delete = menu.addItem(withTitle: "Delete…", action: #selector(Actions.delete), keyEquivalent: "")
@@ -892,6 +1027,7 @@ private struct TaskActionsMenu: View {
         // Finish native menu tracking before changing the SwiftUI hierarchy.
         // Otherwise AppKit can restore the old responder after draft/Cancel focus.
         switch actions.selection {
+        case .move: DispatchQueue.main.async { onMove?() }
         case .edit: DispatchQueue.main.async { onEdit() }
         case .delete: DispatchQueue.main.async { onDelete() }
         case nil: break
@@ -899,8 +1035,9 @@ private struct TaskActionsMenu: View {
     }
 
     @MainActor private final class Actions: NSObject {
-        enum Selection { case edit, delete }
+        enum Selection { case edit, delete, move }
         var selection: Selection?
+        @objc func move() { selection = .move }
         @objc func edit() { selection = .edit }
         @objc func delete() { selection = .delete }
     }

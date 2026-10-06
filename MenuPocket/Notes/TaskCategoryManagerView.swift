@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sheet attached to the Today window for creating, renaming, and removing
+/// Sheet attached to the task window for creating, renaming, and removing
 /// custom categories. Saved categories come only from shared state. Name drafts
 /// stay in this sheet, apart from task drafts, and are discarded when it closes.
 struct TaskCategoryManagerView: View {
@@ -62,7 +62,7 @@ struct TaskCategoryManagerView: View {
                 Text("Manage categories")
                     .font(.system(size: 18, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
-                Text("Categories are shared by every day. Tasks without a category appear in General.")
+                Text("Categories are shared by Today, Later, and all saved days. Tasks without a category appear in General.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -301,15 +301,15 @@ struct TaskCategoryManagerView: View {
             }
     }
 
-    /// States the all-days scope, so the removal never looks limited to Today.
+    /// Includes undated Later tasks and daily history in the removal scope.
     static func removalMessage(usageCount: Int) -> String {
         switch usageCount {
         case 0:
-            "No task on any day uses this category. Removing it changes no tasks."
+            "No task in Later or on any saved day uses this category. Removing it changes no tasks."
         case 1:
-            "1 task, across all days, uses this category. It will move to General and keep its text, completion, and day. No task is deleted."
+            "1 task, across all saved days and Later, uses this category. It will move to General and keep its text, completion, and any assigned day. No task is deleted."
         default:
-            "\(usageCount) tasks, across all days, use this category. They will move to General and keep their text, completion, and day. No task is deleted."
+            "\(usageCount) tasks, across all saved days and Later, use this category. They will move to General and keep their text, completion, and any assigned day. No task is deleted."
         }
     }
 
