@@ -3,10 +3,12 @@
 MenuPocket manages daily tasks in one desktop window and shows saved progress in the menu bar. These tracked documents describe the current product and its verification evidence:
 
 - [README](../README.md) — prerequisites, quick start, tests, and a short usage guide.
-- [Requirements](REQUIREMENTS.md) — desktop task behavior, daily-only scope, and acceptance criteria.
+- [Requirements](REQUIREMENTS.md) — desktop task behavior, Today/Later scope, and acceptance criteria.
 - [Architecture](ARCHITECTURE.md) — app composition, data flow, persistence, and system boundaries.
 - [Workflow](WORKFLOW.md) — build, verification, and local Release steps.
 - [Desktop regression](DESKTOP_TASK_REGRESSION.md) — dated automated regression, category storage/state/UI checks, local builds, and retained artifact identity.
+- [Later tasks regression](LATER_TASKS_REGRESSION.md) — integrated Today/Later tests, changed-data reopen, Debug/Release identity, preservation and cleanup.
+- [Later tasks acceptance](LATER_TASKS_ACCEPTANCE.md) — isolated native fixture identity and the Today/Later interface checklist; user-reported Pass on the isolated fixture, production/system checks not tested.
 - [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) — dated actual-interface observations, category fixtures, partial acceptance, and blocked/untested production and system checks.
 - [Task categories handoff](TASK_CATEGORIES_HANDOFF.md) — category source/artifact identity, automated and interface evidence, completed documentation, and the remaining TASK-011 acceptance gate.
 
@@ -17,7 +19,7 @@ MenuPocket manages daily tasks in one desktop window and shows saved progress in
 
 ## Local plans
 
-The [Today / Later implementation plan](../plan/later-tasks/later-tasks.md) proposes an undated Later list with text/category only and explicit Move to Today; the feature is not yet implemented.
+The [Today / Later implementation plan](../plan/later-tasks/later-tasks.md) tracks the implemented undated Later list with text/category only and explicit Move to Today. Integrated automated verification has passed and isolated native-fixture checks are user-reported Pass; production-identity/system checks and the first real-data upgrade remain Not tested.
 
 The [task-categories plan](../plan/task-categories/task-categories.md) defines the category implementation and acceptance sequence. The [desktop task-management plan](../plan/desktop-task-management/desktop-task-management.md) defines the preceding desktop increment. The earlier [Notes MVP design](../plan/mvp/NOTES_MVP_PLAN.md) and [task cards](../plan/mvp/NOTES_MVP_TASKS.md) describe the superseded compact panel. The [initial roadmap](../plan/init/master_plan.md) records the historical demo-shell phase.
 

@@ -41,23 +41,4 @@ final class LaterTaskDomainTests: XCTestCase {
         XCTAssertEqual(later.destination, .later)
         XCTAssertNotEqual(daily, .daily(id: id, dayKey: "2026-10-06"))
     }
-
-    func testSQLiteTransferFailsExplicitlyUntilImplementedAndLeavesBothListsUnchanged() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("LaterTaskDomainTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = try SQLiteNoteRepository(databaseURL: directory.appendingPathComponent("notes.sqlite"))
-        let today = Note(id: UUID(), text: "Today", dayKey: "2026-10-05",
-                         createdAt: Date(timeIntervalSince1970: 1), completedAt: nil)
-        try store.add(today)
-        let task = LaterTask(id: UUID(), text: "Later", createdAt: Date(timeIntervalSince1970: 2),
-                             completedAt: nil)
-        try store.addLater(task)
-
-        XCTAssertThrowsError(try store.moveLaterToToday(id: task.id, dayKey: today.dayKey)) {
-            XCTAssertEqual($0 as? LaterTaskRepositoryError, .unsupported("moveLaterToToday"))
-        }
-        XCTAssertEqual(try store.notes(for: today.dayKey), [today])
-        XCTAssertEqual(try store.laterTasks(), [task])
-    }
 }

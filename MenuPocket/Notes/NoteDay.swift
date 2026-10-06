@@ -25,7 +25,11 @@ struct NoteDay {
     }
 
     func keys() -> (today: String, yesterday: String) {
-        let instant = now()
+        keys(for: now())
+    }
+
+    /// Reuses an action's clock sample and one calendar for both day keys.
+    func keys(for instant: Date) -> (today: String, yesterday: String) {
         let calendar = calendar
         guard let previousDay = calendar.date(byAdding: .day, value: -1, to: instant) else {
             preconditionFailure("Could not determine the previous calendar day")

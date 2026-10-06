@@ -5,9 +5,17 @@ import SwiftUI
 @MainActor
 @Observable
 final class TaskWindowPresentation {
-    struct DeletionTarget {
+    struct NewTaskRequest: Equatable {
         let id: UUID
-        let dayKey: String
+        let destination: TaskListDestination
+    }
+
+    enum FocusTarget: Equatable {
+        case draft(TaskListDestination)
+        case row(TaskActionTarget)
+        case group(TaskListDestination, TaskGroupID)
+        case add(TaskListDestination)
+        case retry(TaskListDestination)
     }
 
     /// A category awaiting confirmed removal, with the all-days task count the
@@ -29,41 +37,126 @@ final class TaskWindowPresentation {
         case notRemoved
     }
 
-    private(set) var deletionTarget: DeletionTarget?
-    private(set) var newTaskRequestID: UUID?
+    private(set) var selectedDestination: TaskListDestination = .today
+    private(set) var deletionTarget: TaskActionTarget?
+    private(set) var newTaskRequest: NewTaskRequest?
+    var newTaskRequestID: UUID? { newTaskRequest?.id }
+    private(set) var isTodayComposerVisible = false
+    private(set) var isLaterComposerVisible = false
     private(set) var isManagingCategories = false
     private(set) var categoryRemovalTarget: CategoryRemovalTarget?
 
+    private func hasGuardedInteraction(state: DailyNotesState) -> Bool {
+        state.editingNoteID != nil || state.editingLaterTaskID != nil ||
+            deletionTarget != nil || isManagingCategories
+    }
+
+    @discardableResult
+    func selectDestination(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        if destination == selectedDestination { return true }
+        guard !hasGuardedInteraction(state: state) else { return false }
+        selectedDestination = destination
+        newTaskRequest = nil
+        return true
+    }
+
+    func isComposerVisible(in destination: TaskListDestination) -> Bool {
+        switch destination {
+        case .today: isTodayComposerVisible
+        case .later: isLaterComposerVisible
+        }
+    }
+
+    func hasNewTaskComposer(in destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        isComposerVisible(in: destination) || !(destination == .today ? state.draft : state.laterDraft).isEmpty
+    }
+
+    private func isAvailable(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        switch destination {
+        case .today: state.availableProgress != nil
+        case .later: state.availableLaterTasks != nil
+        }
+    }
+
     /// Also false while the category manager is open, so no task command acts behind it.
     func canAddTask(state: DailyNotesState) -> Bool {
-        state.availableProgress != nil && state.editingNoteID == nil && deletionTarget == nil &&
-            !isManagingCategories
+        isAvailable(selectedDestination, state: state) && !hasGuardedInteraction(state: state)
+    }
+
+    @discardableResult
+    func showComposer(in destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        guard destination == selectedDestination, canAddTask(state: state) else { return false }
+        // Only a genuinely new draft takes the remembered category. An empty but
+        // already-open composer still has its own pending category choice.
+        if !hasNewTaskComposer(in: destination, state: state) {
+            switch destination {
+            case .today: state.startNewDraft()
+            case .later: state.startNewLaterDraft()
+            }
+        }
+        switch destination {
+        case .today: isTodayComposerVisible = true
+        case .later: isLaterComposerVisible = true
+        }
+        return true
+    }
+
+    func hideComposer(in destination: TaskListDestination) {
+        switch destination {
+        case .today: isTodayComposerVisible = false
+        case .later: isLaterComposerVisible = false
+        }
+        consumeNewTaskRequest(in: destination)
     }
 
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
-        guard canAddTask(state: state) else { return false }
-        newTaskRequestID = UUID()
+        guard showComposer(in: selectedDestination, state: state) else { return false }
+        newTaskRequest = NewTaskRequest(id: UUID(), destination: selectedDestination)
         return true
     }
 
-    func consumeNewTaskRequest() { newTaskRequestID = nil }
+    func consumeNewTaskRequest(in destination: TaskListDestination) {
+        if newTaskRequest?.destination == destination { newTaskRequest = nil }
+    }
 
-    func requestDeletion(id: UUID, state: DailyNotesState) {
-        guard !isManagingCategories else { return }
+    @discardableResult
+    func requestDeletion(id: UUID, state: DailyNotesState) -> Bool {
+        guard !hasGuardedInteraction(state: state) else { return false }
         state.refreshIfDayChanged()
-        guard state.availableProgress != nil,
-              let note = state.notes.first(where: { $0.id == id }),
-              note.dayKey == state.todayKey else { return }
-        deletionTarget = DeletionTarget(id: id, dayKey: note.dayKey)
+        switch selectedDestination {
+        case .today:
+            guard let note = state.notes.first(where: { $0.id == id }) else { return false }
+            return requestDeletion(.daily(id: id, dayKey: note.dayKey), state: state)
+        case .later:
+            return requestDeletion(.later(id: id), state: state)
+        }
+    }
+
+    @discardableResult
+    func requestDeletion(_ target: TaskActionTarget, state: DailyNotesState) -> Bool {
+        guard !hasGuardedInteraction(state: state) else { return false }
+        state.refreshIfDayChanged()
+        guard target.destination == selectedDestination, isValid(target, state: state) else { return false }
+        deletionTarget = target
+        return true
+    }
+
+    private func isValid(_ target: TaskActionTarget, state: DailyNotesState) -> Bool {
+        switch target {
+        case .daily(let id, let dayKey):
+            state.availableProgress != nil && state.todayKey == dayKey &&
+                state.notes.contains { $0.id == id && $0.dayKey == dayKey }
+        case .later(let id):
+            state.availableLaterTasks?.contains { $0.id == id } == true
+        }
     }
 
     func cancelDeletion() { deletionTarget = nil }
 
     func validateDeletion(state: DailyNotesState) {
         guard let target = deletionTarget else { return }
-        if state.availableProgress == nil || state.todayKey != target.dayKey ||
-            !state.notes.contains(where: { $0.id == target.id && $0.dayKey == target.dayKey }) {
+        if !isValid(target, state: state) {
             cancelDeletion()
         }
     }
@@ -74,17 +167,54 @@ final class TaskWindowPresentation {
         // Consume confirmation before a write changes the observable rows.
         cancelDeletion()
         state.refreshIfDayChanged()
-        guard state.availableProgress != nil, state.todayKey == target.dayKey,
-              state.notes.contains(where: { $0.id == target.id && $0.dayKey == target.dayKey }) else {
-            return false
+        guard isValid(target, state: state) else { return false }
+        switch target {
+        case .daily(let id, _): return state.delete(id: id)
+        case .later(let id): return state.deleteLater(id: id)
         }
-        return state.delete(id: target.id)
+    }
+
+    func focusAfterSelection(state: DailyNotesState) -> FocusTarget {
+        let destination = selectedDestination
+        guard isAvailable(destination, state: state) else { return .retry(destination) }
+        return hasNewTaskComposer(in: destination, state: state) ? .draft(destination) : .add(destination)
+    }
+
+    /// The row, its surviving/collapsed group, Add, or Retry. Never resolve an
+    /// action against the other list, even if both lists contain the same UUID.
+    func focusAfterLeavingRow(_ target: TaskActionTarget, fallbackGroup: TaskGroupID?,
+                              state: DailyNotesState) -> FocusTarget {
+        let destination = target.destination
+        guard isAvailable(destination, state: state) else { return .retry(destination) }
+        let groupID: TaskGroupID?
+        let groupIDs: [TaskGroupID]
+        switch target {
+        case .daily(let id, let dayKey):
+            groupID = state.groups.first { $0.notes.contains { $0.id == id && $0.dayKey == dayKey } }?.id
+            groupIDs = state.groups.map(\.id)
+        case .later(let id):
+            groupID = state.laterGroups.first { $0.tasks.contains { $0.id == id } }?.id
+            groupIDs = state.laterGroups.map(\.id)
+        }
+        if let groupID {
+            return state.categoryPreferences.isCollapsed(groupID, in: destination) ?
+                .group(destination, groupID) : .row(target)
+        }
+        if let fallbackGroup, groupIDs.contains(fallbackGroup) { return .group(destination, fallbackGroup) }
+        return .add(destination)
+    }
+
+    func windowWillClose() {
+        cancelDeletion()
+        dismissCategoryManager()
+        newTaskRequest = nil
     }
 
     /// The manager can open over a pending new-task draft, which it leaves
     /// alone, but not over an edit or a deletion confirmation.
     func canManageCategories(state: DailyNotesState) -> Bool {
-        state.availableCategories != nil && state.editingNoteID == nil && deletionTarget == nil
+        state.availableCategories != nil && state.editingNoteID == nil &&
+            state.editingLaterTaskID == nil && deletionTarget == nil
     }
 
     @discardableResult
@@ -184,14 +314,24 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     func showTasks() {
         guard let window else { return }
         state.windowWillOpen()
+        presentation.validateDeletion(state: state)
+        presentation.validateCategoryRemoval(state: state)
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.contentMinSize = Self.minimumContentSize
     }
 
+    /// Bring the retained window forward even when active work prevents Today
+    /// selection. Native routes use this in TASK-009, rather than forcing a tab.
+    @discardableResult
+    func showToday() -> Bool {
+        guard window != nil else { return false }
+        showTasks()
+        return presentation.selectDestination(.today, state: state)
+    }
+
     func windowWillClose(_ notification: Notification) {
-        presentation.cancelDeletion()
-        presentation.dismissCategoryManager()
+        presentation.windowWillClose()
     }
 }

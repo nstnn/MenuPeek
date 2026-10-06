@@ -387,9 +387,66 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    // The transfer arrives in TASK-004; until then it fails without touching the database.
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
-        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+        try transaction {
+            let readStatement = try prepare(
+                "SELECT text, created_at, completed_at, category_id FROM later_tasks WHERE id = ?"
+            )
+            defer { sqlite3_finalize(readStatement) }
+            try bind(id.uuidString, at: 1, to: readStatement)
+            let step = sqlite3_step(readStatement)
+            if step == SQLITE_DONE {
+                throw LaterTaskRepositoryError.notFound(id)
+            }
+            try check(step, expected: SQLITE_ROW, operation: "read Later task for transfer")
+            guard let createdAt = try instant(at: 1, from: readStatement) else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            if sqlite3_column_type(readStatement, 2) != SQLITE_NULL {
+                throw LaterTaskRepositoryError.alreadyCompleted(id)
+            }
+            let text = try self.text(at: 0, from: readStatement)
+            let categoryID: UUID?
+            if sqlite3_column_type(readStatement, 3) == SQLITE_NULL {
+                categoryID = nil
+            } else {
+                guard let catUUID = UUID(uuidString: try self.text(at: 3, from: readStatement)) else {
+                    throw SQLiteNoteStoreError.invalidNoteRow
+                }
+                _ = try requireCategory(catUUID)
+                categoryID = catUUID
+            }
+
+            let collisionStatement = try prepare("SELECT 1 FROM notes WHERE id = ?")
+            defer { sqlite3_finalize(collisionStatement) }
+            try bind(id.uuidString, at: 1, to: collisionStatement)
+            let collisionStep = sqlite3_step(collisionStatement)
+            if collisionStep == SQLITE_ROW {
+                throw LaterTaskRepositoryError.idCollision(id)
+            }
+            try check(collisionStep, expected: SQLITE_DONE, operation: "check destination note collision")
+
+            let insertStatement = try prepare(
+                "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id) VALUES (?, ?, ?, ?, NULL, ?)"
+            )
+            defer { sqlite3_finalize(insertStatement) }
+            try bind(id.uuidString, at: 1, to: insertStatement)
+            try bind(text, at: 2, to: insertStatement)
+            try bind(dayKey, at: 3, to: insertStatement)
+            try check(sqlite3_bind_double(insertStatement, 4, createdAt.timeIntervalSince1970),
+                      operation: "bind created_at")
+            try bindCategoryID(categoryID, at: 5, to: insertStatement)
+            try check(sqlite3_step(insertStatement), expected: SQLITE_DONE, operation: "insert transferred note")
+
+            let deleteStatement = try prepare("DELETE FROM later_tasks WHERE id = ?")
+            defer { sqlite3_finalize(deleteStatement) }
+            try bind(id.uuidString, at: 1, to: deleteStatement)
+            try executeWrite(deleteStatement, id: id, operation: "delete transferred Later task",
+                             notFound: LaterTaskRepositoryError.notFound(id))
+
+            return Note(id: id, text: text, dayKey: dayKey, createdAt: createdAt,
+                        completedAt: nil, categoryID: categoryID)
+        }
     }
 
     private func transaction<Result>(_ body: () throws -> Result) throws -> Result {

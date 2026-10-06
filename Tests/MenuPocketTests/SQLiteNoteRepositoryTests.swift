@@ -967,6 +967,139 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
+    func testMoveLaterToTodayPreservesFieldsAppendsToDailyRowsAndSurvivesReopen() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let existing1 = note("First Today", day: "2026-10-05", createdAt: 10, categoryID: work.id)
+        let existing2 = note("Second Today", day: "2026-10-05", createdAt: 20,
+                             completedAt: Date(timeIntervalSince1970: 25))
+        try store.add(existing1)
+        try store.add(existing2)
+
+        let source = later("Unscheduled task", createdAt: 5, categoryID: work.id)
+        let otherLater = later("Stay in Later", createdAt: 30)
+        try store.addLater(source)
+        try store.addLater(otherLater)
+
+        let moved = try store.moveLaterToToday(id: source.id, dayKey: "2026-10-05")
+        XCTAssertEqual(moved.id, source.id)
+        XCTAssertEqual(moved.text, source.text)
+        XCTAssertEqual(moved.dayKey, "2026-10-05")
+        XCTAssertEqual(moved.createdAt, source.createdAt)
+        XCTAssertNil(moved.completedAt)
+        XCTAssertEqual(moved.categoryID, work.id)
+
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [existing1, existing2, moved])
+        XCTAssertEqual(try store.incompleteCount(for: "2026-10-05"), 2)
+        XCTAssertEqual(try store.laterTasks(), [otherLater])
+        XCTAssertEqual(try rawRows("SELECT id FROM notes WHERE id = '\(source.id.uuidString)'"),
+                       [[source.id.uuidString]])
+        XCTAssertEqual(try rawRows("SELECT id FROM later_tasks WHERE id = '\(source.id.uuidString)'"), [])
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [existing1, existing2, moved])
+        XCTAssertEqual(try reopened.incompleteCount(for: "2026-10-05"), 2)
+        XCTAssertEqual(try reopened.laterTasks(), [otherLater])
+    }
+
+    func testMoveLaterToTodayRejectsMissingCompletedCollidingAndMissingCategoryTasks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+
+        let missingID = UUID()
+        XCTAssertThrowsError(try store.moveLaterToToday(id: missingID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .notFound(missingID))
+        }
+
+        let done = later("Already finished", createdAt: 10, completedAt: Date(timeIntervalSince1970: 20))
+        try store.addLater(done)
+        XCTAssertThrowsError(try store.moveLaterToToday(id: done.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .alreadyCompleted(done.id))
+        }
+        XCTAssertEqual(try store.laterTasks(), [done])
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [])
+
+        let valid = later("Move once", createdAt: 15)
+        try store.addLater(valid)
+        let moved = try store.moveLaterToToday(id: valid.id, dayKey: "2026-10-05")
+        XCTAssertEqual(moved.id, valid.id)
+        XCTAssertThrowsError(try store.moveLaterToToday(id: valid.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .notFound(valid.id))
+        }
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [moved])
+
+        let collisionID = UUID()
+        let dailyNote = Note(id: collisionID, text: "Existing daily", dayKey: "2026-10-05",
+                             createdAt: Date(timeIntervalSince1970: 1), completedAt: nil)
+        try store.add(dailyNote)
+        try executeRaw(
+            """
+            INSERT INTO later_tasks (id, text, created_at, completed_at, category_id)
+            VALUES ('\(collisionID.uuidString)', 'Colliding later', 2, NULL, NULL);
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: collisionID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .idCollision(collisionID))
+        }
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [moved, dailyNote])
+        XCTAssertEqual(try store.laterTasks().map(\.id), [done.id, collisionID])
+
+        let badCatID = UUID()
+        let badTaskID = UUID()
+        try executeRaw(
+            """
+            PRAGMA foreign_keys = OFF;
+            INSERT INTO later_tasks (id, text, created_at, completed_at, category_id)
+            VALUES ('\(badTaskID.uuidString)', 'Bad category', 3, NULL, '\(badCatID.uuidString)');
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: badTaskID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(badCatID))
+        }
+    }
+
+    func testMoveLaterToTodayRollsBackOnInsertOrDeleteFailuresAndPreservesState() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let today = note("Existing", day: "2026-10-05", createdAt: 10, categoryID: work.id)
+        try store.add(today)
+        let candidate = later("Candidate", createdAt: 20, categoryID: work.id)
+        try store.addLater(candidate)
+        let notesBefore = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterBefore = try laterRows()
+
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_transfer_insert BEFORE INSERT ON notes
+            BEGIN SELECT RAISE(FAIL, 'write rejected on transfer insert'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05"))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notesBefore)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        try executeRaw("DROP TRIGGER reject_transfer_insert")
+
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_transfer_delete BEFORE DELETE ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected on transfer delete'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05"))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notesBefore)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        try executeRaw("DROP TRIGGER reject_transfer_delete")
+
+        let savedNote = try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05")
+        XCTAssertEqual(savedNote.id, candidate.id)
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [today, savedNote])
+        XCTAssertEqual(try store.laterTasks(), [])
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [today, savedNote])
+        XCTAssertEqual(try reopened.laterTasks(), [])
+    }
+
     private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,
                        categoryID: UUID? = nil, id: UUID = UUID()) -> LaterTask {
         LaterTask(id: id, text: text, createdAt: Date(timeIntervalSince1970: createdAt),
