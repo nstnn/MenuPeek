@@ -77,6 +77,7 @@ final class DailyNotesState {
     }
 
     private(set) var todayKey: String?
+    private(set) var hasLoadedCatalog = false
     private(set) var categories: [TaskCategory] = []
     private(set) var notes: [Note] = []
     private(set) var yesterdayIncompleteCount = 0
@@ -86,9 +87,15 @@ final class DailyNotesState {
     private(set) var categoryNameIssue: CategoryNameIssue?
     private(set) var categoryIssue: CategoryCommandIssue?
 
+    private(set) var laterTasks: [LaterTask] = []
+    private(set) var hasLoadedLater = false
+    private(set) var laterReadIssue: DailyNotesIssue?
+    private(set) var laterTaskIssue: DailyNotesIssue?
+
     /// Keep task-write errors through a failed read and its successful retry.
     /// Existing views still consume the load error first through this property.
     var issue: DailyNotesIssue? { readIssue ?? taskIssue }
+    var laterIssue: DailyNotesIssue? { laterReadIssue ?? laterTaskIssue }
 
     var draft = ""
     /// The new task's category; nil is General. Independent of the edit draft.
@@ -100,16 +107,35 @@ final class DailyNotesState {
     private(set) var recoveredEdit: RecoveredEdit?
     private(set) var refreshNotice: String?
 
+    var laterDraft = ""
+    /// The new Later task's category; nil is General. Independent of Today's draft.
+    var laterDraftCategoryID: UUID?
+    private(set) var editingLaterTaskID: UUID?
+    var laterEditDraft = ""
+    /// The edited Later task's category; begins as its saved association.
+    var laterEditCategoryID: UUID?
+    private(set) var laterRecoveredEdit: RecoveredEdit?
+    private(set) var laterRefreshNotice: String?
+
     var recoveredEditDraft: String? { recoveredEdit?.text }
+    var laterRecoveredEditDraft: String? { laterRecoveredEdit?.text }
 
     /// nil means unloaded or the latest read failed; successful empty is 0/0.
     /// Write failures leave this last saved progress available.
     var availableProgress: NoteProgress? { hasLoadedToday ? progress : nil }
-    var availableCategories: [TaskCategory]? { hasLoadedToday ? categories : nil }
+    var availableCategories: [TaskCategory]? { (hasLoadedToday || hasLoadedLater) ? categories : nil }
+    var availableLaterTasks: [LaterTask]? { hasLoadedLater ? laterTasks : nil }
+    var laterRemainingCount: Int {
+        laterTasks.count { !$0.isCompleted }
+    }
+    var availableLaterRemainingCount: Int? {
+        hasLoadedLater ? laterRemainingCount : nil
+    }
 
     /// Today's tasks grouped for display. Group counts include collapsed rows
     /// and always sum to `progress`.
     var groups: [TaskGroup] { TaskGroup.groups(categories: categories, notes: notes) }
+    var laterGroups: [LaterTaskGroup] { LaterTaskGroup.groups(categories: categories, tasks: laterTasks) }
 
     /// Last-used category and collapsed groups; never a source of saved categories.
     let categoryPreferences: TaskCategoryPreferences
@@ -125,6 +151,7 @@ final class DailyNotesState {
     }
 
     var errorMessage: String? { issue?.message }
+    var laterErrorMessage: String? { laterIssue?.message }
 
     init(
         repositoryFactory: @escaping () throws -> any NoteRepository = { try SQLiteNoteRepository() },
@@ -185,12 +212,27 @@ final class DailyNotesState {
                 refreshNotice = "The date changed. Previous task actions were cancelled; unsaved text is still available."
             }
         }
+
+        let store: any NoteRepository
+        let savedCategories: [TaskCategory]
         do {
-            let store = try openRepository()
-            let savedCategories = try store.categories()
+            store = try openRepository()
+            savedCategories = try store.categories()
+            hasLoadedCatalog = true
+        } catch {
+            hasLoadedCatalog = false
+            hasLoadedToday = false
+            hasLoadedLater = false
+            readIssue = .load
+            laterReadIssue = .load
+            return
+        }
+
+        let categoryIDs = Set(savedCategories.map(\.id))
+
+        do {
             let savedNotes = try store.notes(for: keys.today)
             let previousCount = try store.incompleteCount(for: keys.yesterday)
-            let categoryIDs = Set(savedCategories.map(\.id))
             guard savedNotes.allSatisfy({ note in
                 note.categoryID.map { categoryIDs.contains($0) } ?? true
             }) else { throw TaskCategoryRepositoryError.invalidRow }
@@ -201,18 +243,37 @@ final class DailyNotesState {
                 invalidateEditing()
                 refreshNotice = "The edited task is no longer available. Unsaved text was kept for recovery."
             }
-            reconcileSelections(available: categoryIDs)
             todayKey = keys.today
-            categories = savedCategories
             notes = dailyNotes
             yesterdayIncompleteCount = previousCount
             hasLoadedToday = true
             readIssue = nil
-            categoryPreferences.prune(keeping: categoryIDs)
         } catch {
             hasLoadedToday = false
             readIssue = .load
         }
+
+        do {
+            let savedLater = try store.laterTasks()
+            guard savedLater.allSatisfy({ task in
+                task.categoryID.map { categoryIDs.contains($0) } ?? true
+            }) else { throw TaskCategoryRepositoryError.invalidRow }
+            if let editingLaterTaskID, !savedLater.contains(where: { $0.id == editingLaterTaskID }) {
+                invalidateEditingLater()
+                laterRefreshNotice = "The edited task is no longer available. Unsaved text was kept for recovery."
+            }
+            laterTasks = savedLater
+            hasLoadedLater = true
+            laterReadIssue = nil
+        } catch {
+            hasLoadedLater = false
+            laterReadIssue = .load
+        }
+
+        reconcileSelections(available: categoryIDs)
+        reconcileLaterSelections(available: categoryIDs)
+        categories = savedCategories
+        categoryPreferences.prune(keeping: categoryIDs)
     }
 
     @discardableResult
@@ -278,7 +339,15 @@ final class DailyNotesState {
                             createdAt: note.createdAt, completedAt: note.completedAt,
                             categoryID: nil)
             }
-            reconcileSelections(available: Set(categories.map(\.id)).subtracting([id]))
+            laterTasks = laterTasks.map { task in
+                guard task.categoryID == id else { return task }
+                return LaterTask(id: task.id, text: task.text,
+                                 createdAt: task.createdAt, completedAt: task.completedAt,
+                                 categoryID: nil)
+            }
+            let remainingIDs = Set(categories.map(\.id)).subtracting([id])
+            reconcileSelections(available: remainingIDs)
+            reconcileLaterSelections(available: remainingIDs)
             categories.removeAll { $0.id == id }
             categoryPreferences.prune(keeping: Set(categories.map(\.id)))
             return true
@@ -292,6 +361,10 @@ final class DailyNotesState {
     func clearCategoryIssues() {
         categoryNameIssue = nil
         categoryIssue = nil
+    }
+
+    func clearLaterIssues() {
+        laterTaskIssue = nil
     }
 
     private func validatedCategoryName(_ name: String) -> String? {
@@ -334,6 +407,17 @@ final class DailyNotesState {
         draft = ""
         draftCategoryID = nil
         if taskIssue == .add { taskIssue = nil }
+    }
+
+    func startNewLaterDraft() {
+        let lastUsed = categoryPreferences.laterLastUsedCategoryID
+        laterDraftCategoryID = isAvailable(lastUsed) ? lastUsed : nil
+    }
+
+    func cancelLaterDraft() {
+        laterDraft = ""
+        laterDraftCategoryID = nil
+        if laterTaskIssue == .add { laterTaskIssue = nil }
     }
 
     @discardableResult
@@ -417,6 +501,21 @@ final class DailyNotesState {
         if taskIssue == .edit { taskIssue = nil }
     }
 
+    func beginEditingLater(id: UUID) {
+        guard hasLoadedLater,
+              let task = laterTasks.first(where: { $0.id == id }) else { return }
+        editingLaterTaskID = id
+        laterEditDraft = task.text
+        laterEditCategoryID = task.categoryID
+    }
+
+    func cancelEditingLater() {
+        editingLaterTaskID = nil
+        laterEditDraft = ""
+        laterEditCategoryID = nil
+        if laterTaskIssue == .edit { laterTaskIssue = nil }
+    }
+
     /// Saves text and category in one write; a category-only change is an edit.
     @discardableResult
     func saveEdit() -> Bool {
@@ -477,6 +576,16 @@ final class DailyNotesState {
         cancelEditing()
     }
 
+    private func invalidateEditingLater() {
+        if editingLaterTaskID != nil {
+            laterRecoveredEdit = RecoveredEdit(
+                text: laterEditDraft, categoryID: laterEditCategoryID,
+                categoryName: laterEditCategoryID.flatMap { id in categories.first { $0.id == id }?.name }
+            )
+        }
+        cancelEditingLater()
+    }
+
     /// Applies a published catalog to draft selections. A missing new-task
     /// category becomes General and keeps the text; a missing edit category
     /// cancels the edit for recovery rather than saving it as General. Renames
@@ -493,6 +602,23 @@ final class DailyNotesState {
             refreshNotice = "The selected category is no longer available. The new task will use General."
         case (false, true):
             refreshNotice = "The selected category is no longer available. Unsaved edit text was kept for recovery."
+        case (false, false):
+            break
+        }
+    }
+
+    private func reconcileLaterSelections(available ids: Set<UUID>) {
+        let editLost = editingLaterTaskID != nil && laterEditCategoryID.map { !ids.contains($0) } == true
+        let draftLost = laterDraftCategoryID.map { !ids.contains($0) } == true
+        if editLost { invalidateEditingLater() }
+        if draftLost { laterDraftCategoryID = nil }
+        switch (draftLost, editLost) {
+        case (true, true):
+            laterRefreshNotice = "A selected category is no longer available. The new task will use General, and unsaved edit text was kept for recovery."
+        case (true, false):
+            laterRefreshNotice = "The selected category is no longer available. The new task will use General."
+        case (false, true):
+            laterRefreshNotice = "The selected category is no longer available. Unsaved edit text was kept for recovery."
         case (false, false):
             break
         }

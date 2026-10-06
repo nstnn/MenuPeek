@@ -106,6 +106,76 @@ final class TaskCategoryPreferencesTests: XCTestCase {
         preferences.setCollapsed(true, for: .general)
         wait(for: [changed], timeout: 1)
     }
+
+    func testLaterPreferencesUseSeparateKeysAndDoNotOverwriteTodayChoices() {
+        let defaults = isolatedDefaults()
+        let todayCategory = UUID()
+        let laterCategory = UUID()
+
+        let preferences = TaskCategoryPreferences(userDefaults: defaults)
+        preferences.rememberLastUsed(todayCategory, in: .today)
+        preferences.rememberLastUsed(laterCategory, in: .later)
+        preferences.setCollapsed(true, for: .category(todayCategory), in: .today)
+        preferences.setCollapsed(true, for: .category(laterCategory), in: .later)
+
+        XCTAssertEqual(preferences.lastUsedCategoryID(for: .today), todayCategory)
+        XCTAssertEqual(preferences.lastUsedCategoryID(for: .later), laterCategory)
+        XCTAssertTrue(preferences.isCollapsed(.category(todayCategory), in: .today))
+        XCTAssertFalse(preferences.isCollapsed(.category(todayCategory), in: .later))
+        XCTAssertFalse(preferences.isCollapsed(.category(laterCategory), in: .today))
+        XCTAssertTrue(preferences.isCollapsed(.category(laterCategory), in: .later))
+
+        XCTAssertEqual(defaults.object(forKey: TaskCategoryPreferences.lastUsedCategoryIDKey) as? String,
+                       todayCategory.uuidString)
+        XCTAssertEqual(defaults.object(forKey: TaskCategoryPreferences.laterLastUsedCategoryIDKey) as? String,
+                       laterCategory.uuidString)
+
+        let reopened = TaskCategoryPreferences(userDefaults: defaults)
+        XCTAssertEqual(reopened.lastUsedCategoryID(for: .today), todayCategory)
+        XCTAssertEqual(reopened.lastUsedCategoryID(for: .later), laterCategory)
+        XCTAssertTrue(reopened.isCollapsed(.category(todayCategory), in: .today))
+        XCTAssertTrue(reopened.isCollapsed(.category(laterCategory), in: .later))
+    }
+
+    func testLaterPreferencesMalformedValuesFallBackGracefully() {
+        let defaults = isolatedDefaults()
+        let laterWork = UUID()
+        defaults.set("not-a-uuid", forKey: TaskCategoryPreferences.laterLastUsedCategoryIDKey)
+        defaults.set([123, "not-a-valid-group"], forKey: TaskCategoryPreferences.laterCollapsedGroupIDsKey)
+
+        let preferences = TaskCategoryPreferences(userDefaults: defaults)
+        XCTAssertNil(preferences.laterLastUsedCategoryID)
+        XCTAssertEqual(preferences.laterCollapsedGroupIDs, [])
+
+        preferences.rememberLastUsed(laterWork, in: .later)
+        preferences.setCollapsed(true, for: .general, in: .later)
+        XCTAssertEqual(preferences.laterLastUsedCategoryID, laterWork)
+        XCTAssertTrue(preferences.isCollapsed(.general, in: .later))
+    }
+
+    func testPruneCleansObsoleteCategoriesFromBothTodayAndLater() {
+        let defaults = isolatedDefaults()
+        let active = UUID()
+        let obsoleteToday = UUID()
+        let obsoleteLater = UUID()
+
+        let preferences = TaskCategoryPreferences(userDefaults: defaults)
+        preferences.rememberLastUsed(obsoleteToday, in: .today)
+        preferences.rememberLastUsed(obsoleteLater, in: .later)
+        preferences.setCollapsed(true, for: .category(obsoleteToday), in: .today)
+        preferences.setCollapsed(true, for: .category(active), in: .today)
+        preferences.setCollapsed(true, for: .category(obsoleteLater), in: .later)
+        preferences.setCollapsed(true, for: .category(active), in: .later)
+
+        preferences.prune(keeping: [active])
+
+        XCTAssertNil(preferences.lastUsedCategoryID(for: .today))
+        XCTAssertNil(preferences.lastUsedCategoryID(for: .later))
+        XCTAssertFalse(preferences.isCollapsed(.category(obsoleteToday), in: .today))
+        XCTAssertTrue(preferences.isCollapsed(.category(active), in: .today))
+        XCTAssertFalse(preferences.isCollapsed(.category(obsoleteLater), in: .later))
+        XCTAssertTrue(preferences.isCollapsed(.category(active), in: .later))
+    }
 }
 
 extension XCTestCase {

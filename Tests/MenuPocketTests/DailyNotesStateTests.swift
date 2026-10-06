@@ -26,7 +26,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(reopened.notes, [today])
     }
 
-    func testEveryRequiredReadFailureRetainsWholeSavedSnapshotUntilRetry() throws {
+    func testReadFailuresRetainDailySnapshotAndScopeCatalogAvailabilityUntilRetry() throws {
         for failure in FakeSnapshotRead.allCases {
             let originalCategory = try TaskCategory(name: "Work", creationOrder: 0)
             let renamed = try TaskCategory(id: originalCategory.id, name: "Office", creationOrder: 0)
@@ -54,12 +54,26 @@ final class DailyNotesStateTests: XCTestCase {
             }
             store.failSnapshotRead = failure
             state.refresh()
-            XCTAssertEqual(state.categories, [originalCategory], "Failed at \(failure)")
+            let sharedFailure = failure == .categories
+            XCTAssertEqual(state.categories, sharedFailure ? [originalCategory] : [renamed],
+                           "Failed at \(failure)")
             XCTAssertEqual(state.notes, [original])
             XCTAssertEqual(state.yesterdayIncompleteCount, 1)
-            XCTAssertNil(state.availableCategories)
+            XCTAssertEqual(state.availableCategories, sharedFailure ? nil : [renamed])
+            XCTAssertEqual(state.availableLaterTasks, sharedFailure ? nil : [])
+            XCTAssertEqual(state.laterReadIssue, sharedFailure ? .load : nil)
             XCTAssertNil(state.availableProgress)
             XCTAssertEqual(state.readIssue, .load)
+            // Retry must retain the last published snapshot until its reads finish.
+            store.onCategoryRead = {
+                XCTAssertEqual(state.categories, sharedFailure ? [originalCategory] : [renamed])
+                XCTAssertEqual(state.notes, [original])
+                XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+            }
+            store.onRead = { _ in
+                XCTAssertEqual(state.categories, sharedFailure ? [originalCategory] : [renamed])
+                XCTAssertEqual(state.notes, [original])
+            }
             store.failSnapshotRead = nil
             state.refresh()
             XCTAssertEqual(state.availableCategories, [renamed])
@@ -70,16 +84,19 @@ final class DailyNotesStateTests: XCTestCase {
         }
     }
 
-    func testInitialReadFailureAndUnknownReferenceNeverPublishPartialCatalog() throws {
+    func testInitialReadFailuresAndUnknownReferencesRespectScopedAvailability() throws {
         let category = try TaskCategory(name: "Work", creationOrder: 0)
         for failure in FakeSnapshotRead.allCases {
             let store = FakeNoteRepository(categories: [category])
             store.failSnapshotRead = failure
             let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
             state.startup()
-            XCTAssertTrue(state.categories.isEmpty)
+            let sharedFailure = failure == .categories
+            XCTAssertEqual(state.categories, sharedFailure ? [] : [category])
             XCTAssertTrue(state.notes.isEmpty)
-            XCTAssertNil(state.availableCategories)
+            XCTAssertEqual(state.availableCategories, sharedFailure ? nil : [category])
+            XCTAssertEqual(state.availableLaterTasks, sharedFailure ? nil : [])
+            XCTAssertEqual(state.laterReadIssue, sharedFailure ? .load : nil)
             XCTAssertNil(state.availableProgress)
             store.failSnapshotRead = nil
             state.refresh()
@@ -300,7 +317,8 @@ final class DailyNotesStateTests: XCTestCase {
         current = instant("2026-09-28T00:01:00-04:00")
         store.onCategoryRead = {
             XCTAssertEqual(state.categories, [category, unused])
-            XCTAssertNil(state.availableCategories)
+            XCTAssertEqual(state.availableCategories, [category, unused])
+            XCTAssertEqual(state.availableLaterTasks, [])
             XCTAssertNil(state.availableProgress)
             XCTAssertTrue(state.notes.isEmpty)
         }
@@ -597,7 +615,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertNil(store.saved.last?.categoryID)
     }
 
-    func testRefreshAppliesRemovedCategoryOnlyAfterACompleteRead() throws {
+    func testRefreshAppliesRemovedCategoryAfterCatalogReadDespiteTodayFailure() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 0)
         let original = Note(id: UUID(), text: "Original", dayKey: "2026-09-27",
                             createdAt: Date(), completedAt: nil, categoryID: work.id)
@@ -608,19 +626,44 @@ final class DailyNotesStateTests: XCTestCase {
         state.draftCategoryID = work.id
         state.beginEditing(id: original.id)
         state.editDraft = "Edited"
-        // Storage changes outside this state; a failed read must not guess.
+        // A valid catalog confirms removal even when the Today count cannot load.
         try store.removeCategory(id: work.id)
-        store.failSnapshotRead = .count
+        // A catalog failure supplies no evidence that a selection disappeared.
+        store.failSnapshotRead = .categories
         state.refresh()
         XCTAssertNil(state.availableCategories)
+        XCTAssertNil(state.availableLaterTasks)
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(state.draft, "New task")
         XCTAssertEqual(state.draftCategoryID, work.id)
         XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertEqual(state.editDraft, "Edited")
         XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertNil(state.recoveredEdit)
+
+        store.failSnapshotRead = .count
+        state.refresh()
+        XCTAssertEqual(state.availableCategories, [])
+        XCTAssertEqual(state.availableLaterTasks, [])
+        XCTAssertNil(state.availableProgress)
+        XCTAssertEqual(state.readIssue, .load)
+        XCTAssertEqual(state.notes, [original])
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertNil(state.editCategoryID)
+        let recovered = DailyNotesState.RecoveredEdit(text: "Edited", categoryID: work.id,
+                                                      categoryName: "Work")
+        XCTAssertEqual(state.recoveredEdit, recovered)
+        XCTAssertNotNil(state.refreshNotice)
         XCTAssertFalse(state.saveEdit())
         XCTAssertFalse(state.addDraft())
         XCTAssertEqual(store.saved.map(\.text), ["Original"])
-        XCTAssertEqual(state.draftCategoryID, work.id)
-        XCTAssertEqual(state.editingNoteID, original.id)
+        XCTAssertNil(store.saved.first?.categoryID)
+        XCTAssertEqual(state.draft, "New task")
+        XCTAssertNil(state.draftCategoryID)
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEdit, recovered)
 
         store.failSnapshotRead = nil
         state.refresh()
@@ -1118,7 +1161,9 @@ final class DailyNotesStateTests: XCTestCase {
             state.refresh()
             try await waitForStatusTitle("—", controller: controller)
             XCTAssertEqual(state.notes, [saved])
-            XCTAssertNil(state.availableCategories)
+            XCTAssertNil(state.availableProgress)
+            XCTAssertEqual(state.availableCategories, failure == .categories ? nil : [])
+            XCTAssertEqual(state.availableLaterTasks, failure == .categories ? nil : [])
             XCTAssertTrue(controller.statusItem?.button?.accessibilityLabel()?.contains("unavailable") == true)
             store.failSnapshotRead = nil
             store.failWrite = nil
@@ -1805,6 +1850,150 @@ final class DailyNotesStateTests: XCTestCase {
         Note(id: UUID(), text: text, dayKey: day,
              createdAt: Date(timeIntervalSince1970: createdAt), completedAt: completedAt)
     }
+
+    private func laterTask(_ text: String, createdAt: TimeInterval,
+                           completedAt: Date? = nil, categoryID: UUID? = nil) -> LaterTask {
+        LaterTask(id: UUID(), text: text,
+                  createdAt: Date(timeIntervalSince1970: createdAt),
+                  completedAt: completedAt, categoryID: categoryID)
+    }
+
+    func testLaterReadFailureDoesNotInvalidateTodayOrMenuBarProgress() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let today = note("Today note", day: "2026-09-27", createdAt: 1)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [today], categories: [work], laterTasks: [later])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+
+        store.failLaterRead = true
+        state.startup()
+
+        XCTAssertTrue(state.hasLoadedToday)
+        XCTAssertEqual(state.notes, [today])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+        XCTAssertEqual(state.availableCategories, [work])
+        XCTAssertNil(state.readIssue)
+
+        XCTAssertFalse(state.hasLoadedLater)
+        XCTAssertNil(state.availableLaterTasks)
+        XCTAssertNil(state.availableLaterRemainingCount)
+        XCTAssertEqual(state.laterReadIssue, .load)
+
+        store.failLaterRead = false
+        state.refresh()
+        XCTAssertTrue(state.hasLoadedLater)
+        XCTAssertEqual(state.availableLaterTasks, [later])
+        XCTAssertEqual(state.availableLaterRemainingCount, 1)
+        XCTAssertNil(state.laterReadIssue)
+    }
+
+    func testTodayReadFailureDoesNotInvalidateLaterSnapshot() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let today = note("Today note", day: "2026-09-27", createdAt: 1)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [today], categories: [work], laterTasks: [later])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+
+        store.failSnapshotRead = .notes
+        state.startup()
+
+        XCTAssertFalse(state.hasLoadedToday)
+        XCTAssertNil(state.availableProgress)
+        XCTAssertEqual(state.readIssue, .load)
+
+        XCTAssertTrue(state.hasLoadedLater)
+        XCTAssertEqual(state.laterTasks, [later])
+        XCTAssertEqual(state.availableLaterTasks, [later])
+        XCTAssertEqual(state.availableLaterRemainingCount, 1)
+        XCTAssertEqual(state.availableCategories, [work])
+        XCTAssertNil(state.laterReadIssue)
+        XCTAssertEqual(state.laterGroups.count, 1)
+        XCTAssertEqual(state.laterGroups[0].name, "Work")
+    }
+
+    func testCatalogReadFailureInvalidatesBothTodayAndLater() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let today = note("Today note", day: "2026-09-27", createdAt: 1)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [today], categories: [work], laterTasks: [later])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+
+        store.failSnapshotRead = .categories
+        state.startup()
+
+        XCTAssertFalse(state.hasLoadedCatalog)
+        XCTAssertFalse(state.hasLoadedToday)
+        XCTAssertFalse(state.hasLoadedLater)
+        XCTAssertNil(state.availableCategories)
+        XCTAssertNil(state.availableProgress)
+        XCTAssertNil(state.availableLaterTasks)
+        XCTAssertEqual(state.readIssue, .load)
+        XCTAssertEqual(state.laterReadIssue, .load)
+    }
+
+    func testDayChangeInvalidatesTodayEditingButPreservesLaterEditingAndDraft() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let today = note("Today note", day: "2026-09-27", createdAt: 1)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [today], categories: [work], laterTasks: [later])
+        var currentInstant = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { currentInstant })
+        state.startup()
+
+        state.beginEditing(id: today.id)
+        state.editDraft = "Updated today draft"
+
+        state.beginEditingLater(id: later.id)
+        state.laterEditDraft = "Updated later draft"
+        state.laterDraft = "New later item draft"
+        state.laterDraftCategoryID = work.id
+
+        currentInstant = instant("2026-09-28T00:01:00-04:00")
+        state.refresh()
+
+        XCTAssertNil(state.editingNoteID)
+        XCTAssertEqual(state.recoveredEdit?.text, "Updated today draft")
+        XCTAssertNotNil(state.refreshNotice)
+
+        XCTAssertEqual(state.editingLaterTaskID, later.id)
+        XCTAssertEqual(state.laterEditDraft, "Updated later draft")
+        XCTAssertEqual(state.laterDraft, "New later item draft")
+        XCTAssertEqual(state.laterDraftCategoryID, work.id)
+        XCTAssertNil(state.laterRecoveredEdit)
+    }
+
+    func testLaterDraftAndEditLifecycleAndCategoryReconciliation() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let defaults = isolatedDefaults()
+        let preferences = TaskCategoryPreferences(userDefaults: defaults)
+        preferences.rememberLastUsed(work.id, in: .later)
+
+        let store = FakeNoteRepository(categories: [work], laterTasks: [later])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") }, preferences: preferences)
+        state.startup()
+
+        state.startNewLaterDraft()
+        XCTAssertEqual(state.laterDraftCategoryID, work.id)
+        state.cancelLaterDraft()
+        XCTAssertEqual(state.laterDraft, "")
+        XCTAssertNil(state.laterDraftCategoryID)
+
+        state.beginEditingLater(id: later.id)
+        state.laterEditDraft = "Editing text"
+        state.startNewLaterDraft()
+        state.laterDraft = "Draft text"
+
+        XCTAssertTrue(state.removeCategory(id: work.id))
+
+        XCTAssertNil(state.laterDraftCategoryID)
+        XCTAssertEqual(state.laterDraft, "Draft text")
+
+        XCTAssertNil(state.editingLaterTaskID)
+        XCTAssertEqual(state.laterRecoveredEdit?.text, "Editing text")
+        XCTAssertEqual(state.laterRecoveredEdit?.categoryName, "Work")
+        XCTAssertNotNil(state.laterRefreshNotice)
+    }
 }
 
 private enum FakeFailure: Error { case failed }
@@ -1816,20 +2005,25 @@ private enum FakeSnapshotRead: CaseIterable {
 private final class FakeNoteRepository: NoteRepository {
     var saved: [Note]
     var savedCategories: [TaskCategory]
+    var savedLaterTasks: [LaterTask]
     var onRead: ((String) -> Void)?
     var onCategoryRead: (() -> Void)?
     var onCategoryWrite: (() -> Void)?
+    var onLaterRead: (() -> Void)?
     var uncheckedNotes: [Note]?
+    var uncheckedLaterTasks: [LaterTask]?
     var failSnapshotRead: FakeSnapshotRead?
+    var failLaterRead = false
     var failCategoryCommand: CategoryCommandIssue?
     var readAttempts = 0
     var categoryWriteAttempts = 0
     var failCount = false
     var failWrite: DailyNotesIssue?
 
-    init(notes: [Note] = [], categories: [TaskCategory] = []) {
+    init(notes: [Note] = [], categories: [TaskCategory] = [], laterTasks: [LaterTask] = []) {
         saved = notes
         savedCategories = categories
+        savedLaterTasks = laterTasks
     }
 
     func categories() throws -> [TaskCategory] {
@@ -1871,7 +2065,7 @@ private final class FakeNoteRepository: NoteRepository {
     func categoryUsageCount(id: UUID) throws -> Int {
         if failCategoryCommand == .usage { throw FakeFailure.failed }
         _ = try requireCategory(id)
-        return saved.count { $0.categoryID == id }
+        return saved.count { $0.categoryID == id } + savedLaterTasks.count { $0.categoryID == id }
     }
 
     func removeCategory(id: UUID) throws {
@@ -1882,6 +2076,11 @@ private final class FakeNoteRepository: NoteRepository {
             Note(id: note.id, text: note.text, dayKey: note.dayKey,
                  createdAt: note.createdAt, completedAt: note.completedAt,
                  categoryID: note.categoryID == id ? nil : note.categoryID)
+        }
+        savedLaterTasks = savedLaterTasks.map { task in
+            LaterTask(id: task.id, text: task.text, createdAt: task.createdAt,
+                      completedAt: task.completedAt,
+                      categoryID: task.categoryID == id ? nil : task.categoryID)
         }
         savedCategories.removeAll { $0.id == id }
         onCategoryWrite?()
@@ -1944,8 +2143,17 @@ private final class FakeNoteRepository: NoteRepository {
         saved.removeAll { $0.id == id }
     }
 
-    // Later operations are not faked yet; each fails explicitly.
-    func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
+    func laterTasks() throws -> [LaterTask] {
+        readAttempts += 1
+        onLaterRead?()
+        if failLaterRead { throw FakeFailure.failed }
+        if let uncheckedLaterTasks { return uncheckedLaterTasks }
+        for task in savedLaterTasks {
+            if let id = task.categoryID { _ = try requireCategory(id) }
+        }
+        return savedLaterTasks
+    }
+
     func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
     func setLaterCompleted(id: UUID, completedAt: Date?) throws {
         throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
