@@ -1858,6 +1858,445 @@ final class DailyNotesStateTests: XCTestCase {
                   completedAt: completedAt, categoryID: categoryID)
     }
 
+    func testLaterCommandsPreserveTodayOrderMetadataAndScopedPreferences() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let today = note("Today", day: "2026-09-27", createdAt: 1)
+        let first = laterTask("First", createdAt: 2, categoryID: work.id)
+        let second = laterTask("Second", createdAt: 3)
+        let store = FakeNoteRepository(notes: [today], categories: [work, home], laterTasks: [first, second])
+        let preferences = isolatedCategoryPreferences()
+        preferences.rememberLastUsed(home.id)
+        preferences.setCollapsed(true, for: .category(work.id))
+        preferences.setCollapsed(true, for: .category(work.id), in: .later)
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let state = makeState(store: store, now: { current }, preferences: preferences)
+        state.startup()
+        state.draft = "Today draft"
+        state.draftCategoryID = home.id
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        let todayProgress = state.availableProgress
+
+        state.laterDraft = " \n "
+        XCTAssertFalse(state.addLaterDraft())
+        XCTAssertEqual(store.laterWriteAttempts, 0)
+        state.laterDraft = "  Added later  "
+        state.laterDraftCategoryID = work.id
+        XCTAssertTrue(state.addLaterDraft())
+        let added = try XCTUnwrap(state.laterTasks.last)
+        XCTAssertEqual(added.text, "Added later")
+        XCTAssertEqual(added.createdAt, current)
+        XCTAssertEqual(added.categoryID, work.id)
+        XCTAssertEqual(state.laterDraft, "")
+        XCTAssertNil(state.laterDraftCategoryID)
+        XCTAssertEqual(preferences.laterLastUsedCategoryID, work.id)
+        XCTAssertFalse(preferences.isCollapsed(.category(work.id), in: .later))
+        XCTAssertTrue(preferences.isCollapsed(.category(work.id)))
+
+        XCTAssertTrue(state.setLaterCompleted(id: first.id, completed: true))
+        XCTAssertEqual(state.laterTasks.first?.completedAt, current)
+        preferences.setCollapsed(true, for: .category(work.id), in: .later)
+        state.beginEditingLater(id: first.id)
+        state.laterEditDraft = " "
+        let attempts = store.laterWriteAttempts
+        XCTAssertFalse(state.saveLaterEdit())
+        XCTAssertEqual(store.laterWriteAttempts, attempts)
+        state.laterEditDraft = "  Renamed  "
+        XCTAssertTrue(state.saveLaterEdit())
+        XCTAssertTrue(preferences.isCollapsed(.category(work.id), in: .later))
+        preferences.setCollapsed(true, for: .category(home.id), in: .later)
+        state.beginEditingLater(id: first.id)
+        state.laterEditCategoryID = home.id
+        XCTAssertTrue(state.saveLaterEdit())
+        XCTAssertFalse(preferences.isCollapsed(.category(home.id), in: .later))
+        XCTAssertEqual(state.laterTasks.map(\.id), [first.id, second.id, added.id])
+        XCTAssertEqual(state.laterTasks.first?.createdAt, first.createdAt)
+        XCTAssertEqual(state.laterTasks.first?.completedAt, current)
+        XCTAssertTrue(state.setLaterCompleted(id: first.id, completed: false))
+        XCTAssertNil(state.laterTasks.first?.completedAt)
+        XCTAssertTrue(state.deleteLater(id: second.id))
+        XCTAssertEqual(state.laterTasks.map(\.id), [first.id, added.id])
+        XCTAssertEqual(state.notes, [today])
+        XCTAssertEqual(state.availableProgress, todayProgress)
+        XCTAssertEqual(state.draft, "Today draft")
+        XCTAssertEqual(state.draftCategoryID, home.id)
+        XCTAssertEqual(state.taskIssue, .add)
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+        XCTAssertEqual(preferences.laterLastUsedCategoryID, work.id)
+
+        // Quick Add remains Today/General, independent of Later's active edit/draft.
+        state.laterDraft = "Next Later draft"
+        state.laterDraftCategoryID = work.id
+        state.beginEditingLater(id: first.id)
+        state.laterEditDraft = "Pending Later edit"
+        store.failWrite = nil
+        XCTAssertEqual(state.add(text: "Capture"), .added)
+        XCTAssertNil(state.notes.last?.categoryID)
+        XCTAssertEqual(state.laterDraft, "Next Later draft")
+        XCTAssertEqual(state.laterDraftCategoryID, work.id)
+        XCTAssertEqual(state.laterEditDraft, "Pending Later edit")
+        XCTAssertEqual(preferences.lastUsedCategoryID, home.id)
+        XCTAssertEqual(preferences.laterLastUsedCategoryID, work.id)
+    }
+
+    func testEveryFailedLaterWriteKeepsSnapshotsDraftsAndPreferencesUntilRetry() throws {
+        for failure in [DailyNotesIssue.add, .complete, .edit, .delete] {
+            let work = try TaskCategory(name: "Work", creationOrder: 0)
+            let original = laterTask("Original", createdAt: 2, categoryID: work.id)
+            let today = note("Today", day: "2026-09-27", createdAt: 1)
+            let store = FakeNoteRepository(notes: [today], categories: [work], laterTasks: [original])
+            let preferences = isolatedCategoryPreferences()
+            preferences.setCollapsed(true, for: .category(work.id), in: .later)
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") },
+                                  preferences: preferences)
+            state.startup()
+            state.laterDraft = "New Later draft"
+            state.laterDraftCategoryID = work.id
+            if failure == .edit {
+                state.beginEditingLater(id: original.id)
+                state.laterEditDraft = "Changed"
+                state.laterEditCategoryID = nil
+            }
+            let command: () -> Bool = {
+                switch failure {
+                case .add: state.addLaterDraft()
+                case .complete: state.setLaterCompleted(id: original.id, completed: true)
+                case .edit: state.saveLaterEdit()
+                case .delete: state.deleteLater(id: original.id)
+                default: false
+                }
+            }
+            store.failLaterWrite = failure
+            XCTAssertFalse(command())
+            XCTAssertEqual(state.laterTaskIssue, failure)
+            XCTAssertEqual(state.laterTasks, [original])
+            XCTAssertEqual(store.savedLaterTasks, [original])
+            XCTAssertEqual(state.availableLaterRemainingCount, 1)
+            XCTAssertEqual(state.notes, [today])
+            XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+            XCTAssertEqual(state.laterDraft, "New Later draft")
+            XCTAssertEqual(state.laterDraftCategoryID, work.id)
+            XCTAssertNil(preferences.laterLastUsedCategoryID)
+            XCTAssertTrue(preferences.isCollapsed(.category(work.id), in: .later))
+            if failure == .edit {
+                XCTAssertEqual(state.editingLaterTaskID, original.id)
+                XCTAssertEqual(state.laterEditDraft, "Changed")
+                XCTAssertNil(state.laterEditCategoryID)
+            }
+            store.failLaterRead = true
+            state.refresh()
+            XCTAssertEqual(state.laterIssue, .load)
+            XCTAssertEqual(state.laterTaskIssue, failure)
+            store.failLaterRead = false
+            state.refresh()
+            XCTAssertEqual(state.laterIssue, failure)
+            store.failLaterWrite = nil
+            XCTAssertTrue(command())
+            XCTAssertNil(state.laterTaskIssue)
+            XCTAssertEqual(state.laterTasks, store.savedLaterTasks)
+        }
+    }
+
+    func testLaterAndSharedCategoryWritesRemainUsableWhenOnlyTodayReadFails() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let original = laterTask("Original", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(categories: [work], laterTasks: [original])
+        store.failSnapshotRead = .notes
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.laterDraft = "New"
+        state.laterDraftCategoryID = work.id
+        XCTAssertTrue(state.addLaterDraft())
+        XCTAssertTrue(state.setLaterCompleted(id: original.id, completed: true))
+        state.beginEditingLater(id: original.id)
+        state.laterEditDraft = "Edited"
+        XCTAssertTrue(state.saveLaterEdit())
+        XCTAssertNotNil(state.createCategory(name: "Unused"))
+        XCTAssertNotNil(state.renameCategory(id: work.id, name: "Office"))
+        XCTAssertEqual(state.categoryUsageCount(id: work.id), 2)
+        XCTAssertEqual(state.laterGroups.first?.name, "Office")
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertTrue(state.laterTasks.allSatisfy { $0.categoryID == nil })
+        XCTAssertTrue(state.deleteLater(id: original.id))
+        let remaining = try XCTUnwrap(state.laterTasks.first)
+        XCTAssertFalse(state.moveLaterToToday(id: remaining.id))
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertNil(state.availableProgress)
+        XCTAssertEqual(state.readIssue, .load)
+        XCTAssertTrue(state.hasLoadedLater)
+    }
+
+    func testUnavailableLaterOrCatalogAndTerminationRejectAllLaterWrites() throws {
+        for catalogFailure in [false, true] {
+            let original = laterTask("Original", createdAt: 1)
+            let store = FakeNoteRepository(laterTasks: [original])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            state.beginEditingLater(id: original.id)
+            state.laterEditDraft = "Pending edit"
+            state.laterDraft = "Pending add"
+            if catalogFailure { store.failSnapshotRead = .categories } else { store.failLaterRead = true }
+            state.refresh()
+            XCTAssertFalse(state.addLaterDraft())
+            XCTAssertFalse(state.setLaterCompleted(id: original.id, completed: true))
+            XCTAssertFalse(state.saveLaterEdit())
+            XCTAssertFalse(state.deleteLater(id: original.id))
+            XCTAssertFalse(state.moveLaterToToday(id: original.id))
+            XCTAssertEqual(store.laterWriteAttempts, 0)
+            XCTAssertEqual(store.savedLaterTasks, [original])
+            XCTAssertEqual(state.laterDraft, "Pending add")
+            XCTAssertEqual(state.laterEditDraft, "Pending edit")
+            store.failSnapshotRead = nil
+            store.failLaterRead = false
+            state.refresh()
+            state.stopForTermination()
+            XCTAssertFalse(state.addLaterDraft())
+            XCTAssertFalse(state.saveLaterEdit())
+            XCTAssertFalse(state.setLaterCompleted(id: original.id, completed: true))
+            XCTAssertFalse(state.deleteLater(id: original.id))
+            XCTAssertFalse(state.moveLaterToToday(id: original.id))
+            XCTAssertEqual(store.laterWriteAttempts, 0)
+        }
+    }
+
+    func testMoveUsesOneActionClockSampleAcrossMidnightAndTimeZoneChanges() throws {
+        for timeZoneChange in [false, true] {
+            let work = try TaskCategory(name: "Work", creationOrder: 0)
+            let source = laterTask("Old task", createdAt: 1, categoryID: work.id)
+            let oldDay = note("Old day", day: "2026-09-27", createdAt: 2)
+            let destination = note("Already today", day: "2026-09-28", createdAt: 3)
+            let store = FakeNoteRepository(notes: [oldDay, destination], categories: [work], laterTasks: [source])
+            var current = instant("2026-09-27T23:59:00-04:00")
+            var zone = self.zone
+            var clockReads = 0
+            var advanceAfterSample = false
+            let preferences = isolatedCategoryPreferences()
+            preferences.setCollapsed(true, for: .category(work.id))
+            let state = DailyNotesState(repositoryFactory: { store },
+                                       day: NoteDay(now: {
+                                           clockReads += 1
+                                           let result = current
+                                           if advanceAfterSample { current = current.addingTimeInterval(86_400) }
+                                           return result
+                                       }, timeZone: { zone }),
+                                       notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+                                       categoryPreferences: preferences)
+            state.startup()
+            state.laterDraft = "Keep Later draft"
+            state.draft = "Keep Today draft"
+            if timeZoneChange { zone = TimeZone(secondsFromGMT: 0)! }
+            else { current = instant("2026-09-28T00:01:00-04:00") }
+            advanceAfterSample = true
+            clockReads = 0
+            XCTAssertTrue(state.moveLaterToToday(id: source.id))
+            XCTAssertEqual(clockReads, 1)
+            XCTAssertEqual(state.todayKey, "2026-09-28")
+            XCTAssertEqual(state.notes.map(\.id), [destination.id, source.id])
+            let moved = try XCTUnwrap(state.notes.last)
+            XCTAssertEqual(moved.dayKey, "2026-09-28")
+            XCTAssertEqual(moved.text, source.text)
+            XCTAssertEqual(moved.categoryID, source.categoryID)
+            XCTAssertEqual(moved.createdAt, source.createdAt)
+            XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
+            XCTAssertEqual(state.availableLaterRemainingCount, 0)
+            XCTAssertEqual(state.yesterdayIncompleteCount, 1)
+            XCTAssertFalse(preferences.isCollapsed(.category(work.id)))
+            XCTAssertNil(preferences.lastUsedCategoryID)
+            XCTAssertNil(preferences.laterLastUsedCategoryID)
+            XCTAssertEqual(state.laterDraft, "Keep Later draft")
+            XCTAssertEqual(state.draft, "Keep Today draft")
+            XCTAssertEqual(store.moveAttempts, 1)
+        }
+    }
+
+    func testMoveFailureRetryAndCommittedResultDoNotDependOnFollowUpReads() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let source = laterTask("Cached text", createdAt: 1, categoryID: work.id)
+        let today = note("Today", day: "2026-09-27", createdAt: 2)
+        let store = FakeNoteRepository(notes: [today], categories: [work, home], laterTasks: [source])
+        defer { store.onMove = nil }
+        let preferences = isolatedCategoryPreferences()
+        preferences.rememberLastUsed(work.id)
+        preferences.rememberLastUsed(work.id, in: .later)
+        preferences.setCollapsed(true, for: .category(home.id))
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") }, preferences: preferences)
+        state.startup()
+        state.laterDraft = "Pending Later draft"
+        store.failLaterWrite = .move
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(state.laterTasks, [source])
+        XCTAssertEqual(state.notes, [today])
+        XCTAssertEqual(state.laterDraft, "Pending Later draft")
+        XCTAssertTrue(preferences.isCollapsed(.category(home.id)))
+        store.failLaterWrite = nil
+        store.onMove = {
+            store.savedLaterTasks = [LaterTask(id: source.id, text: "Persisted text", createdAt: source.createdAt,
+                                               completedAt: nil, categoryID: home.id)]
+            // Any optional reread after this saved result would fail.
+            store.failSnapshotRead = .categories
+            store.failLaterRead = true
+        }
+        let reads = store.readAttempts
+        XCTAssertTrue(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(store.readAttempts, reads)
+        XCTAssertNil(state.laterTaskIssue)
+        XCTAssertEqual(state.notes.last?.text, "Persisted text")
+        XCTAssertEqual(state.notes.last?.categoryID, home.id)
+        XCTAssertEqual(state.notes.last?.createdAt, source.createdAt)
+        XCTAssertEqual(state.laterRefreshNotice, "Moved task to Today.")
+        XCTAssertFalse(preferences.isCollapsed(.category(home.id)))
+        XCTAssertEqual(preferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(preferences.laterLastUsedCategoryID, work.id)
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(store.moveAttempts, 2)
+        XCTAssertEqual(store.saved.filter { $0.id == source.id }.count, 1)
+        state.refresh()
+        XCTAssertEqual(state.laterIssue, .load)
+        XCTAssertNil(state.laterTaskIssue)
+        store.failSnapshotRead = nil
+        store.failLaterRead = false
+        state.refresh()
+        XCTAssertEqual(state.notes, store.saved)
+        XCTAssertEqual(state.laterTasks, [])
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(store.moveAttempts, 2)
+    }
+
+    func testLaterStaleTargetsAndCategoriesRecoverWithoutSavingElsewhere() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let source = laterTask("Original", createdAt: 1, categoryID: work.id)
+        let store = FakeNoteRepository(categories: [work], laterTasks: [source])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.beginEditingLater(id: source.id)
+        state.laterEditDraft = "Recover removed task"
+        store.savedLaterTasks = []
+        XCTAssertFalse(state.saveLaterEdit())
+        XCTAssertNil(state.editingLaterTaskID)
+        XCTAssertEqual(state.laterRecoveredEdit?.text, "Recover removed task")
+        XCTAssertEqual(state.laterTasks, [])
+
+        state.laterDraft = "Never autosave as General"
+        state.laterDraftCategoryID = work.id
+        store.savedCategories = []
+        XCTAssertFalse(state.addLaterDraft())
+        XCTAssertEqual(store.savedLaterTasks, [])
+        XCTAssertEqual(state.laterDraft, "Never autosave as General")
+        XCTAssertNil(state.laterDraftCategoryID)
+        XCTAssertNotNil(state.laterRefreshNotice)
+
+        let completed = LaterTask(id: source.id, text: source.text, createdAt: source.createdAt,
+                                  completedAt: instant("2026-09-27T10:00:00-04:00"))
+        store.savedLaterTasks = [LaterTask(id: source.id, text: source.text, createdAt: source.createdAt, completedAt: nil)]
+        state.refresh()
+        store.savedLaterTasks = [completed]
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(state.laterTasks, [completed])
+        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(store.saved, [])
+        let attempts = store.moveAttempts
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(store.moveAttempts, attempts)
+        XCTAssertTrue(state.setLaterCompleted(id: source.id, completed: false))
+        store.saved = [Note(id: source.id, text: "History collision", dayKey: "2026-09-26",
+                            createdAt: source.createdAt, completedAt: nil)]
+        XCTAssertFalse(state.moveLaterToToday(id: source.id))
+        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(store.savedLaterTasks.count, 1)
+        XCTAssertEqual(state.notes, [])
+    }
+
+    func testLaterAddReadinessRefreshDoesNotAutosaveADeletedCategoryAsGeneral() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let store = FakeNoteRepository(categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.laterDraft = "Keep for explicit retry"
+        state.laterDraftCategoryID = work.id
+        store.failLaterRead = true
+        state.refresh()
+        store.failLaterRead = false
+        store.savedCategories = []
+        XCTAssertFalse(state.addLaterDraft())
+        XCTAssertEqual(store.laterWriteAttempts, 0)
+        XCTAssertEqual(store.savedLaterTasks, [])
+        XCTAssertEqual(state.laterDraft, "Keep for explicit retry")
+        XCTAssertNil(state.laterDraftCategoryID)
+        XCTAssertNotNil(state.laterRefreshNotice)
+        XCTAssertTrue(state.addLaterDraft())
+        XCTAssertNil(store.savedLaterTasks.first?.categoryID)
+    }
+
+    func testSQLiteBackedLaterCommandsMoveRollbackAndReopenPublishOnlySavedValues() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LaterStateCommands-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let current = instant("2026-09-27T12:00:00-04:00")
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { current }), notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: self.isolatedCategoryPreferences())
+        }
+        let state = makeState()
+        state.startup()
+        let work = try XCTUnwrap(state.createCategory(name: "Work"))
+        state.draft = "Existing Today"
+        XCTAssertTrue(state.addDraft())
+        state.laterDraft = "First Later"
+        state.laterDraftCategoryID = work.id
+        XCTAssertTrue(state.addLaterDraft())
+        state.laterDraft = "Second Later"
+        XCTAssertTrue(state.addLaterDraft())
+        let first = try XCTUnwrap(state.laterTasks.first)
+        let second = try XCTUnwrap(state.laterTasks.last)
+        XCTAssertTrue(state.setLaterCompleted(id: first.id, completed: true))
+        state.beginEditingLater(id: first.id)
+        state.laterEditDraft = "Edited first"
+        XCTAssertTrue(state.saveLaterEdit())
+        XCTAssertEqual(state.laterTasks.map(\.id), [first.id, second.id])
+        let savedBeforeMove = state.laterTasks
+        let todayBeforeMove = state.notes
+        state.stopForTermination()
+        let reopened = makeState()
+        reopened.startup()
+        XCTAssertEqual(reopened.laterTasks, savedBeforeMove)
+        XCTAssertEqual(reopened.notes, todayBeforeMove)
+        XCTAssertFalse(reopened.moveLaterToToday(id: first.id))
+        XCTAssertTrue(reopened.setLaterCompleted(id: first.id, completed: false))
+        try executeCategoryFixtureSQL("CREATE TRIGGER reject_move BEFORE DELETE ON later_tasks BEGIN SELECT RAISE(ABORT, 'reject move'); END", at: url)
+        let beforeRejectedMove = reopened.laterTasks
+        XCTAssertFalse(reopened.moveLaterToToday(id: first.id))
+        XCTAssertEqual(reopened.laterTasks, beforeRejectedMove)
+        XCTAssertEqual(reopened.notes, todayBeforeMove)
+        let observer = try SQLiteNoteRepository(databaseURL: url)
+        XCTAssertEqual(try observer.laterTasks(), beforeRejectedMove)
+        XCTAssertEqual(try observer.notes(for: "2026-09-27"), todayBeforeMove)
+        try executeCategoryFixtureSQL("DROP TRIGGER reject_move", at: url)
+        XCTAssertTrue(reopened.moveLaterToToday(id: first.id))
+        XCTAssertFalse(reopened.moveLaterToToday(id: first.id))
+        XCTAssertEqual(reopened.notes.map(\.id), todayBeforeMove.map(\.id) + [first.id])
+        XCTAssertEqual(reopened.notes.last?.text, "Edited first")
+        XCTAssertEqual(reopened.notes.last?.categoryID, work.id)
+        XCTAssertEqual(reopened.notes.last?.createdAt, first.createdAt)
+        XCTAssertEqual(reopened.availableLaterRemainingCount, 1)
+        XCTAssertEqual(reopened.availableProgress, NoteProgress(completed: 0, total: 2))
+        XCTAssertTrue(reopened.deleteLater(id: second.id))
+        let finalNotes = reopened.notes
+        reopened.stopForTermination()
+        let finalState = makeState()
+        finalState.startup()
+        XCTAssertEqual(finalState.notes, finalNotes)
+        XCTAssertEqual(finalState.laterTasks, [])
+        XCTAssertEqual(try observer.notes(for: "2026-09-27"), finalNotes)
+        XCTAssertEqual(try observer.laterTasks(), [])
+        finalState.stopForTermination()
+    }
+
     func testLaterReadFailureDoesNotInvalidateTodayOrMenuBarProgress() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 0)
         let today = note("Today note", day: "2026-09-27", createdAt: 1)
@@ -2019,6 +2458,10 @@ private final class FakeNoteRepository: NoteRepository {
     var categoryWriteAttempts = 0
     var failCount = false
     var failWrite: DailyNotesIssue?
+    var failLaterWrite: DailyNotesIssue?
+    var laterWriteAttempts = 0
+    var moveAttempts = 0
+    var onMove: (() -> Void)?
 
     init(notes: [Note] = [], categories: [TaskCategory] = [], laterTasks: [LaterTask] = []) {
         saved = notes
@@ -2154,16 +2597,59 @@ private final class FakeNoteRepository: NoteRepository {
         return savedLaterTasks
     }
 
-    func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
+    func addLater(_ task: LaterTask) throws {
+        try checkLaterWrite(.add)
+        if let id = task.categoryID { _ = try requireCategory(id) }
+        guard !savedLaterTasks.contains(where: { $0.id == task.id }) else { throw FakeFailure.failed }
+        savedLaterTasks.append(task)
+    }
     func setLaterCompleted(id: UUID, completedAt: Date?) throws {
-        throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
+        try checkLaterWrite(.complete)
+        try mutateLater(id: id) { task in
+            LaterTask(id: task.id, text: task.text, createdAt: task.createdAt,
+                      completedAt: completedAt, categoryID: task.categoryID)
+        }
     }
     func updateLater(id: UUID, text: String, categoryID: UUID?) throws {
-        throw LaterTaskRepositoryError.unsupported("updateLater")
+        try checkLaterWrite(.edit)
+        if let categoryID { _ = try requireCategory(categoryID) }
+        try mutateLater(id: id) { task in
+            LaterTask(id: task.id, text: text, createdAt: task.createdAt,
+                      completedAt: task.completedAt, categoryID: categoryID)
+        }
     }
-    func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
+    func deleteLater(id: UUID) throws {
+        try checkLaterWrite(.delete)
+        guard savedLaterTasks.contains(where: { $0.id == id }) else { throw LaterTaskRepositoryError.notFound(id) }
+        savedLaterTasks.removeAll { $0.id == id }
+    }
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
-        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+        moveAttempts += 1
+        try checkLaterWrite(.move)
+        onMove?()
+        guard let task = savedLaterTasks.first(where: { $0.id == id }) else {
+            throw LaterTaskRepositoryError.notFound(id)
+        }
+        guard !task.isCompleted else { throw LaterTaskRepositoryError.alreadyCompleted(id) }
+        if let categoryID = task.categoryID { _ = try requireCategory(categoryID) }
+        guard !saved.contains(where: { $0.id == id }) else { throw LaterTaskRepositoryError.idCollision(id) }
+        let note = Note(id: task.id, text: task.text, dayKey: dayKey, createdAt: task.createdAt,
+                        completedAt: nil, categoryID: task.categoryID)
+        saved.append(note)
+        savedLaterTasks.removeAll { $0.id == id }
+        return note
+    }
+
+    private func checkLaterWrite(_ issue: DailyNotesIssue) throws {
+        laterWriteAttempts += 1
+        if failLaterWrite == issue { throw FakeFailure.failed }
+    }
+
+    private func mutateLater(id: UUID, change: (LaterTask) -> LaterTask) throws {
+        guard let index = savedLaterTasks.firstIndex(where: { $0.id == id }) else {
+            throw LaterTaskRepositoryError.notFound(id)
+        }
+        savedLaterTasks[index] = change(savedLaterTasks[index])
     }
 
     private func mutate(id: UUID, change: (Note) -> Note) throws {

@@ -573,3 +573,31 @@ Source is based on `main` HEAD `8f3804734f58b8c89ea24b08ba64d8ab8a98b3ee` with t
 The first run had four assertion failures during the new asynchronous field-restoration check and existing native text-command checks. After waiting for the restored Add field, the next run passed 91/91. Native verification then exposed pending-Add focus stealing after a distant category reassignment, an offscreen editor on re-entry at minimum size, and a focused but offscreen saved destination. The final fix has one reveal/focus owner, mounts the destination group at the top, then centers the target row. The final v4 run passed 91/91. Earlier runs and logs remain historical evidence only.
 
 The isolated 100-task fixture uses current production views/state/delegate, a separate SQLite/defaults suite, a simulated October 3 clock, and fake login/hotkey services. Its executable SHA-256 is `f60913f519dc25dabb9be7044b4bf8c2ee963b6a74030ecdafd753e70a7cad61`; harness SHA-256 is `fe306466d70eb9eef77bf73d0eac6b30de590020b0dc46c0c3a4373f1da8a2fc`. See [native observations](DESKTOP_TASK_ACCEPTANCE.md#inline-task-editing--2026-10-04). No persistence schema, repository behavior, permissions, dependency, Add workflow or Delete workflow was changed. Full-suite, Release, remote CI and production/system acceptance were not run for this change.
+
+
+## Later shared-state commands — 2026-10-05
+
+TASK-006's state/storage command handoff is source complete. The final independent shared-scheme Debug hosted run passed **158/158**, zero failures: `DailyNotesStateTests` 65, `SQLiteNoteRepositoryTests` 33, `TaskCategoryPreferencesTests` 8, `NoteDomainTests` 9, `AppConfigurationTests` 35, and `QuickAddPanelTests` 8. The fresh reviewer issued **READY for TASK-006 source handoff**, with no material findings. Logs/results and exact review identity remain under ignored `build/task006-review/`: `xcodebuild.log`, `Tests.xcresult`, and `review.md`. `git diff --check` passed.
+
+The new state APIs publish Later add/edit/completion/deletion and Later-to-Today moves only after persistence succeeds. Nine new state tests establish rejected-write preservation/retry, scoped errors/readiness, draft/category recovery, insertion order and metadata, per-list preferences, Quick Add independence, one action-time day calculation through midnight/time-zone changes, publication of the repository's committed returned Note without a post-write reread, duplicate/collision rejection, and real isolated SQLite rollback/reopen. Shared category commands can use independently valid Later data when Today cannot be read; the existing Today capture API remains unchanged. No UI/layout/native route or storage schema was changed by this increment.
+
+Final verification used macOS 26.6.2 (25G83), Xcode 27.0 (27A266a), on `feat/later-tasks`, base/HEAD `963f17586eb99783bb84504babadec190ab1199f` plus uncommitted state/helper/test/architecture/workflow changes. The independently tested six-file binary diff SHA-256 was `10ab3624414b3e64a699f958c265d4644bf38a77d6940a9013aa1ff5da1dcd89`, unchanged before and after verification. The later additions to this regression record and English plan are documentation-only. The tested temporary app was `build/task006-review/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle `local.menupocket.app`, version `0.1.0`, build `1`; executable SHA-256 `bdc10dab13dcbce91b4757f21f74a4ef808ddc3664d3eae2e18463df3d09c0e2`. Exact artifact identity and cleanup observations are retained in the review report.
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/task006-review/DerivedData \
+  -resultBundlePath build/task006-review/Tests.xcresult \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/TaskCategoryPreferencesTests \
+  -only-testing:MenuPocketTests/NoteDomainTests \
+  -only-testing:MenuPocketTests/AppConfigurationTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+An initial restricted-sandbox attempt failed before tests because Swift macro compiler access was unavailable (`build/task006/targeted-sandbox.log` and `targeted-sandbox.xcresult`). Running through authorized Xcode access passed 157/157 in the author's intermediate run (`build/task006/targeted.log`, `targeted.xcresult`). The final readiness-refresh guard and its ninth regression test were added after that run compiled, so **158/158 from the independent run is the final-source evidence**; the earlier 157 count is historical only.
+
+Both session-created Debug app hosts exited and were unregistered at their exact original paths, moved with `FileManager.trashItem`, and unregistered at returned Trash paths. Their original paths were absent; fresh process, Spotlight, and LaunchServices checks found no runnable copies. The author's Trash path was re-registered asynchronously by macOS and was unregistered again before the final empty registry check. Existing user Debug/Release bundles outside these two output directories were preserved, with the existing Debug executable hash unchanged. Author identity/cleanup records are `build/task006/artifact-identity.json` and `cleanup.json`; reviewer cleanup records are linked in `build/task006-review/review.md`. Saved production data, defaults, launch-at-login state, and global hotkey registration were not modified.
+
+Later tab/view/native routes and full-feature actual-interface acceptance remain later plan work. Release, remote CI, real-data upgrade/relaunch, and genuine login/day/time-zone/hotkey checks were **Not tested** in this increment. Hosted AppKit/status/Quick Add tests and injected clocks are automated evidence, not native/system acceptance. Earlier dated regression and acceptance gaps remain historical records.

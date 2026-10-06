@@ -1162,6 +1162,7 @@ final class AppConfigurationTests: XCTestCase {
 
 private final class TaskWindowReadFixture: NoteRepository {
     var saved: [Note] = []
+    var savedLater: [LaterTask] = []
     var savedCategories: [TaskCategory] = []
     var failRead = false
     var failDelete = false
@@ -1191,7 +1192,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     /// Counts every saved day, like the store.
     func categoryUsageCount(id: UUID) throws -> Int {
         guard savedCategories.contains(where: { $0.id == id }) else { throw TaskCategoryRepositoryError.notFound(id) }
-        return saved.count { $0.categoryID == id }
+        return saved.count { $0.categoryID == id } + savedLater.count { $0.categoryID == id }
     }
     func removeCategory(id: UUID) throws {
         removeAttempts += 1
@@ -1202,6 +1203,10 @@ private final class TaskWindowReadFixture: NoteRepository {
         saved = saved.map { note in
             Note(id: note.id, text: note.text, dayKey: note.dayKey, createdAt: note.createdAt,
                  completedAt: note.completedAt, categoryID: note.categoryID == id ? nil : note.categoryID)
+        }
+        savedLater = savedLater.map { task in
+            LaterTask(id: task.id, text: task.text, createdAt: task.createdAt,
+                      completedAt: task.completedAt, categoryID: task.categoryID == id ? nil : task.categoryID)
         }
     }
 
@@ -1233,18 +1238,55 @@ private final class TaskWindowReadFixture: NoteRepository {
         saved.removeAll { $0.id == id }
     }
 
-    // Later operations are not faked yet; each fails explicitly.
-    func laterTasks() throws -> [LaterTask] { throw LaterTaskRepositoryError.unsupported("laterTasks") }
-    func addLater(_ task: LaterTask) throws { throw LaterTaskRepositoryError.unsupported("addLater") }
+    func laterTasks() throws -> [LaterTask] {
+        if failRead { throw CocoaError(.fileReadUnknown) }
+        return savedLater
+    }
+    func addLater(_ task: LaterTask) throws {
+        guard allowAdd else { throw CocoaError(.fileWriteNoPermission) }
+        try requireLaterCategory(task.categoryID)
+        guard !savedLater.contains(where: { $0.id == task.id }) else { throw CocoaError(.fileWriteUnknown) }
+        savedLater.append(task)
+    }
     func setLaterCompleted(id: UUID, completedAt: Date?) throws {
-        throw LaterTaskRepositoryError.unsupported("setLaterCompleted")
+        try mutateLater(id: id) { task in
+            LaterTask(id: task.id, text: task.text, createdAt: task.createdAt,
+                      completedAt: completedAt, categoryID: task.categoryID)
+        }
     }
     func updateLater(id: UUID, text: String, categoryID: UUID?) throws {
-        throw LaterTaskRepositoryError.unsupported("updateLater")
+        try requireLaterCategory(categoryID)
+        try mutateLater(id: id) { task in
+            LaterTask(id: task.id, text: text, createdAt: task.createdAt,
+                      completedAt: task.completedAt, categoryID: categoryID)
+        }
     }
-    func deleteLater(id: UUID) throws { throw LaterTaskRepositoryError.unsupported("deleteLater") }
+    func deleteLater(id: UUID) throws {
+        deleteAttempts += 1
+        onDelete?()
+        if failDelete { throw CocoaError(.fileWriteNoPermission) }
+        guard savedLater.contains(where: { $0.id == id }) else { throw LaterTaskRepositoryError.notFound(id) }
+        savedLater.removeAll { $0.id == id }
+    }
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
-        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+        guard let task = savedLater.first(where: { $0.id == id }) else { throw LaterTaskRepositoryError.notFound(id) }
+        guard !task.isCompleted else { throw LaterTaskRepositoryError.alreadyCompleted(id) }
+        try requireLaterCategory(task.categoryID)
+        guard !saved.contains(where: { $0.id == id }) else { throw LaterTaskRepositoryError.idCollision(id) }
+        let note = Note(id: id, text: task.text, dayKey: dayKey, createdAt: task.createdAt,
+                        completedAt: nil, categoryID: task.categoryID)
+        saved.append(note)
+        savedLater.removeAll { $0.id == id }
+        return note
+    }
+
+    private func requireLaterCategory(_ id: UUID?) throws {
+        if let id, !savedCategories.contains(where: { $0.id == id }) { throw TaskCategoryRepositoryError.notFound(id) }
+    }
+
+    private func mutateLater(id: UUID, change: (LaterTask) -> LaterTask) throws {
+        guard let index = savedLater.firstIndex(where: { $0.id == id }) else { throw LaterTaskRepositoryError.notFound(id) }
+        savedLater[index] = change(savedLater[index])
     }
 }
 
