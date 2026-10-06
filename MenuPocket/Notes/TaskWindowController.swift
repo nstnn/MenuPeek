@@ -289,12 +289,14 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
             rootView: TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
         )
         hostingController.sizingOptions = []
+        hostingController.sceneBridgingOptions = [.toolbars]
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.initialContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         window.title = "MenuPocket Tasks"
+        window.toolbarStyle = .unified
         window.contentViewController = hostingController
         // Installing the hosting view can replace the frame with its fitting size.
         // Restore the intended size before centering and presenting the window.

@@ -58,7 +58,7 @@ struct TaskWindowView: View {
     }
 
     private enum FocusControl: Hashable {
-        case add, manageCategories, settings, retry, save, draft, category, cancelDelete, confirmDelete
+        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete
         case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
@@ -199,6 +199,18 @@ struct TaskWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { canvasBackground }
+        // Bridged into the window's unified title bar by TaskWindowController.
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                destinationControl
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                }
+                .help("Open Settings (⌘,)")
+                .accessibilityLabel("Open Settings")
+                .disabled(presentation.deletionTarget != nil)
+            }
+        }
         // Attached to this window, so it blocks the rows and actions behind it.
         .sheet(isPresented: Binding(
             get: { presentation.isManagingCategories },
@@ -267,9 +279,8 @@ struct TaskWindowView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            destinationControl
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 24) {
+                HStack(alignment: .center, spacing: 24) {
                     listHeading
                     Spacer(minLength: 16)
                     topActions
@@ -319,7 +330,7 @@ struct TaskWindowView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(width: 200)
+        .fixedSize()
         .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
                   presentation.deletionTarget != nil || presentation.isManagingCategories)
         .accessibilityLabel("Task list")
@@ -392,20 +403,6 @@ struct TaskWindowView: View {
             .help("Manage categories")
             .accessibilityLabel("Manage categories")
             .accessibilityIdentifier("manageCategories")
-            Button(action: onSettings) {
-                Image(systemName: "gearshape")
-            }
-            .focusable()
-            .keyboardFocusAppearance()
-            .focused($focusedControl, equals: .settings)
-            .onKeyPress(keys: [.space, .return]) { _ in
-                onSettings()
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .settings) }
-            .help("Open Settings (⌘,)")
-            .accessibilityLabel("Open Settings")
-            .disabled(presentation.deletionTarget != nil)
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
