@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         installApplicationMenu()
         dailyNotesState.startup()
         taskStatusItemController = TaskStatusItemController(state: dailyNotesState) { [weak self] in
-            self?.showTasks()
+            self?.showToday()
         }
         // Registers in both launch contexts; a press never raises a window on its own.
         model.startQuickAdd { [weak self] in self?.quickAddHotKeyPressed() }
@@ -88,17 +88,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func showTasks() {
         guard !isTerminating else { return }
-        if taskWindowController == nil {
-            taskWindowController = TaskWindowController(state: dailyNotesState) { [weak self] in
-                self?.showSettings()
-            }
-        }
-        taskWindowController?.showTasks()
+        makeTaskWindowController().showTasks()
         if taskWindowController?.window?.isVisible == true { completeOnboardingAfterPresentation() }
     }
 
-    @objc func addTask() {
+    /// Status-item and unavailable Quick Add routes request Today without
+    /// discarding a guarded interaction in the retained window.
+    private func showToday() {
         guard !isTerminating else { return }
+        makeTaskWindowController().showToday()
+        if taskWindowController?.window?.isVisible == true { completeOnboardingAfterPresentation() }
+    }
+
+    private func makeTaskWindowController() -> TaskWindowController {
+        if let taskWindowController { return taskWindowController }
+        let controller = TaskWindowController(state: dailyNotesState) { [weak self] in
+            self?.showSettings()
+        }
+        taskWindowController = controller
+        return controller
+    }
+
+    @objc func addTask() {
+        guard !isTerminating, canAddTask else { return }
         showTasks()
         taskWindowController?.presentation.requestNewTask(state: dailyNotesState)
     }
@@ -121,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         if dailyNotesState.availableProgress == nil { dailyNotesState.refresh() }
         guard dailyNotesState.availableProgress != nil else {
-            showTasks()
+            showToday()
             return
         }
         let controller = quickAddPanelController ?? makeQuickAddPanelController()
@@ -143,14 +155,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard !isTerminating else { return false }
         if menuItem.action == #selector(addTask) {
-            // The window's presentation also blocks Add behind deletion
-            // confirmation and the category manager.
-            if let presentation = taskWindowController?.presentation {
-                return presentation.canAddTask(state: dailyNotesState)
-            }
-            return dailyNotesState.availableProgress != nil && dailyNotesState.editingNoteID == nil
+            return canAddTask
         }
         return true
+    }
+
+    private var canAddTask: Bool {
+        if let presentation = taskWindowController?.presentation {
+            return presentation.canAddTask(state: dailyNotesState)
+        }
+        // A fresh window starts at Today.
+        return dailyNotesState.availableProgress != nil &&
+            dailyNotesState.editingNoteID == nil && dailyNotesState.editingLaterTaskID == nil
     }
 
     static func appearance(for theme: AppTheme) -> NSAppearance? {

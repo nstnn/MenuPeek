@@ -1282,6 +1282,176 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeCommandNInLaterSavesOnlyLaterAndKeepsTodayDraft() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.repository.allowAdd = true
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        fixture.state.draft = "Today draft"
+        XCTAssertTrue(controller.presentation.selectDestination(.later, state: fixture.state))
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("n", keyCode: 45)))
+        let window = try XCTUnwrap(controller.window)
+        let editor = try await focusedEditor(in: window)
+        editor.insertText("Later command task", replacementRange: NSRange(location: 0, length: 0))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        await waitUntil { fixture.repository.savedLater.count == 1 }
+        XCTAssertEqual(fixture.repository.savedLater.map(\.text), ["Later command task"])
+        XCTAssertTrue(fixture.repository.saved.isEmpty)
+        XCTAssertEqual(fixture.state.draft, "Today draft")
+        XCTAssertEqual(controller.presentation.selectedDestination, .later)
+        await waitForStatusTitle("0/0", fixture: fixture)
+    }
+
+    @MainActor
+    func testAppAddValidationUsesActiveAvailabilityAndGuardsBeforePresentation() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.repository.failTodayRead = true
+        fixture.launch()
+        let item = NSMenuItem(title: "Add Task", action: #selector(AppDelegate.addTask), keyEquivalent: "n")
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        fixture.delegate.showTasks()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertTrue(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertTrue(presentation.isComposerVisible(in: .later))
+        XCTAssertFalse(presentation.isComposerVisible(in: .today))
+        presentation.consumeNewTaskRequest(in: .later)
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(presentation.newTaskRequest)
+        presentation.dismissCategoryManager()
+        fixture.repository.failTodayRead = false
+        fixture.repository.failLaterRead = true
+        fixture.state.refresh()
+        XCTAssertFalse(fixture.delegate.validateMenuItem(item))
+        fixture.delegate.addTask()
+        XCTAssertNil(presentation.newTaskRequest)
+        XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertTrue(fixture.delegate.validateMenuItem(item))
+    }
+
+    @MainActor
+    func testStatusClickRequestsTodayButDockAndShowTasksRetainLaterAndGuards() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let task = LaterTask(id: UUID(), text: "Later row", createdAt: Date(), completedAt: nil)
+        fixture.repository.savedLater = [task]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        let window = try XCTUnwrap(controller.window)
+        let button = try XCTUnwrap(fixture.delegate.taskStatusItemController?.statusItem?.button)
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.laterDraft = "Retained Later draft"
+        window.close()
+        XCTAssertTrue(fixture.delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+        XCTAssertTrue(window.isVisible)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        fixture.delegate.showTasks()
+        XCTAssertTrue(fixture.delegate.taskWindowController === controller)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        fixture.state.beginEditingLater(id: task.id)
+        fixture.state.laterEditDraft = "Protected edit"
+        button.performClick(nil)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(fixture.state.laterEditDraft, "Protected edit")
+        fixture.state.cancelEditingLater()
+        XCTAssertTrue(presentation.requestDeletion(id: task.id, state: fixture.state))
+        button.performClick(nil)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(presentation.deletionTarget, .later(id: task.id))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        button.performClick(nil)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        presentation.dismissCategoryManager()
+        button.performClick(nil)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertEqual(fixture.state.laterDraft, "Retained Later draft")
+        XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+    }
+
+    @MainActor
+    func testQuickAddFromLaterPreservesBothDraftsCategoriesSelectionAndProgress() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let later = LaterTask(id: UUID(), text: "Later saved", createdAt: Date(), completedAt: nil,
+                              categoryID: home.id)
+        fixture.repository.savedCategories = [work, home]
+        fixture.repository.savedLater = [later]
+        fixture.repository.allowAdd = true
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController?.presentation)
+        fixture.state.categoryPreferences.rememberLastUsed(work.id, in: .today)
+        fixture.state.categoryPreferences.rememberLastUsed(home.id, in: .later)
+        XCTAssertTrue(presentation.showComposer(in: .today, state: fixture.state))
+        fixture.state.draft = "Today pending"
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertTrue(presentation.showComposer(in: .later, state: fixture.state))
+        fixture.state.laterDraft = "Later pending"
+        fixture.state.beginEditingLater(id: later.id)
+        fixture.state.laterEditDraft = "Later edit"
+        fixture.hotKeys.simulatePress()
+        let panel = try XCTUnwrap(fixture.delegate.quickAddPanelController)
+        panel.model.text = "Captured for Today"
+        panel.submit()
+        XCTAssertFalse(panel.isShown)
+        XCTAssertEqual(fixture.repository.saved.map(\.text), ["Captured for Today"])
+        XCTAssertEqual(fixture.repository.saved.first?.dayKey, fixture.state.todayKey)
+        XCTAssertNil(fixture.repository.saved.first?.categoryID)
+        XCTAssertEqual(fixture.repository.savedLater, [later])
+        XCTAssertEqual(fixture.state.availableLaterRemainingCount, 1)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(fixture.state.draft, "Today pending")
+        XCTAssertEqual(fixture.state.draftCategoryID, work.id)
+        XCTAssertEqual(fixture.state.laterDraft, "Later pending")
+        XCTAssertEqual(fixture.state.laterDraftCategoryID, home.id)
+        XCTAssertEqual(fixture.state.laterEditDraft, "Later edit")
+        XCTAssertEqual(fixture.state.editingLaterTaskID, later.id)
+        XCTAssertEqual(fixture.state.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(fixture.state.categoryPreferences.laterLastUsedCategoryID, home.id)
+        await waitForStatusTitle("0/1", fixture: fixture)
+    }
+
+    @MainActor
+    func testUnavailableQuickAddFromLaterRequestsTodayUnlessInteractionIsGuarded() throws {
+        let fixture = try AppLifecycleFixture(context: .manual, quickAddEnabled: true)
+        defer { fixture.cleanup() }
+        let later = LaterTask(id: UUID(), text: "Later saved", createdAt: Date(), completedAt: nil)
+        fixture.repository.savedLater = [later]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.laterDraft = "Later pending"
+        fixture.state.beginEditingLater(id: later.id)
+        fixture.state.laterEditDraft = "Protected edit"
+        fixture.repository.failTodayRead = true
+        fixture.state.refresh()
+        fixture.hotKeys.simulatePress()
+        XCTAssertNil(fixture.delegate.quickAddPanelController)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(fixture.state.laterEditDraft, "Protected edit")
+        fixture.state.cancelEditingLater()
+        fixture.hotKeys.simulatePress()
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertTrue(controller.window?.isVisible == true)
+        XCTAssertNil(fixture.state.availableProgress)
+        XCTAssertEqual(fixture.state.laterDraft, "Later pending")
+        XCTAssertNil(fixture.delegate.quickAddPanelController)
+    }
+
+    @MainActor
     func testQuickAddRegistersOnceAtLoginLaunchWithoutPresentingWindows() throws {
         let fixture = try AppLifecycleFixture(context: .login, quickAddEnabled: true)
         defer { fixture.cleanup() }
