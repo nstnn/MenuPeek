@@ -151,6 +151,10 @@ Full-day progress and category groups are derived before row filters; filtering 
 
 The retained child-screen shell forwards pane visibility and `historyRevision` to `refresh(revision:)` after existing lifecycle refreshes. Visible dirty panes reread; hidden panes remain dirty with unavailable snapshots until shown. Civil selection survives clock/time-zone changes while Today follows the injected clock. Future month selection may require month summaries even when only detail is visible. This state adds no observers, writes, or schema changes. Previous/next month steps reuse the same clamping as `changeMonth(containing:)`.
 
+### Calendar month geometry
+
+`HistoryMonthGrid` (in `TaskHistoryCalendar.swift`) is a pure value model for the planned month calendar. Weekdays and month lengths come from proleptic Gregorian civil-day arithmetic on `GregorianDay` and the month's exclusive end, so layout has no time zone, DST, or 86,400-second steps, and a saved dayKey keeps its cell identity when the time zone changes. Columns start on Sunday by default (`firstWeekday`, Calendar convention). Padding cells are blank and have no actions. In-month cells use `HistoryDayAvailability`: a nil month read is Unavailable (no counts), a loaded empty past/today day is 0/0, an empty future day is Not yet, and saved future rows remain readable. Today and selection are separate flags. `HistoryDayRange.day(clampedTo:)` is the month-change clamping rule shared with `TaskHistoryState`. Rendering is not implemented yet.
+
 ### Unfinished date index
 
 `UnfinishedTasksState` is a main-actor observable read projection over the existing `unfinishedDayPage` facade. It starts with an exclusive Today cutoff and a configurable default page size of 31. Only date summaries are cached. A nil index means unloaded/unavailable; a successful empty page means no unfinished days. Initial and append errors are separate. Failed Load more retains published rows and its cursor; calling Load more again retries that cursor without duplicating rows.

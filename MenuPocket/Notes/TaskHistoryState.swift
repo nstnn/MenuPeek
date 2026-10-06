@@ -129,13 +129,7 @@ final class TaskHistoryState {
 
     func changeMonth(containing day: GregorianDay) throws {
         let range = try HistoryDayRange.month(containing: day)
-        // Gregorian UTC arithmetic operates on civil components, never 86400 seconds.
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let start = calendar.date(from: DateComponents(year: range.start.year, month: range.start.month, day: 1))!
-        let count = calendar.range(of: .day, in: .month, for: start)!.count
-        let candidate = try GregorianDay(key: String(format: "%04d-%02d-%02d", locale: Locale(identifier: "en_US_POSIX"),
-                                                     range.start.year, range.start.month, min(preferredDay, count)))
+        let candidate = try range.day(clampedTo: preferredDay)
         preferredDay = candidate.day
         month = range
         invalidateMonth()
