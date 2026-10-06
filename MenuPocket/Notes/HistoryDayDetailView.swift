@@ -88,7 +88,7 @@ struct HistoryDayDetailView: View {
             }
             if let message = history.detailMessage {
                 // Without a selection (e.g. a future month), say what to do next.
-                Text(history.selectedDay == nil && history.dayIssue == nil ? "Choose a day from the list." : message)
+                Text(history.selectedDay == nil && history.dayIssue == nil ? "Choose a day from the calendar." : message)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("historyDetailMessage")
                 if history.dayIssue != nil {

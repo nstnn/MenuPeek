@@ -391,3 +391,20 @@ Scoped native fixture, not full History/calendar feature acceptance. Source: unc
 | Edit/delete/manager guard UI, VoiceOver, macOS Keyboard navigation on, real-drag minimum size | Not tested here. Guards have focused hosted evidence from TASK-008. |
 
 The fixture was quit; it and the Debug test host were unregistered from LaunchServices and moved to Trash, and the Trash paths were unregistered. No production data/defaults/login/hotkey state was touched.
+
+## 2026-10-06 — History month calendar (TASK-012)
+
+Scoped native fixture, not full feature acceptance (TASK-014). Source: uncommitted working tree on base `c8d1fae`. Harness `build/task-history-task012/FixtureMain.swift` (TASK-009 harness and sample data; separate SQLite/defaults, fake login/hotkey, fixed Toronto clock Tuesday, October 6, 2026), compiled with all production sources except `MenuPocketApp.swift`. Bundle `local.menupocket.task012.fixture`; first build executable SHA-256 `2894be55…dcae`, fixed recheck `8aae167e5c005e60b0e13323d3b95bdf3d7449416c6d679b8397b816bde5c2c3`. Driven by Claude through Computer Use background app control with the user's permission (fixture bundle only), Dark appearance.
+
+| Journey | Result |
+| --- | --- |
+| Calendar entry → History; Sun–Sat header; October 2026 starts Thursday; cells 1 0/3, 2 0/0, 3 2/2, 4 0/0, 5 3/5, 6 0/2, saved future 20 0/1, other future days —; Today = filled circle on 6; selection = outline on 5; detail beside grid at 800 pt | Pass after fix. Initial finding: blank padding cells grew vertically and pushed the weeks below the fold. Fixed by excluding padding from grid sizing; recheck Pass. |
+| Click Oct 3 with Unfinished filter → filter kept, 2/2, "No unfinished tasks for this day."; saved future Oct 20 opens read-only detail; empty future Oct 21 click does nothing | Pass |
+| This month selects Oct 6 with All | Pass |
+| Keyboard: Tab reaches Previous/Next/This month then calendar cells; Down/Right move by week/day; Return on empty future does nothing; Up past the 1st moves to September with focus on Sep 25; Space selects Sep 30 (1/2, Work 1/1, Home 0/1) | Pass. Crossing months applies the existing month-change selection clamp (selection moved to Sep 6 before Space). |
+| August 2026 starts Saturday; Aug 12 shows 100/125 in full; January 2026 starts Thursday with Jan 1 1/1; December 2025 starts Monday with Dec 31 1/2 | Pass |
+| Accessibility label of the Today cell exactly "Today, Tuesday, October 6, 2026, 0 of 2 complete"; empty future cells are not exposed as buttons | Pass (tool withholds other titles) |
+| Narrow stacked layout: calendar above detail, scrollable to detail | Pass at ≈502 × 302; the tool's resize bypassed the 600 × 400 minimum, so the real-drag minimum was not observed |
+| Unavailable month + Retry, Light appearance, VoiceOver, macOS Keyboard navigation setting on | Not tested natively. Unavailable cell state has hosted model coverage (TASK-011). |
+
+The fixture and Debug hosts were quit, unregistered from LaunchServices, and moved to Trash; Trash paths were unregistered. No production data/defaults/login/hotkey state was touched.
