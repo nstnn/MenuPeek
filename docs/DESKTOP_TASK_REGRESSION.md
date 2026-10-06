@@ -573,3 +573,26 @@ Source is based on `main` HEAD `8f3804734f58b8c89ea24b08ba64d8ab8a98b3ee` with t
 The first run had four assertion failures during the new asynchronous field-restoration check and existing native text-command checks. After waiting for the restored Add field, the next run passed 91/91. Native verification then exposed pending-Add focus stealing after a distant category reassignment, an offscreen editor on re-entry at minimum size, and a focused but offscreen saved destination. The final fix has one reveal/focus owner, mounts the destination group at the top, then centers the target row. The final v4 run passed 91/91. Earlier runs and logs remain historical evidence only.
 
 The isolated 100-task fixture uses current production views/state/delegate, a separate SQLite/defaults suite, a simulated October 3 clock, and fake login/hotkey services. Its executable SHA-256 is `f60913f519dc25dabb9be7044b4bf8c2ee963b6a74030ecdafd753e70a7cad61`; harness SHA-256 is `fe306466d70eb9eef77bf73d0eac6b30de590020b0dc46c0c3a4373f1da8a2fc`. See [native observations](DESKTOP_TASK_ACCEPTANCE.md#inline-task-editing--2026-10-04). No persistence schema, repository behavior, permissions, dependency, Add workflow or Delete workflow was changed. Full-suite, Release, remote CI and production/system acceptance were not run for this change.
+
+
+## Movement contract and pure ordering — 2026-10-06
+
+Task 1 adds a pure movement planner and UUID-based request/placement/outcome types in [TaskMovement.swift](../MenuPocket/Notes/TaskMovement.swift), with [contract tests](../Tests/MenuPocketTests/TaskMovementTests.swift) registered in the shared Xcode project. It supports before/after and end-of-group placement, validates expected day/source and destination/anchor identities, preserves task fields and every other task's relative order, and returns unchanged for equivalent visible positions. Malformed/stale snapshots reject without mutation. The planner's changed result is only a proposal; repository persistence and state/UI integration remain future work.
+
+Source baseline: branch `feat/task-movement`, HEAD `34b789f2333b7f53dfabfb38b472617ce13cab4e`, initially clean tracked tree. Dirty build inputs were the new planner/tests and project membership. Schema remains v3 and daily reads remain rowid ordered. Today and Quick Add share `DailyNotesState.add(text:categoryID:)` → `SQLiteNoteRepository.add(_:)`, the sole production daily INSERT. Later-to-Today transfer still throws unsupported. The next ordering migration must guard Later-table creation by `version < 3`; v4 is available at this baseline. No real database, defaults, login registration, or hotkey was changed.
+
+The final shared-scheme Debug hosted run passed **13/13**, zero failures: 8 `TaskMovementTests` and 5 existing `TaskGroupingTests`. Xcode 27.0 (27A266a), macOS arm64 destination. Command:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests test
+```
+
+The initial run also passed 13/13; the final run rebuilt a simplified preservation assertion. Final result: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.06_13-56-53--0400.xcresult`; logs and hashes: `build/task-movement-task1/`. Planner SHA-256: `e4efe76d39df5b51f1c6b823be04bcb35e2a40faa159b8261bbe133d6bc0543d`; tests: `5ac08559712ed3223f51aff9486567d4251a9da5410129af15967840134f6258`; project: `8799d183976677b2b32413718df57a28a7e42714a81136d26848f354b0dcf812`. Debug host executable: `7b066f5ad1c069f4ac6b91f0c31e79892f673224ce9a29381e5e82786d3e7d40`; Debug dylib: `69b96b120b35f294b90635a350830efbc019f0250c55bea93568521acfe253fe`. Project plist validation and `git diff --check` passed.
+
+Cleanup: the only temporary app created was this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`. After both completed runs, no process was running from that path. It was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 13-57-36-795.app`, then unregistered again after LaunchServices re-registration was observed. Final LaunchServices dump contains neither original nor Trash path; Spotlight lists neither temporary copy. The pre-existing main-checkout Debug executable hash was identical before/after cleanup. Another session's Later worktree host was preserved. Cleanup evidence is in `build/task-movement-task1/cleanup.log`, `launchservices-after.txt`, `spotlight-after.txt`, and `main-app-before.txt`/`main-app-after.txt`.
+
+This is focused automated contract evidence. No SQL migration, repository move, persisted ordering, visible drag/menu behavior, full-suite, Release, remote CI, or native/system acceptance is claimed for Task 1.
