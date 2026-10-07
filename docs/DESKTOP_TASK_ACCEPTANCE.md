@@ -402,3 +402,33 @@ Final [automated/review evidence](DESKTOP_TASK_REGRESSION.md#movement-scrolling-
 | Oldest supported OS (macOS 14) runtime | Not tested (no environment) |
 
 The user performed and reported these observations; Claude did not operate the interface. The fixture process was stopped, unregistered, moved to Trash with `FileManager.trashItem`, and the Trash path unregistered (`build/task5/cleanup-final.txt`); no real tasks or preferences were changed. Saved native drops, insertion feedback and edge scrolling remain Task 6/7 acceptance work.
+
+## Movement destinations, scrolling and reveal — Tasks 6/7 native acceptance (2026-10-07)
+
+**Native acceptance: Pass on macOS 26.6.2.** The isolated fixture `/private/tmp/menupocket-task67-native/MovementFixture.app` (executable SHA-256 `d04f841fd94d758fd91c43937b291d0bc83b0055aa149c695e84fb41437878b3`, source ignored `build/task67/MovementFixture.swift`, built from HEAD `14cf694`) used production `TaskWindowController`/`TaskWindowView`, SQLite `/private/tmp/menupocket-task67-native/notes.sqlite`, defaults suite `local.menupocket.task67-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. Seed: Work W01–W60 (W02 completed), collapsed Home (H1), an empty category, General (G1), in the initial 800 × 560 pt Dark window. A fixture-only status panel showed the live session, the hovered request, and the order read back from SQLite.
+
+Steps 1–4 were operated by Claude through Computer Use; steps 5–15 were performed and reported by the user. The SQLite state was checked against each report.
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| 1 | Escape during hover clears line, transient groups and session; nothing saved | Pass (Claude) |
+| 2 | Row lower half: W05 after W01; saved `W01 W05 W02 …` | Pass (Claude) |
+| 3 | Row upper half: W06 before W01; saved `W06 W01 W05 …` | Pass (Claude) |
+| 4 | Equivalent placement (W03 after W02): no line, `hover: none`, no write | Pass (Claude) |
+| 5 | Category → General header (end of group) | Pass (user) |
+| 6 | General → category row | Pass (user) |
+| 7 | Transient Empty category accepts a drop | Pass (user) |
+| 8 | Collapsed Home header accepts without expanding on hover; expands after save | Pass (user) |
+| 9 | Completed task keeps completion; overall progress unchanged | Pass (user) |
+| 10 | Bottom-edge scrolling, bounded and stops away from the edge | Pass (user; also observed by Claude) |
+| 11 | Top-edge scrolling and drop | Pass (user) |
+| 12 | Escape while edge-scrolling stops scrolling | Pass (user, physical mouse) |
+| 13 | Offscreen collapsed destination expands and reveals the moved row | Pass (user) |
+| 14 | No unexpected keyboard focus ring after pointer drops | Pass (user) |
+| 15 | ⌘Q, confirmed exit, relaunch without reseeding: order/groups match | Pass (user) |
+
+Final SQLite after the user session (written 16:34): Work 56 tasks (`W01 W05 W03 W04 W07 …`), Home `H1 W59`, Empty `W60`, General `W02 W06 G1`; 62 tasks, W02 is still the only completed task. Record: ignored `build/task67/final-saved-order.txt`.
+
+Automation-only observations, not reproduced by the user's physical-mouse pass: when one Computer Use drag spanned two tool calls, the synthetic mouse-up did not reach AppKit's drag loop. The preview froze, `isDragging` stayed true, and the fixture spun at ~100% CPU in `NSCoreDragManager _dragUntilMouseUp` with continuous SwiftUI re-rendering (`build/task67/stuck-sample.txt`). Synthetic Escape during edge scrolling also let scrolling continue for about four rows during the cancel slide-back. During normal drags CPU was 33–87% while scrolling and ~0.5% idle (`build/task67/cpu-log.txt`). Drop targets request periodic dragging updates and re-assign `hoveredRequest` on every update, which re-renders observing rows even when the value is unchanged. This is a possible efficiency improvement, not an acceptance failure.
+
+Not tested: oldest supported OS (macOS 14), the 600 × 400 pt minimum window, a failed-write drop in the real interface, and the 1,000-task scale probe (TASK-009/010). The fixture was killed twice after stuck automation drags; saved data was intact both times. It was finally moved to Trash with `FileManager.trashItem` and unregistered (`build/task67/cleanup-final.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.
