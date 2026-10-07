@@ -432,3 +432,23 @@ Final SQLite after the user session (written 16:34): Work 56 tasks (`W01 W05 W03
 Automation-only observations, not reproduced by the user's physical-mouse pass: when one Computer Use drag spanned two tool calls, the synthetic mouse-up did not reach AppKit's drag loop. The preview froze, `isDragging` stayed true, and the fixture spun at ~100% CPU in `NSCoreDragManager _dragUntilMouseUp` with continuous SwiftUI re-rendering (`build/task67/stuck-sample.txt`). Synthetic Escape during edge scrolling also let scrolling continue for about four rows during the cancel slide-back. During normal drags CPU was 33–87% while scrolling and ~0.5% idle (`build/task67/cpu-log.txt`). Drop targets request periodic dragging updates and re-assign `hoveredRequest` on every update, which re-renders observing rows even when the value is unchanged. This is a possible efficiency improvement, not an acceptance failure.
 
 Not tested: oldest supported OS (macOS 14), the 600 × 400 pt minimum window, a failed-write drop in the real interface, and the 1,000-task scale probe (TASK-009/010). The fixture was killed twice after stuck automation drags; saved data was intact both times. It was finally moved to Trash with `FileManager.trashItem` and unregistered (`build/task67/cleanup-final.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.
+
+## Row-menu movement — Task 8 (2026-10-07)
+
+**Native acceptance: Pass on macOS 26.6.2 (user-operated).** The isolated fixture `/private/tmp/menupocket-task8-native/MovementFixture.app` (source ignored `build/task8/MovementFixture.swift`, HEAD `ee47259` plus the uncommitted Task 8 change) used production `TaskWindowController`/`TaskWindowView`, SQLite in that folder, defaults suite `local.menupocket.task8-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. Seed: Work W01–W12 (W02 completed), collapsed Home (H1), a category with a 68-character name, and General (G1).
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| 1 | Tab + Space opens Edit / Move Up / Move Down / Move To ▸ / Delete… | Pass |
+| 2–3 | Move Up/Down by keyboard; focus stays on the row's actions | Pass |
+| 4 | Boundary items disabled (top, bottom, single-task group) | Pass |
+| 5 | Move To: current group checked/disabled, long label acceptable; collapsed Home expands and reveals | Pass |
+| 6 | General → Work → General | **Fail, then Pass after repair** (below) |
+| 7 | Completed task keeps completion; progress unchanged | Pass |
+| 8 | Moves unavailable during inline edit | Pass |
+| 9 | Edit, Delete… and checkbox Space still work | Pass |
+| 10 | ⌘Q and relaunch keep the saved order | Pass |
+
+Step 6 initial failure (fixture executable `ceff298f…`, 811 × 430 pt window): moving G1 back into a re-created, last General group left the list area blank until the user scrolled. Claude reproduced the setup in a separate debug fixture. One capture right after the move was blank, but the persistent blank was not reproduced, so the root cause is unconfirmed. Repair: the saved-move reveal now scrolls minimally (`scrollTo` without `.top`/`.center` anchors), so it never targets an offset past the end of the content. This also applies to drag reveal. On the repaired fixture (`65c9a5b7…`), the user reported step 6 and steps 7–10 Pass. Final SQLite (17:17): Work `W01 W02 W03 W04 W06 … W12`, Home `H1 W05`, General `G1`; 14 tasks, W02 the only completed task (`build/task8/final-saved-order.txt`).
+
+Claude used background Computer Use only on the separate debug fixture (`/private/tmp/menupocket-task8-debug`, now trashed) and took read-only screenshots of the user's fixture. Not tested: VoiceOver spoken output, macOS 14, and the 600 × 400 pt minimum. Every fixture was stopped, unregistered and moved to Trash, with Trash paths unregistered (`build/task8/cleanup-*.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.

@@ -21,6 +21,8 @@ struct TaskWindowView: View {
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
+    /// A menu-moved row whose actions regain focus once its reveal finishes.
+    @State private var menuMoveFocusID: UUID?
     @FocusState private var focusedControl: FocusControl?
     @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -86,13 +88,25 @@ struct TaskWindowView: View {
                         guard let request else { return }
                         let ownership = focusRequestID
                         Task { @MainActor in
-                            defer { presentation.consumeMovementReveal(request) }
+                            defer {
+                                presentation.consumeMovementReveal(request)
+                                if menuMoveFocusID == request.taskID {
+                                    menuMoveFocusID = nil
+                                    if focusRequestID == ownership {
+                                        focusedControl = focusAfterLeavingRow(request.taskID,
+                                                                              fallbackGroup: request.group)
+                                    }
+                                }
+                            }
                             await Task.yield()
                             guard canReveal(request, ownership: ownership) else { return }
-                            scroll.scrollTo(request.group, anchor: .top)
+                            // Minimal scrolling: a .top/.center target past the end
+                            // of a re-created last group can leave the lazy list
+                            // blank until the user scrolls.
+                            scroll.scrollTo(request.group)
                             await Task.yield()
                             guard canReveal(request, ownership: ownership) else { return }
-                            scroll.scrollTo(request.taskID, anchor: .center)
+                            scroll.scrollTo(request.taskID)
                             // Pointer movement does not create a keyboard ring. A
                             // preexisting focused control keeps its row identity.
                         }
@@ -607,13 +621,15 @@ struct TaskWindowView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             TaskActionsMenu(onOpen: { focusedControl = .actions(note.id) },
-                            onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) })
+                            onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) },
+                            moves: { presentation.menuMoves(for: note.id, state: state) },
+                            onMove: moveFromMenu)
             .focused($focusedControl, equals: .actions(note.id))
             .overlay { focusOutline(focusedControl == .actions(note.id)) }
             .disabled(state.editingNoteID != nil)
             .help("Task actions")
             .accessibilityLabel("Actions for task: \(note.text)")
-            .accessibilityHint("Opens Edit and Delete actions")
+            .accessibilityHint("Opens Edit, Move, and Delete actions")
             .accessibilityIdentifier("taskActions-\(note.id)")
         }
         .font(.system(size: 14))
@@ -754,6 +770,20 @@ struct TaskWindowView: View {
         presentation.requestDeletion(id: id, state: state)
     }
 
+    /// Runs after native menu tracking ends. Uses the same saved command as drops;
+    /// only a committed move reveals the row before its actions regain focus.
+    private func moveFromMenu(_ request: TaskMoveRequest) {
+        guard canUseRowActions else { return }
+        rowActionOrigin = (request.taskID, request.expectedSourceGroup)
+        focusRequestID = UUID()
+        menuMoveFocusID = request.taskID
+        guard case .changed = state.moveTask(request) else {
+            menuMoveFocusID = nil
+            restoreRowFocus(request.taskID)
+            return
+        }
+    }
+
     private func confirmDeletion() {
         _ = presentation.confirmDeletion(state: state)
     }
@@ -876,6 +906,9 @@ private struct TaskActionsMenu: View {
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    /// Read when the menu opens, so entries reflect the current saved order.
+    let moves: () -> TaskWindowPresentation.MenuMoves?
+    let onMove: (TaskMoveRequest) -> Void
     @State private var anchor = TaskMenuAnchor.Reference()
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
@@ -925,6 +958,22 @@ private struct TaskActionsMenu: View {
         menu.autoenablesItems = false
         let edit = menu.addItem(withTitle: "Edit", action: #selector(Actions.edit), keyEquivalent: "")
         edit.target = actions
+        if let moves = moves() {
+            menu.addItem(.separator())
+            menu.addItem(actions.item("Move Up", moves.moveUp))
+            menu.addItem(actions.item("Move Down", moves.moveDown))
+            let moveTo = NSMenuItem(title: "Move To", action: nil, keyEquivalent: "")
+            let destinations = NSMenu(title: "Move To")
+            destinations.autoenablesItems = false
+            for destination in moves.destinations {
+                let item = actions.item(destination.title, destination.request)
+                item.state = destination.isCurrent ? .on : .off
+                destinations.addItem(item)
+            }
+            moveTo.submenu = destinations
+            menu.addItem(moveTo)
+            menu.addItem(.separator())
+        }
         let delete = menu.addItem(withTitle: "Delete…", action: #selector(Actions.delete), keyEquivalent: "")
         delete.target = actions
         withExtendedLifetime(actions) {
@@ -935,15 +984,30 @@ private struct TaskActionsMenu: View {
         switch actions.selection {
         case .edit: DispatchQueue.main.async { onEdit() }
         case .delete: DispatchQueue.main.async { onDelete() }
+        case let .move(request): DispatchQueue.main.async { onMove(request) }
         case nil: break
         }
     }
 
     @MainActor private final class Actions: NSObject {
-        enum Selection { case edit, delete }
+        enum Selection { case edit, delete, move(TaskMoveRequest) }
         var selection: Selection?
+        private var requests: [TaskMoveRequest] = []
         @objc func edit() { selection = .edit }
         @objc func delete() { selection = .delete }
+        @objc func move(_ sender: NSMenuItem) { selection = .move(requests[sender.tag]) }
+
+        /// A nil request is an unavailable boundary or guarded state.
+        func item(_ title: String, _ request: TaskMoveRequest?) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: #selector(move(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = request != nil
+            if let request {
+                item.tag = requests.count
+                requests.append(request)
+            }
+            return item
+        }
     }
 }
 

@@ -283,6 +283,99 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertNil(session.active)
     }
 
+    func testMenuMovesListDestinationsAndAdjacentReordersWithinGroup() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let done = instant("2026-09-27T09:00:00-04:00")
+        let w1 = categorized("W1", work, createdAt: 1)
+        let g1 = note("G1", day: w1.dayKey, createdAt: 2)
+        let w2 = categorized("W2", work, createdAt: 3, completedAt: done)
+        let w3 = categorized("W3", work, createdAt: 4)
+        let state = makeState(store: FakeNoteRepository(notes: [w1, g1, w2, w3], categories: [work, home]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+
+        let moves = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state))
+        XCTAssertEqual(moves.destinations.map(\.title), ["Work", "Home", "General"])
+        XCTAssertEqual(moves.destinations.map(\.isCurrent), [true, false, false])
+        XCTAssertNil(moves.destinations[0].request, "The current group is marked, not offered")
+        XCTAssertEqual(moves.destinations[1].request?.placement, .endOfGroup)
+        XCTAssertEqual(moves.destinations[2].request?.destinationGroup, .general)
+        XCTAssertEqual(moves.moveUp?.placement, .before(w1.id))
+        XCTAssertEqual(moves.moveDown?.placement, .after(w3.id))
+        XCTAssertNil(presentation.menuMoves(for: w1.id, state: state)?.moveUp, "Top of its group")
+        XCTAssertNil(presentation.menuMoves(for: w3.id, state: state)?.moveDown, "Bottom of its group")
+        let general = try XCTUnwrap(presentation.menuMoves(for: g1.id, state: state))
+        XCTAssertNil(general.moveUp, "Another group's rows are not neighbours")
+        XCTAssertNil(general.moveDown)
+        XCTAssertEqual(general.destinations.map(\.isCurrent), [false, false, true])
+
+        let progress = state.availableProgress
+        XCTAssertEqual(state.moveTask(try XCTUnwrap(moves.moveUp)).map(isChanged), true)
+        XCTAssertEqual(state.notes.map(\.id), [w2.id, w1.id, g1.id, w3.id])
+        let down = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.moveDown)
+        XCTAssertEqual(down.placement, .after(w1.id))
+        XCTAssertEqual(state.moveTask(down).map(isChanged), true)
+        XCTAssertEqual(state.notes.map(\.id), [w1.id, w2.id, g1.id, w3.id])
+
+        state.categoryPreferences.setCollapsed(true, for: .category(home.id))
+        let toHome = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.destinations[1].request)
+        XCTAssertEqual(state.moveTask(toHome).map(isChanged), true)
+        let moved = try XCTUnwrap(state.notes.first { $0.id == w2.id })
+        XCTAssertEqual(moved.categoryID, home.id)
+        XCTAssertEqual(moved.completedAt, done)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertFalse(state.categoryPreferences.isCollapsed(.category(home.id)))
+        XCTAssertEqual(presentation.movementReveal?.taskID, w2.id)
+        XCTAssertEqual(presentation.menuMoves(for: w2.id, state: state)?.destinations.map(\.isCurrent),
+                       [false, true, false])
+    }
+
+    func testMenuMovesAreDisabledBehindGuardsAndAbsentForUnknownTasks() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        XCTAssertNil(presentation.menuMoves(for: UUID(), state: state))
+        XCTAssertNotNil(presentation.menuMoves(for: b.id, state: state)?.moveUp)
+
+        func assertDisabled(_ reason: String) throws {
+            let moves = try XCTUnwrap(presentation.menuMoves(for: b.id, state: state), reason)
+            XCTAssertNil(moves.moveUp, reason)
+            XCTAssertNil(moves.moveDown, reason)
+            XCTAssertTrue(moves.destinations.allSatisfy { $0.request == nil }, reason)
+        }
+        state.beginEditing(id: a.id)
+        try assertDisabled("inline edit")
+        state.cancelEditing()
+        presentation.requestDeletion(id: a.id, state: state)
+        try assertDisabled("deletion confirmation")
+        presentation.cancelDeletion()
+        XCTAssertNotNil(presentation.menuMoves(for: b.id, state: state)?.moveUp)
+    }
+
+    func testMenuMoveRequestsMatchDropRoutingForTheSamePlacement() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let w1 = categorized("W1", work, createdAt: 1)
+        let w2 = categorized("W2", work, createdAt: 2)
+        let g1 = note("G1", day: w1.dayKey, createdAt: 3)
+        let state = makeState(store: FakeNoteRepository(notes: [w1, w2, g1], categories: [work]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let moves = try XCTUnwrap(state.taskWindowPresentation.menuMoves(for: w2.id, state: state))
+        let payload = TaskDragSession.Payload(token: UUID(), taskID: w2.id, dayKey: w2.dayKey,
+                                              sourceGroup: .category(work.id))
+        func drop(_ group: TaskGroupID, anchor: UUID?, upper: Bool) -> TaskMoveRequest? {
+            TaskDropRouting.request(payload: payload, group: group, anchor: anchor, upperHalf: upper,
+                                    dayKey: w2.dayKey, notes: state.notes, categories: state.categories)
+        }
+        XCTAssertEqual(moves.moveUp, drop(.category(work.id), anchor: w1.id, upper: true))
+        XCTAssertEqual(moves.destinations.last?.request, drop(.general, anchor: nil, upper: false))
+    }
+
     func testSavedMovementRevealIsSupersededAndCancelledByNewAction() throws {
         let a = note("A", day: "2026-09-27", createdAt: 1)
         let b = note("B", day: a.dayKey, createdAt: 2)
@@ -2360,6 +2453,16 @@ final class DailyNotesStateTests: XCTestCase {
         TaskMoveRequest(taskID: note.id, expectedDayKey: note.dayKey,
                         expectedSourceGroup: TaskGroupID(categoryID: note.categoryID),
                         destinationGroup: destination, placement: placement)
+    }
+
+    private func categorized(_ text: String, _ category: TaskCategory, createdAt: TimeInterval,
+                             completedAt: Date? = nil) -> Note {
+        Note(id: UUID(), text: text, dayKey: "2026-09-27", createdAt: Date(timeIntervalSince1970: createdAt),
+             completedAt: completedAt, categoryID: category.id)
+    }
+
+    private func isChanged(_ outcome: TaskMoveOutcome) -> Bool {
+        if case .changed = outcome { true } else { false }
     }
 
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date,
