@@ -1050,6 +1050,190 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
+    func testSavedMovesReopenWithExactOrderAndPreserveOtherData() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let study = try store.createCategory(name: "Study")
+        let empty = try store.createCategory(name: "Empty")
+        let day = "2026-10-07"
+        let a = note("A", day: day, createdAt: 10, categoryID: work.id)
+        let b = note("B", day: day, createdAt: 20, categoryID: study.id)
+        let c = note("C", day: day, createdAt: 30, completedAt: Date(timeIntervalSince1970: 35), categoryID: work.id)
+        let d = note("D", day: day, createdAt: 40, categoryID: study.id)
+        let old = note("Other day", day: "2026-10-06", createdAt: 50)
+        for row in [a, b, c, d, old] { try store.add(row) }
+        try store.addLater(later("Later", createdAt: 60, categoryID: work.id))
+        let fields = try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at FROM notes ORDER BY rowid")
+        let otherDay = try rawRows("SELECT * FROM notes WHERE day_key = '2026-10-06'")
+        let laterBefore = try laterRows()
+        let catalog = try store.categories()
+        func move(_ source: Note, from: TaskGroupID, to: TaskGroupID,
+                  placement: TaskMovePlacement, ids: [UUID]) throws {
+            let outcome = try store.moveTask(TaskMoveRequest(taskID: source.id, expectedDayKey: day,
+                expectedSourceGroup: from, destinationGroup: to, placement: placement))
+            guard case let .changed(saved) = outcome else { return XCTFail("Expected committed move") }
+            XCTAssertEqual(saved.map(\.id), ids)
+            XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: day), saved)
+        }
+        try move(c, from: .category(work.id), to: .category(work.id), placement: .before(a.id), ids: [c.id, a.id, b.id, d.id])
+        try move(c, from: .category(work.id), to: .category(study.id), placement: .after(b.id), ids: [a.id, b.id, c.id, d.id])
+        try move(c, from: .category(study.id), to: .general, placement: .endOfGroup, ids: [a.id, b.id, d.id, c.id])
+        try move(c, from: .general, to: .category(empty.id), placement: .endOfGroup, ids: [a.id, b.id, d.id, c.id])
+        try move(c, from: .category(empty.id), to: .category(study.id), placement: .before(b.id), ids: [a.id, c.id, b.id, d.id])
+        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at FROM notes ORDER BY rowid"), fields)
+        XCTAssertEqual(try rawRows("SELECT * FROM notes WHERE day_key = '2026-10-06'"), otherDay)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        XCTAssertEqual(try store.categories(), catalog)
+        XCTAssertEqual(try store.incompleteCount(for: day), 3)
+    }
+
+    func testRejectedAndEquivalentMovesNeverUpdateSavedRows() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let a = note("A", day: "2026-10-07", createdAt: 10)
+        let b = note("B", day: a.dayKey, createdAt: 20, categoryID: work.id)
+        let c = note("C", day: a.dayKey, createdAt: 30)
+        for row in [a, b, c] { try store.add(row) }
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        try executeRaw("CREATE TRIGGER reject_any_update BEFORE UPDATE ON notes BEGIN SELECT RAISE(ABORT, 'unexpected update'); END")
+        func request(_ id: UUID, day: String = "2026-10-07", source: TaskGroupID = .general,
+                     destination: TaskGroupID = .general, placement: TaskMovePlacement = .endOfGroup) -> TaskMoveRequest {
+            TaskMoveRequest(taskID: id, expectedDayKey: day, expectedSourceGroup: source,
+                            destinationGroup: destination, placement: placement)
+        }
+        XCTAssertEqual(try store.moveTask(request(a.id, placement: .before(c.id))), .unchanged)
+        XCTAssertEqual(try store.moveTask(request(c.id)), .unchanged)
+        XCTAssertEqual(try store.moveTask(request(UUID())), .rejected(.taskNotFound))
+        XCTAssertEqual(try store.moveTask(request(a.id, day: "2026-10-06")), .rejected(.taskNotFound))
+        XCTAssertEqual(try store.moveTask(request(a.id, source: .category(work.id))), .rejected(.sourceChanged))
+        XCTAssertEqual(try store.moveTask(request(a.id, destination: .category(UUID()))), .rejected(.destinationNotFound))
+        for anchor in [a.id, b.id, UUID()] {
+            XCTAssertEqual(try store.moveTask(request(a.id, placement: .after(anchor))), .rejected(.invalidAnchor))
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+    }
+
+    func testMoveSQLFailuresRollBackBothRankPassesAndCategoryThenRetry() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let a = note("A", day: "2026-10-07", createdAt: 10)
+        let b = note("B", day: a.dayKey, createdAt: 20)
+        try store.add(a); try store.add(b)
+        let request = TaskMoveRequest(taskID: b.id, expectedDayKey: a.dayKey,
+            expectedSourceGroup: .general, destinationGroup: .category(work.id), placement: .endOfGroup)
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        // Fail after an actual write in each phase, including category reassignment.
+        for condition in ["NEW.display_order = -2", "OLD.display_order < 0 AND NEW.display_order = 1", "NEW.category_id IS NOT NULL"] {
+            try executeRaw("CREATE TRIGGER reject_move AFTER UPDATE ON notes WHEN \(condition) BEGIN SELECT RAISE(FAIL, 'move failed'); END")
+            XCTAssertThrowsError(try store.moveTask(request))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+            XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: a.dayKey), [a, b])
+            try executeRaw("DROP TRIGGER reject_move")
+        }
+        guard case let .changed(saved) = try store.moveTask(request) else { return XCTFail("Retry failed") }
+        XCTAssertEqual(saved.map(\.id), [a.id, b.id])
+        XCTAssertEqual(saved.last?.categoryID, work.id)
+        XCTAssertEqual(try store.moveTask(TaskMoveRequest(taskID: b.id, expectedDayKey: a.dayKey,
+            expectedSourceGroup: .category(work.id), destinationGroup: .category(work.id), placement: .endOfGroup)), .unchanged)
+    }
+
+    func testMoveCommitFailureRollsBackAndAllowsRetryOnSameConnection() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = note("A", day: "2026-10-07", createdAt: 10)
+        let b = note("B", day: a.dayKey, createdAt: 20)
+        try store.add(a); try store.add(b)
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        var reader: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &reader), SQLITE_OK)
+        let connection = try XCTUnwrap(reader)
+        defer { sqlite3_close(connection) }
+        // A rollback-journal reader allows BEGIN IMMEDIATE and writes, but blocks COMMIT.
+        XCTAssertEqual(sqlite3_exec(connection, "BEGIN; SELECT * FROM notes", nil, nil, nil), SQLITE_OK)
+        let request = TaskMoveRequest(taskID: b.id, expectedDayKey: a.dayKey,
+            expectedSourceGroup: .general, destinationGroup: .general, placement: .before(a.id))
+        XCTAssertThrowsError(try store.moveTask(request)) { error in
+            guard case let SQLiteNoteStoreError.databaseError(operation, code, _) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(operation, "COMMIT")
+            XCTAssertEqual(code, SQLITE_BUSY)
+        }
+        XCTAssertEqual(sqlite3_exec(connection, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        XCTAssertEqual(try store.notes(for: a.dayKey), [a, b])
+        XCTAssertEqual(try store.moveTask(request), .changed([b, a]))
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: a.dayKey), [b, a])
+    }
+
+    func testAddAfterMoveAndExistingWritesPreserveRanks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let a = note("A", day: "2026-10-07", createdAt: 10)
+        let b = note("B", day: a.dayKey, createdAt: 20)
+        try store.add(a); try store.add(b)
+        _ = try store.moveTask(TaskMoveRequest(taskID: b.id, expectedDayKey: a.dayKey,
+            expectedSourceGroup: .general, destinationGroup: .general, placement: .before(a.id)))
+        let c = note("C", day: a.dayKey, createdAt: 30)
+        try store.add(c)
+        XCTAssertEqual(try store.notes(for: a.dayKey).map(\.id), [b.id, a.id, c.id])
+        let ranks = try rawRows("SELECT id, display_order FROM notes ORDER BY display_order")
+        try store.update(id: a.id, text: "Edited", categoryID: work.id)
+        try store.setCompleted(id: b.id, completedAt: Date(timeIntervalSince1970: 40))
+        try store.removeCategory(id: work.id)
+        XCTAssertEqual(try rawRows("SELECT id, display_order FROM notes ORDER BY display_order"), ranks)
+        try store.delete(id: a.id)
+        XCTAssertEqual(try rawRows("SELECT id, display_order FROM notes ORDER BY display_order"), [ranks[0], ranks[2]])
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: a.dayKey).map(\.id), [b.id, c.id])
+    }
+
+    func testAppendCompactsExhaustedRanksWithoutChangingFieldsOrOtherDays() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = note("A", day: "2026-10-07", createdAt: 10)
+        let b = note("B", day: a.dayKey, createdAt: 20)
+        let old = note("Old", day: "2026-10-06", createdAt: 30)
+        for row in [a, b, old] { try store.add(row) }
+        try executeRaw("UPDATE notes SET display_order = 9223372036854775807 WHERE id = '\(a.id.uuidString)'")
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let c = note("C", day: a.dayKey, createdAt: 40)
+        try executeRaw("CREATE TRIGGER reject_add AFTER INSERT ON notes BEGIN SELECT RAISE(FAIL, 'failed after compaction'); END")
+        XCTAssertThrowsError(try store.add(c))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        try executeRaw("DROP TRIGGER reject_add")
+        try store.add(c)
+        XCTAssertEqual(try store.notes(for: a.dayKey), [b, a, c])
+        XCTAssertEqual(try rawRows("SELECT display_order FROM notes WHERE day_key = '2026-10-07' ORDER BY display_order"), [["0"], ["1"], ["2"]])
+        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes WHERE id != '\(c.id.uuidString)' ORDER BY rowid"), before.map { Array($0.dropLast()) })
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: old.dayKey), [old])
+    }
+
+    func testRuntimeMalformedRanksFailReadsMovesAndAddsWithoutRepair() throws {
+        for corruption in ["UPDATE notes SET display_order = -1", "PRAGMA ignore_check_constraints = ON; UPDATE notes SET display_order = 'bad'", "DROP INDEX notes_day_display_order_idx; UPDATE notes SET display_order = 0"] {
+            let url = directory.appendingPathComponent("\(UUID().uuidString).sqlite")
+            let store = try SQLiteNoteRepository(databaseURL: url)
+            let a = note("A", day: "2026-10-07", createdAt: 10)
+            let b = note("B", day: a.dayKey, createdAt: 20)
+            try store.add(a); try store.add(b)
+            var raw: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(url.path, &raw), SQLITE_OK)
+            let connection = try XCTUnwrap(raw)
+            defer { sqlite3_close(connection) }
+            // Negative corruption targets one row to avoid an unrelated unique collision.
+            let sql = corruption == "UPDATE notes SET display_order = -1"
+                ? "UPDATE notes SET display_order = -1 WHERE id = '\(a.id.uuidString)'" : corruption
+            // Noninteger corruption also targets one row for the same reason.
+            let targeted = sql.contains("'bad'") ? sql + " WHERE id = '\(a.id.uuidString)'" : sql
+            XCTAssertEqual(sqlite3_exec(connection, targeted, nil, nil, nil), SQLITE_OK)
+            let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid", at: url)
+            XCTAssertThrowsError(try store.notes(for: a.dayKey))
+            XCTAssertThrowsError(try store.moveTask(TaskMoveRequest(taskID: b.id, expectedDayKey: a.dayKey,
+                expectedSourceGroup: .general, destinationGroup: .general, placement: .before(a.id))))
+            XCTAssertThrowsError(try store.add(note("Unsaved", day: a.dayKey, createdAt: 30)))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid", at: url), before)
+            // Reopening must still reject the corrupt store; operations did not repair it.
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: url))
+        }
+    }
+
     private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,
                        categoryID: UUID? = nil, id: UUID = UUID()) -> LaterTask {
         LaterTask(id: id, text: text, createdAt: Date(timeIntervalSince1970: createdAt),
@@ -1076,9 +1260,9 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         return sqlite3_exec(database, sql, nil, nil, nil)
     }
 
-    private func rawRows(_ sql: String) throws -> [[String?]] {
+    private func rawRows(_ sql: String, at url: URL? = nil) throws -> [[String?]] {
         var connection: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(databaseURL.path, &connection), SQLITE_OK)
+        XCTAssertEqual(sqlite3_open((url ?? databaseURL).path, &connection), SQLITE_OK)
         let database = try XCTUnwrap(connection)
         defer { sqlite3_close(database) }
         var prepared: OpaquePointer?

@@ -34,8 +34,12 @@ protocol NoteRepository {
     /// days and the Later list.
     func removeCategory(id: UUID) throws
 
-    /// Returns tasks in saved insertion order, independent of completion or timestamps.
+    /// Returns tasks in saved display order, independent of completion or timestamps.
     func notes(for dayKey: String) throws -> [Note]
+    /// Validates a fresh transactional snapshot for expectedDayKey. The caller
+    /// authorizes the action-time Today key. Changed snapshots return only after
+    /// COMMIT; rejected/unchanged requests perform no updates. Storage failures throw.
+    func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome
     func incompleteCount(for dayKey: String) throws -> Int
     /// Appends a task after the day's existing tasks.
     func add(_ note: Note) throws

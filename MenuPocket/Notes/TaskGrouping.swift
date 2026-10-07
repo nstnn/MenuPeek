@@ -37,7 +37,7 @@ enum TaskGroupID: Hashable, Sendable {
 struct TaskGroup: Identifiable, Equatable {
     let id: TaskGroupID
     let name: String
-    /// Every task in the group in saved insertion order, whether or not the
+    /// Every task in the group in saved display order, whether or not the
     /// group is collapsed.
     let notes: [Note]
 
@@ -46,8 +46,8 @@ struct TaskGroup: Identifiable, Equatable {
     }
 
     /// Custom categories in saved creation order, then General. Only groups
-    /// with tasks appear. Each group filters the canonical task array, so a
-    /// reassigned task takes its original relative position in its new group.
+    /// with tasks appear. Each group filters the canonical task array. An
+    /// explicit move follows its saved rank; Edit reassignment retains its rank.
     /// The state never publishes a task whose category is missing from the
     /// catalog, so every task lands in exactly one group.
     static func groups(categories: [TaskCategory], notes: [Note]) -> [TaskGroup] {

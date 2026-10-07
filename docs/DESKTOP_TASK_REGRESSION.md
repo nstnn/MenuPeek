@@ -619,3 +619,29 @@ Result: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.06_14-12-00--0400.x
 Cleanup: no test host process remained after testing. The only created temporary app, this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`, was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 14-12-44-475.app`. Following automatic Trash-path re-registration it was unregistered again; final LaunchServices dump contains neither path, Spotlight contains neither temporary copy, and the original bundle is absent. Main-checkout Debug executable hash remained `8ee2320cf524a802568da6aad47209d84a7cf3d9e18ddce406e0a54caf3a1c67` before/after.
 
 This establishes isolated migration and focused regression evidence. No production database upgrade/launch, native movement interaction, oldest-OS run, full suite, Release, remote CI, or system acceptance was performed.
+
+
+## Atomic repository movement — 2026-10-07
+
+**Pass for Movement TASK-003 repository handoff; independent review READY.** Baseline: clean `feat/task-movement`, HEAD `c121808`; final source/tests/workflow were uncommitted. SQLite schema remains v4. The repository now reads validated saved `display_order`, executes UUID-based explicit moves against a fresh transaction snapshot, rewrites ranks in two passes and updates the moving category atomically. Changed snapshots return only after COMMIT. Rejected/equivalent moves perform no UPDATE. Add/Quick Add compact only an exhausted day's ranks inside the insertion transaction. Existing Edit/completion and surviving delete/category-removal ranks are retained; Later→Today remains unsupported.
+
+Xcode 27.0 (`27A266a`), macOS 26.6.2 (`25G83`), arm64. Author and fresh independent reviewer runs each passed **112/112**, zero failures/skips: 40 SQLite repository, 51 DailyNotesState, 8 Quick Add, 8 movement planner, 5 grouping. Both used the shared MenuPocket Debug scheme and isolated databases/injected services. The initial sandboxed author invocation failed because Swift macro/test services were blocked; the permitted rerun below succeeded.
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+Coverage establishes exact order after fresh repository reopen for within/cross-group, before/after and empty/General movements; preservation of rowids/task fields, other days, Later, categories and counts; rejected/stale/no-op requests with an UPDATE-rejecting trigger; rollback after writes in both rank passes and category reassignment; reader-lock **COMMIT/SQLITE_BUSY** failure followed by retry on the same connection; Add after move; Edit/completion/delete/category removal rank retention; Int64-exhaustion compaction with failed-insert rollback; and runtime malformed/noninteger/duplicate/negative ranks rejected without repair.
+
+Author xcresult: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.07_10-13-24--0400.xcresult`. Independent xcresult: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.07_10-15-08--0400.xcresult`. Logs and hashes: `build/task-movement-task3/` (`tests.log`, `tests-authorized.log`, `independent-review-tests.log`, `source-hashes.txt`, `artifact-hashes.txt`). Repository SHA-256: `ff6b8378d075c141c9666ea7cd22d6fd5ea6ba82449435194aa1138a4024dc9c`; repository tests: `77cff607aff4188a0c330f6748ef55b83d9b900c5b508a4eadca3991d04273bb`. Debug executable: `98f1ebd3ba7cf5e0e0a33322134986bae8bec2ba47b239291af8fc5f2664a2a6`; Debug dylib: `ec76e491e956c3b869fd68d1dc63876ea2cb331fb60d0c6c9bc1791498f22c50`. Independent reviewer `/root/review_task3` did not author the changes. Final implementation/test snapshot remained stable through review; subsequent edits record handoff/evidence only.
+
+Cleanup: no process remained at this checkout's exact test-host path. `build/DerivedData/Build/Products/Debug/MenuPocket.app` was unregistered and moved using `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 10-16-13-486.app`. Unregistering that Trash path reported scan `-10814`; the final LaunchServices/Spotlight dumps contain neither original nor Trash path. The original bundle is absent. `/Applications/MenuPocket.app` executable SHA-256 is identical before/after. Evidence: `processes-before-cleanup.txt`, `trashed-app-path.txt`, `launchservices-after.txt`, `spotlight-after.txt`, `main-app-before.txt` and `main-app-after.txt` under the log directory. Diff whitespace validation passed.
+
+This is repository/automated evidence. State move command/guards, drag/menu interaction, native changed-data relaunch, production database upgrade, 1,000-task scale, oldest-OS run, full-suite, Release and remote CI remain later-card or separate evidence. No real saved database, defaults, login registration or global hotkey was changed.

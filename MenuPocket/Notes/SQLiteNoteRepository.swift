@@ -172,20 +172,7 @@ final class SQLiteNoteRepository: NoteRepository {
     func add(_ note: Note) throws {
         try transaction {
             if let id = note.categoryID { _ = try requireCategory(id) }
-            // The v4 unique index requires every existing add route to allocate a rank.
-            // Overflow compaction and explicit movement are implemented in TASK-003.
-            let orderStatement = try prepare("SELECT MAX(display_order) FROM notes WHERE day_key = ?")
-            defer { sqlite3_finalize(orderStatement) }
-            try bind(note.dayKey, at: 1, to: orderStatement)
-            try check(sqlite3_step(orderStatement), expected: SQLITE_ROW, operation: "read daily order")
-            var order: Int64 = 0
-            if sqlite3_column_type(orderStatement, 0) != SQLITE_NULL {
-                let next = sqlite3_column_int64(orderStatement, 0).addingReportingOverflow(1)
-                guard !next.overflow else {
-                    throw SQLiteNoteStoreError.incompatibleSchema("Daily display order exhausted")
-                }
-                order = next.partialValue
-            }
+            let order = try nextDailyOrder(for: note.dayKey)
             let statement = try prepare(
                 "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id, display_order) VALUES (?, ?, ?, ?, ?, ?, ?)"
             )
@@ -207,24 +194,28 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     func notes(for dayKey: String) throws -> [Note] {
-        // The existing table's rowid preserves insertion order across task updates.
-        // Do not rebuild this table without preserving that relative order.
         let statement = try prepare(
             """
             SELECT notes.id, text, day_key, created_at, completed_at, category_id,
-                   categories.id, name, name_key, creation_order
+                   categories.id, name, name_key, creation_order, notes.display_order
             FROM notes LEFT JOIN categories ON categories.id = notes.category_id
-            WHERE day_key = ? ORDER BY notes.rowid ASC
+            WHERE day_key = ? ORDER BY notes.display_order ASC
             """
         )
         defer { sqlite3_finalize(statement) }
         try bind(dayKey, at: 1, to: statement)
 
         var result: [Note] = []
+        var ranks = Set<Int64>()
         while true {
             let step = sqlite3_step(statement)
             if step == SQLITE_DONE { return result }
             try check(step, expected: SQLITE_ROW, operation: "read notes")
+            let rank = sqlite3_column_int64(statement, 10)
+            guard sqlite3_column_type(statement, 10) == SQLITE_INTEGER,
+                  rank >= 0, ranks.insert(rank).inserted else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
             guard let id = UUID(uuidString: try text(at: 0, from: statement)),
                   sqlite3_column_type(statement, 3) == SQLITE_FLOAT ||
                   sqlite3_column_type(statement, 3) == SQLITE_INTEGER else {
@@ -261,6 +252,63 @@ final class SQLiteNoteRepository: NoteRepository {
                                dayKey: try text(at: 2, from: statement),
                                createdAt: Date(timeIntervalSince1970: createdAt),
                                completedAt: completedAt, categoryID: categoryID))
+        }
+    }
+
+    func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome {
+        try transaction {
+            let snapshot = try notes(for: request.expectedDayKey)
+            let outcome = TaskMovePlanner.plan(request, dayKey: request.expectedDayKey,
+                                               notes: snapshot, categories: try categories())
+            guard case let .changed(ordered) = outcome else { return outcome }
+            try rewriteDailyOrder(ordered, dayKey: request.expectedDayKey)
+            let statement = try prepare("UPDATE notes SET category_id = ? WHERE id = ? AND day_key = ?")
+            defer { sqlite3_finalize(statement) }
+            guard let moved = ordered.first(where: { $0.id == request.taskID }) else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            try bindCategoryID(moved.categoryID, at: 1, to: statement)
+            try bind(request.taskID.uuidString, at: 2, to: statement)
+            try bind(request.expectedDayKey, at: 3, to: statement)
+            try executeWrite(statement, id: request.taskID, operation: "move task category")
+            // transaction returns this snapshot only after COMMIT succeeds.
+            return outcome
+        }
+    }
+
+    /// Called only inside a write transaction. Validate before allocating or compacting;
+    /// malformed saved ranks are errors, never a reason to repair the store.
+    private func nextDailyOrder(for dayKey: String) throws -> Int64 {
+        let snapshot = try notes(for: dayKey)
+        let maximum: Int64? = try {
+            let statement = try prepare("SELECT MAX(display_order) FROM notes WHERE day_key = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(dayKey, at: 1, to: statement)
+            try check(sqlite3_step(statement), expected: SQLITE_ROW, operation: "read daily order")
+            return sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 0)
+        }()
+        guard let maximum else { return 0 }
+        let next = maximum.addingReportingOverflow(1)
+        if !next.overflow { return next.partialValue }
+        try rewriteDailyOrder(snapshot, dayKey: dayKey)
+        return Int64(snapshot.count)
+    }
+
+    /// Two passes avoid collisions with the per-day unique index. Negative ranks
+    /// remain private to the transaction and are never committed or published.
+    private func rewriteDailyOrder(_ ordered: [Note], dayKey: String) throws {
+        let statement = try prepare("UPDATE notes SET display_order = ? WHERE id = ? AND day_key = ?")
+        defer { sqlite3_finalize(statement) }
+        for temporary in [true, false] {
+            for (index, note) in ordered.enumerated() {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                let rank = temporary ? -Int64(index) - 1 : Int64(index)
+                try check(sqlite3_bind_int64(statement, 1, rank), operation: "bind display_order")
+                try bind(note.id.uuidString, at: 2, to: statement)
+                try bind(dayKey, at: 3, to: statement)
+                try executeWrite(statement, id: note.id, operation: "rewrite daily order")
+            }
         }
     }
 
