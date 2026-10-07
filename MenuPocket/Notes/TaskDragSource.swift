@@ -17,6 +17,7 @@ final class TaskDragSession {
     static let pasteboardType = NSPasteboard.PasteboardType("local.menupocket.today-task-move")
     private(set) var active: Payload?
     private(set) var isDragging = false
+    var hoveredRequest: TaskMoveRequest?
     @ObservationIgnored private var nativeToken: UUID?
     @ObservationIgnored private weak var nativeSource: TaskDragHandleView?
 
@@ -54,16 +55,21 @@ final class TaskDragSession {
     func consume(_ payload: Payload) -> Bool {
         guard active == payload, nativeToken == payload.token else { return false }
         active = nil
+        hoveredRequest = nil
         return true
     }
 
     /// Invalidation removes feedback/authorization immediately, but does not
     /// allow another drag until the old native session actually ends.
-    func cancel() { active = nil }
+    func cancel() {
+        active = nil
+        hoveredRequest = nil
+    }
 
     func ended(token: UUID) {
         guard nativeToken == token else { return }
         active = nil
+        hoveredRequest = nil
         nativeToken = nil
         nativeSource = nil
         isDragging = false

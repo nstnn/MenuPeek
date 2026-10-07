@@ -8,6 +8,109 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+    func testNativeDropCallbacksRouteRowHalvesAndConsumeOnlyOnce() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let c = note("C", day: a.dayKey, createdAt: 3)
+        for upper in [true, false] {
+            let store = FakeNoteRepository(notes: [a, b, c])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            let session = state.taskWindowPresentation.dragSession
+            let source = TaskDragHandleView(frame: .zero)
+            let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+            let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+            let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = target
+            defer { window.close(); session.ended(token: payload.token) }
+            target.state = state; target.session = session; target.group = .general; target.anchor = c.id
+            let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                            point: target.convert(NSPoint(x: 20, y: upper ? 5 : 35), to: nil))
+            defer { info.draggingPasteboard.releaseGlobally() }
+            XCTAssertEqual(target.draggingEntered(info), .move)
+            XCTAssertEqual(session.hoveredRequest?.placement, upper ? .before(c.id) : .after(c.id))
+            XCTAssertTrue(target.prepareForDragOperation(info))
+            XCTAssertEqual(store.moveAttempts, 0)
+            XCTAssertTrue(target.performDragOperation(info))
+            XCTAssertFalse(target.performDragOperation(info))
+            XCTAssertEqual(store.moveAttempts, 1)
+            XCTAssertEqual(state.notes.map(\.id), upper ? [b.id, a.id, c.id] : [b.id, c.id, a.id])
+            XCTAssertNil(session.active)
+            XCTAssertNil(session.hoveredRequest)
+        }
+    }
+
+    func testNativeDropRejectsExternalNoOpSelfAndNewGuardsWithoutWriting() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+        let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = target
+        defer { window.close(); session.ended(token: payload.token) }
+        target.state = state; target.session = session; target.group = .general
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                        point: target.convert(NSPoint(x: 20, y: 5), to: nil))
+        defer { info.draggingPasteboard.releaseGlobally() }
+        info.draggingSource = nil
+        XCTAssertEqual(target.draggingEntered(info), [])
+        info.draggingSource = source
+        target.anchor = a.id
+        XCTAssertEqual(target.draggingUpdated(info), [])
+        target.anchor = b.id // A is already before B.
+        XCTAssertEqual(target.draggingUpdated(info), [])
+        target.anchor = nil
+        XCTAssertEqual(target.draggingUpdated(info), .move)
+        state.beginEditing(id: b.id) // Guard changes between hover and drop.
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.active)
+    }
+
+    func testNativeHeaderDropFailurePreservesDraftCollapseAndClearsFeedback() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Keep draft"
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+        let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = target
+        defer { window.close(); session.ended(token: payload.token) }
+        target.state = state; target.session = session; target.group = .category(work.id)
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                        point: target.convert(NSPoint(x: 20, y: 5), to: nil))
+        defer { info.draggingPasteboard.releaseGlobally() }
+        XCTAssertEqual(target.draggingEntered(info), .move)
+        XCTAssertEqual(session.hoveredRequest?.placement, .endOfGroup)
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        store.failWrite = .move
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertEqual(store.moveAttempts, 1)
+        XCTAssertEqual(state.notes, [a])
+        XCTAssertEqual(state.draft, "Keep draft")
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        XCTAssertEqual(state.taskIssue, .move)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.active)
+    }
+
     func testCatalogIsPublishedWithDailyRowsAndIncludesUnusedReusableCategories() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 2)
         let unused = try TaskCategory(name: "Unused", creationOrder: 8)
@@ -2177,4 +2280,37 @@ private final class FakeNoteRepository: NoteRepository {
         guard let index = saved.firstIndex(where: { $0.id == id }) else { throw FakeFailure.failed }
         saved[index] = change(saved[index])
     }
+}
+
+/// Callback-level fixture; this does not simulate the system's native drag loop.
+@MainActor
+private final class MovementDraggingInfo: NSObject, NSDraggingInfo {
+    var draggingDestinationWindow: NSWindow?
+    var draggingSourceOperationMask: NSDragOperation = .move
+    var draggingLocation: NSPoint
+    var draggedImageLocation: NSPoint { .zero }
+    nonisolated var draggedImage: NSImage? { nil }
+    let draggingPasteboard = NSPasteboard(name: .init(UUID().uuidString))
+    var draggingSource: Any?
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    init(source: TaskDragHandleView, token: UUID, window: NSWindow, point: NSPoint) {
+        draggingSource = source
+        draggingDestinationWindow = window
+        draggingLocation = point
+        super.init()
+        let item = NSPasteboardItem()
+        item.setString(token.uuidString, forType: TaskDragSession.pasteboardType)
+        draggingPasteboard.writeObjects([item])
+    }
+    func resetSpringLoading() {}
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    func enumerateDraggingItems(options: NSDraggingItemEnumerationOptions, for view: NSView?,
+                                classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+                                using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
 }

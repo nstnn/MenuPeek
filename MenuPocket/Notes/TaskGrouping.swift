@@ -46,19 +46,20 @@ struct TaskGroup: Identifiable, Equatable {
     }
 
     /// Custom categories in saved creation order, then General. Only groups
-    /// with tasks appear. Each group filters the canonical task array. An
+    /// with tasks appear unless a live drag requests transient empty targets.
+    /// Each group filters the canonical task array. An
     /// explicit move follows its saved rank; Edit reassignment retains its rank.
     /// The state never publishes a task whose category is missing from the
     /// catalog, so every task lands in exactly one group.
-    static func groups(categories: [TaskCategory], notes: [Note]) -> [TaskGroup] {
+    static func groups(categories: [TaskCategory], notes: [Note], includeEmpty: Bool = false) -> [TaskGroup] {
         let custom = categories
             .sorted { $0.creationOrder < $1.creationOrder }
             .compactMap { category -> TaskGroup? in
                 let rows = notes.filter { $0.categoryID == category.id }
-                return rows.isEmpty ? nil : TaskGroup(id: .category(category.id), name: category.name, notes: rows)
+                return rows.isEmpty && !includeEmpty ? nil : TaskGroup(id: .category(category.id), name: category.name, notes: rows)
             }
         let general = notes.filter { $0.categoryID == nil }
-        guard !general.isEmpty else { return custom }
+        guard includeEmpty || !general.isEmpty else { return custom }
         return custom + [TaskGroup(id: .general, name: TaskCategoryName.general, notes: general)]
     }
 }

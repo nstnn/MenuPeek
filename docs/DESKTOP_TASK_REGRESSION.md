@@ -670,3 +670,26 @@ Task 5 source implementation only; the user explicitly deferred tests. No XCTest
 - Static: project plist validation and `git diff --check` passed. Installed SDK headers expose the native source-end and source-operation callbacks and the drag-session source API for the supported deployment target. References: [NSDraggingSource](https://developer.apple.com/documentation/appkit/nsdraggingsource), [native session creation](https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)). This is compilation/API evidence, not a macOS 14 runtime observation.
 - Cleanup: the exact temporary `/private/tmp/menupocket-task5-build/Build/Products/Debug/MenuPocket.app` was unregistered, moved through `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 10-46-02-749.app`, and that Trash path was unregistered. Original bundle path is absent; process and LaunchServices checks found no app at the original temporary path. Cleanup log: `/private/tmp/menupocket-task5-cleanup.log`. No production app/data/defaults or system registrations were changed.
 - Not tested: handle start, preview/cursor, Escape/outside/rejected/successful drag endings, cleared observable session state in the running interface, checkbox/text selection/copy/ellipsis coexistence, oldest supported macOS runtime. These are pending native feasibility/acceptance checks; do not infer them from the build.
+
+## Movement destinations — Task 6 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `792e2645306c52c21c881717c2f63e380c5791e7` plus the Task 6 changes in `TaskDragSource.swift`, `TaskGrouping.swift`, `TaskWindowView.swift`, new `TaskDropTarget.swift`, project membership, and state/grouping tests. Partial destination changes existed at task start and were retained/finished. No persistence schema or repository change.
+
+Shared-scheme Debug verification on macOS 26.6.2 (25G83), Xcode 27.0 (27A266a): **74/74 passed**, zero failures/skips, selecting `TaskGroupingTests`, `TaskMovementTests`, and `DailyNotesStateTests`. Command:
+
+```sh
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug \
+  -destination 'platform=macOS' -derivedDataPath /private/tmp/menupocket-task6 \
+  -resultBundlePath build/task6/Tests-final.xcresult \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests test
+```
+
+New callback tests exercise both row halves, one-shot dispatch despite duplicate callbacks, external/self/no-op rejection, a guard changing between hover/drop, header placement into a collapsed empty category, and failed-write preservation of saved rows/drafts/collapse/error plus feedback cleanup. The grouping test checks transient empty categories/General, creation order and unchanged counts/normal presentation. These use isolated repositories/defaults and fake dragging info; they do not simulate the native drag loop.
+
+The first sandboxed run failed on Xcode Observation macro service access; a permitted rerun found test-fixture protocol conformance errors, which were corrected before the successful final run. Evidence: ignored `build/task6/tests*.log`, `Tests*.xcresult`, `test-summary.json`, fixture source/build commands/logs, crash report and artifact hashes.
+
+Independent reviewer `/root/review_task6` did not author or modify this patch. Fresh focused verification passed **9/9** (three callback tests plus grouping), project plist and whitespace checks passed, no demonstrated source defect. Verdict **BLOCKED** for unresolved native acceptance. Reviewed code identity: tracked diff SHA-256 `c9a503e0b68b59d3549421e3822804e45899243d234a03f36ecda08ef89f075d`; untracked `TaskDropTarget.swift` SHA-256 `2496c73a3ec672d137d2c12063e1fdffef3a698d6008c66b9bcaf53a686b49ed`. Reviewer logs/results: `/private/tmp/menupocket-task6-review-permitted.log` and `/private/tmp/menupocket-task6-review/Logs/Test/Test-MenuPocket-2026.10.07_11-15-54--0400.xcresult`. Later documentation edits do not change that code snapshot.
+
+Cleanup completed after failed/successful sessions: author's exact Debug host and native fixture were unregistered, moved with `FileManager.trashItem`, and Trash paths unregistered; reviewer did the same for their host. Original paths are absent. Final author's process/LaunchServices checks expose neither original host nor fixture; Spotlight has no fixture. `/Applications/MenuPocket.app` executable hash is identical before/after. Cleanup/identity records are under `build/task6/`. No production data/defaults, login/hotkey registrations, Git publication, full suite, Release build, oldest-supported-OS acceptance or later-card scrolling/menu acceptance was performed.

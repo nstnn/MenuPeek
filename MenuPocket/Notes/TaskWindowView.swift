@@ -57,7 +57,7 @@ struct TaskWindowView: View {
                                     emptyState
                                 } else {
                                     LazyVStack(alignment: .leading, spacing: 24) {
-                                        ForEach(state.groups) { group in
+                                        ForEach(movementGroups) { group in
                                             groupSurface(group)
                                                 .id(group.id)
                                         }
@@ -398,17 +398,42 @@ struct TaskWindowView: View {
         }
     }
 
+    private var hasValidDrag: Bool {
+        guard let payload = presentation.dragSession.active else { return false }
+        return presentation.canMoveTask(state: state) && state.todayKey == payload.dayKey &&
+            state.notes.contains { $0.id == payload.taskID && TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup }
+    }
+
+    private var movementGroups: [TaskGroup] {
+        TaskGroup.groups(categories: state.categories, notes: state.notes, includeEmpty: hasValidDrag)
+    }
+
+    private func dropTarget(_ group: TaskGroupID, anchor: UUID? = nil) -> some View {
+        TaskDropTarget(state: state, session: presentation.dragSession, group: group, anchor: anchor)
+            .accessibilityHidden(true)
+    }
+
     /// The count covers every task in the group, including rows hidden by collapse.
     private func groupSurface(_ group: TaskGroup) -> some View {
         let collapsed = state.categoryPreferences.isCollapsed(group.id)
         return VStack(alignment: .leading, spacing: 0) {
             groupHeader(group, collapsed: collapsed)
+                .overlay { dropTarget(group.id) }
             // Remove collapsed rows from keyboard and accessibility traversal.
             if !collapsed {
                 ForEach(group.notes) { note in
                     taskRow(note)
+                        .overlay { dropTarget(group.id, anchor: note.id) }
                 }
                 .padding(.leading, Self.groupRowIndent)
+                if hasValidDrag {
+                    Text(group.notes.isEmpty ? "Drop task here" : "Move to end of group")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                        .padding(.leading, Self.groupRowIndent)
+                        .overlay { dropTarget(group.id) }
+                }
             }
         }
         .padding(.horizontal, 16)
