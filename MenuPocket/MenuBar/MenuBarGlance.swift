@@ -8,13 +8,24 @@ struct MenuBarGlance: Equatable {
     static let rowLimit = 5
     /// Characters kept in a row title, including the trailing ellipsis.
     static let titleLimit = 60
+    /// Characters kept in a row's category name; names have no saved limit.
+    static let categoryLimit = 24
 
     struct Header: Equatable {
         /// `EEE d MMM` in English, or the raw key when it cannot be parsed.
         let dateLabel: String
         /// nil when Today is unavailable; the header then shows `—` and no bar.
         let progress: NoteProgress?
-        let accessibilityLabel: String
+        /// The date VoiceOver speaks, for example `Wednesday 7 October`.
+        let spokenDate: String
+
+        /// The progress VoiceOver speaks after the date.
+        var accessibilityValue: String {
+            progress.map { "\($0.completed) of \($0.total) tasks done" } ?? "tasks are unavailable"
+        }
+
+        /// The whole header as one phrase: the spoken date, then the value.
+        var accessibilityLabel: String { "\(spokenDate), \(accessibilityValue)" }
 
         var countLabel: String {
             progress.map { "\($0.completed) of \($0.total) done" } ?? "—"
@@ -33,9 +44,16 @@ struct MenuBarGlance: Equatable {
         let fullText: String
         /// Set only when today's tasks span more than one group.
         let categoryName: String?
+        /// The untruncated category name, set whenever `categoryName` is.
+        let fullCategoryName: String?
 
-        /// The full text when the title does not already show all of it.
-        var toolTip: String? { title == fullText ? nil : fullText }
+        /// The full text, plus the full category name on a second line when it
+        /// is cut; nil when the row already shows everything.
+        var toolTip: String? {
+            let categoryCut = categoryName != fullCategoryName
+            guard title != fullText || categoryCut else { return nil }
+            return categoryCut ? "\(fullText)\n\(fullCategoryName ?? "")" : fullText
+        }
     }
 
     enum Body: Equatable {
@@ -68,11 +86,8 @@ struct MenuBarGlance: Equatable {
          laterRemainingCount: Int?, canAddTask: Bool) {
         let day = try? GregorianDay(key: dayKey)
         let dateLabel = day?.label("EEE d MMM") ?? dayKey
-        let spokenDate = day?.label("EEEE d MMMM") ?? dayKey
-        let spokenCount = progress.map { "\($0.completed) of \($0.total) tasks done" }
-            ?? "tasks are unavailable"
         header = Header(dateLabel: dateLabel, progress: progress,
-                        accessibilityLabel: "\(spokenDate), \(spokenCount)")
+                        spokenDate: day?.label("EEEE d MMMM") ?? dayKey)
 
         if let progress {
             body = Self.body(progress: progress, groups: groups)
@@ -92,18 +107,19 @@ struct MenuBarGlance: Equatable {
         guard !unfinished.isEmpty else { return progress.total == 0 ? .empty : .allDone }
         let rows = unfinished.prefix(rowLimit).map { entry in
             Row(id: entry.note.id, title: title(for: entry.note.text), fullText: entry.note.text,
-                categoryName: showsCategory ? entry.group.name : nil)
+                categoryName: showsCategory ? title(for: entry.group.name, limit: categoryLimit) : nil,
+                fullCategoryName: showsCategory ? entry.group.name : nil)
         }
         let overflow = unfinished.count - rowLimit
         return .tasks(rows: rows, overflowCount: overflow > 0 ? overflow : nil)
     }
 
-    /// One line of at most `titleLimit` characters. Saved text can contain
+    /// One line of at most `limit` characters. Saved text can contain
     /// line breaks, which a menu item would otherwise show as extra lines.
-    static func title(for text: String) -> String {
+    static func title(for text: String, limit: Int = titleLimit) -> String {
         let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard line.count > titleLimit else { return line }
-        var kept = line.prefix(titleLimit - 1)
+        guard line.count > limit else { return line }
+        var kept = line.prefix(limit - 1)
         while kept.last?.isWhitespace == true { kept = kept.dropLast() }
         return String(kept) + "…"
     }

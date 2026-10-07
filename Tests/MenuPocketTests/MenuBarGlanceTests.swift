@@ -13,6 +13,8 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(glance.header.countLabel, "4 of 7 done")
         XCTAssertEqual(glance.header.fraction ?? -1, 4.0 / 7.0, accuracy: 1e-9)
         XCTAssertEqual(glance.header.accessibilityLabel, "Wednesday 7 October, 4 of 7 tasks done")
+        XCTAssertEqual(glance.header.spokenDate, "Wednesday 7 October")
+        XCTAssertEqual(glance.header.accessibilityValue, "4 of 7 tasks done")
     }
 
     func testDateLabelsCrossMonthAndYearBoundariesIndependentOfTimeZone() {
@@ -71,6 +73,7 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(glance.header.countLabel, "—")
         XCTAssertNil(glance.header.fraction)
         XCTAssertEqual(glance.header.accessibilityLabel, "Wednesday 7 October, tasks are unavailable")
+        XCTAssertEqual(glance.header.accessibilityValue, "tasks are unavailable")
         XCTAssertEqual(glance.body, .unavailable)
         XCTAssertFalse(glance.canAddTask, "Add Task… targets Today, which cannot be read")
         XCTAssertEqual(glance.laterRemainingCount, 3, "A Today read failure does not hide Later")
@@ -131,6 +134,24 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(rows(generalOnly).map(\.categoryName), [nil, nil])
         XCTAssertEqual(rows(workOnly).map(\.categoryName), [nil])
         XCTAssertEqual(rows(mixed).map(\.categoryName), ["Work"])
+    }
+
+    func testLongCategoryNamesAreCutAndTheFullNameJoinsTheTooltip() throws {
+        let longName = "Quarterly planning and roadmap review"
+        let long = try TaskCategory(name: longName, creationOrder: 0)
+        let short = try TaskCategory(name: "Home", creationOrder: 1)
+        let longTitle = String(repeating: "y", count: MenuBarGlance.titleLimit + 1)
+        let notes = [note("Plan", long), note(longTitle, long), note("Milk", short)]
+
+        let rows = rows(glance(notes: notes, categories: [long, short]))
+
+        XCTAssertEqual(rows[0].categoryName, "Quarterly planning and…")
+        XCTAssertEqual(rows[0].categoryName?.count, MenuBarGlance.categoryLimit - 1)
+        XCTAssertEqual(rows[0].fullCategoryName, longName)
+        XCTAssertEqual(rows[0].toolTip, "Plan\n\(longName)", "Title fits, category is cut")
+        XCTAssertEqual(rows[1].toolTip, "\(longTitle)\n\(longName)")
+        XCTAssertEqual(rows[2].categoryName, "Home")
+        XCTAssertNil(rows[2].toolTip, "Nothing is cut")
     }
 
     func testCollapsedGroupsAreListedBecauseTheModelTakesNoCollapseInput() throws {
