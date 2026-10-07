@@ -169,6 +169,7 @@ final class DailyNotesState {
 
     func stopForTermination() {
         isTerminating = true
+        taskWindowPresentation.dragSession.cancel()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
         repository = nil

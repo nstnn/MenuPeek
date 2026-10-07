@@ -146,6 +146,20 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
+        .onDisappear { presentation.dragSession.cancel() }
+        .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
+            if !eligible { presentation.dragSession.cancel() }
+        }
+        .onChange(of: state.todayKey) { _, _ in presentation.dragSession.cancel() }
+        .onChange(of: state.notes) { _, notes in
+            if let payload = presentation.dragSession.active,
+               !notes.contains(where: {
+                   $0.id == payload.taskID && $0.dayKey == payload.dayKey &&
+                   TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
+               }) {
+                presentation.dragSession.cancel()
+            }
+        }
         .onChange(of: presentation.deletionTarget?.id) { old, new in
             if let old, new == nil { restoreRowFocus(old) }
         }
@@ -488,6 +502,9 @@ struct TaskWindowView: View {
 
     private func savedTaskRow(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 12) {
+            TaskDragHandle(note: note, state: state, session: presentation.dragSession,
+                           enabled: presentation.canMoveTask(state: state) && !presentation.dragSession.isDragging)
+                .frame(width: 16, height: 20)
             Toggle(isOn: Binding(
                 get: { state.notes.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
                 set: { state.setCompleted(id: note.id, completed: $0) }

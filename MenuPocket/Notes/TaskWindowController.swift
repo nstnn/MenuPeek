@@ -29,6 +29,8 @@ final class TaskWindowPresentation {
         case notRemoved
     }
 
+    let dragSession = TaskDragSession()
+
     private(set) var deletionTarget: DeletionTarget?
     private(set) var newTaskRequestID: UUID?
     private(set) var isManagingCategories = false
@@ -196,6 +198,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        presentation.dragSession.cancel()
         presentation.cancelDeletion()
         presentation.dismissCategoryManager()
     }
