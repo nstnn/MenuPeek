@@ -41,6 +41,8 @@ Current-day new and edit drafts retain text and category across window close/reo
 
 The menu bar shows saved completed/total progress, including `0/0` after a successful empty read. Unloaded or failed reads show `—`; open the window and use Retry. Failed writes retain the last saved count. Progress refresh remains active with the window closed. The previous compact editable popup is no longer exposed.
 
+Right-click (or Control-click) the menu bar count for a read-only quick look: the date, Today's progress bar and `N of M done`, the next five unfinished Today tasks, how many Later tasks remain, and Open Today, Add Task… (always to Today), Settings…, and Quit. The quick look never completes or changes a task. It is implemented but its running-app checks are still pending.
+
 Today tasks keep their assigned local day; unfinished tasks do not carry forward. The yesterday reminder opens History at yesterday with the Unfinished filter. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
 
 ## Use the Later list
