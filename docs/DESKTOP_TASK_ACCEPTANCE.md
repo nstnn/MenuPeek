@@ -363,3 +363,25 @@ The first disposable fixture crashed in its own startup force unwrap because its
 Computer-use handle drag exposed the transient Empty category and group footer targets. The attempted Work-first → Work-second drop saved nothing; subsequent click/Escape did not clear transient presentation. The automation/native-loop versus implementation cause remains unresolved. This establishes only startup and temporary destination rendering. Actual successful row/header/empty/collapsed drops, insertion/highlight correctness and native cancellation are **Not tested/Blocked**, not passes. Callback tests are separate evidence in [Task 6 regression](DESKTOP_TASK_REGRESSION.md#movement-destinations--task-6-2026-10-07). Independent review remains BLOCKED on these gaps. Resolve native-session behavior before closing Task 6 acceptance; Task 7 edge scrolling/reveal and Task 8 keyboard actions remain separate work.
 
 The fixture process was stopped by its exact path, its bundle unregistered and moved to Trash with `FileManager.trashItem`, and the Trash path unregistered. Original path is gone, final process/LaunchServices/Spotlight checks expose no original temporary fixture; the main app hash is unchanged. No real saved tasks or preferences were changed.
+
+
+## Movement scrolling and reveal — Task 7 (2026-10-07)
+
+**Native acceptance: BLOCKED.** The isolated fixture uses production state/controller/view, SQLite `/private/tmp/menupocket-task7-native/notes.sqlite`, defaults suite `local.menupocket.task7-presentation`, injected October 7 Toronto clock, and no production delegate/login/hotkey initialization. It contained 60 Work tasks, a collapsed Home task, General task and empty category, in the initial Dark 800 × 560 pt window.
+
+Initial fixture executable SHA-256: `a37070b2f662d3968c78693a0682aad708ade3ef9089b771b7aad3eebf5361ac`, observed exact-path PID 34935. A handle drag exposed transient destination feedback; the first Escape removed its footer. A second attempt toward the bottom edge exposed the footer but did not establish sustained viewport scrolling or a saved native drop; later Escape/close automation timed out. SQLite order remained unchanged at that point. This fixture was stopped and cleaned before final rebuilding.
+
+Final executable SHA-256: `9e94882b6e1e661a3223ac9baf845dc2b55e4bca725bb53b04173a4075676379`, observed exact-path PID 38381. A fixture-only native menu/shortcut calls `DailyNotesState.moveTask` to move Work task 1 to Home; SQLite confirmed destination UUID `7D2B2987-829A-4271-AC3E-4C1EDF32D153`, daily rank 60. However native menu tracking then returned stale accessibility IDs and unavailable window screenshots, so the saved command does **not** establish visible offscreen/collapsed destination reveal, successful dragging, or Task 8 production menu acceptance. No screenshot files are claimed; initial screenshots were inspected inline.
+
+| Scenario | Result |
+| --- | --- |
+| Isolated long-list interface startup | Pass |
+| First handle drag feedback / Escape clears temporary footer | Observed on initial artifact; final-artifact drag retest not established |
+| Sustained edge scrolling, above/below viewport and cancellation while scrolling | Blocked |
+| Successful saved native drop | Blocked |
+| Fixture-only common saved command changes isolated SQLite assignment/order | Pass; narrower than native dragging or visible reveal |
+| Visible collapsed/offscreen row reveal, focus/ring and failed/interrupted jump behavior | Blocked |
+| Integrated close/reopen, rollover, removed destination and unavailable-read recovery | Not tested in the real interface; hosted checks are separate |
+| Oldest supported OS, minimum window, full changed-data relaunch | Not tested; later acceptance cards retain these checks |
+
+Final [automated/review evidence](DESKTOP_TASK_REGRESSION.md#movement-scrolling-and-reveal--task-7-2026-10-07) is 69/69 author tests and 6/6 independent checks. Both fixture processes and all created temporary hosts were stopped/unregistered/trash-moved; original paths gone and main app hash unchanged. No real user task data or preferences were modified. Resolve native drag/drop/scroll/reveal observations before closing Tasks 6/7 acceptance.

@@ -82,6 +82,21 @@ struct TaskWindowView: View {
                     .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
                     .contentShape(Rectangle())
                     .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+                    .onChange(of: presentation.movementReveal) { _, request in
+                        guard let request else { return }
+                        let ownership = focusRequestID
+                        Task { @MainActor in
+                            defer { presentation.consumeMovementReveal(request) }
+                            await Task.yield()
+                            guard canReveal(request, ownership: ownership) else { return }
+                            scroll.scrollTo(request.group, anchor: .top)
+                            await Task.yield()
+                            guard canReveal(request, ownership: ownership) else { return }
+                            scroll.scrollTo(request.taskID, anchor: .center)
+                            // Pointer movement does not create a keyboard ring. A
+                            // preexisting focused control keeps its row identity.
+                        }
+                    }
                     .onChange(of: state.editingNoteID, initial: true) { old, new in
                         // Keep the editor or its saved destination visible when
                         // the Add composer changes the list's available height.
@@ -146,23 +161,61 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
-        .onDisappear { presentation.dragSession.cancel() }
-        .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
-            if !eligible { presentation.dragSession.cancel() }
+        .onChange(of: presentation.dragSession.active) { _, payload in
+            if payload != nil {
+                focusRequestID = UUID()
+                if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+            }
         }
-        .onChange(of: state.todayKey) { _, _ in presentation.dragSession.cancel() }
+        .onDisappear { interruptMovement() }
+        .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
+            if !eligible { interruptMovement() }
+        }
+        .onChange(of: state.todayKey) { _, _ in interruptMovement() }
         .onChange(of: state.notes) { _, notes in
             if let payload = presentation.dragSession.active,
                !notes.contains(where: {
                    $0.id == payload.taskID && $0.dayKey == payload.dayKey &&
                    TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
                }) {
-                presentation.dragSession.cancel()
+                presentation.cancelMovement()
             }
+        }
+        .onChange(of: movementGroups.map(\.id)) { _, ids in
+            if case let .group(id) = focusedControl, !ids.contains(id) {
+                focusedControl = state.availableProgress == nil ? .retry : .add
+            }
+        }
+        .onChange(of: state.categories) { _, _ in
+            if presentation.dragSession.active != nil { interruptMovement() }
+            if let request = presentation.movementReveal,
+               !state.groups.contains(where: { $0.id == request.group }) {
+                interruptMovement()
+            }
+        }
+        .onChange(of: focusedControl) { old, new in
+            // Hierarchy removal can clear focus or invoke the fallback above;
+            // neither is a newer user navigation action.
+            guard new != nil else { return }
+            if case let .group(id) = old, !movementGroups.contains(where: { $0.id == id }) { return }
+            if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
         }
         .onChange(of: presentation.deletionTarget?.id) { old, new in
             if let old, new == nil { restoreRowFocus(old) }
         }
+    }
+
+    private func canReveal(_ request: TaskWindowPresentation.MovementReveal, ownership: UUID) -> Bool {
+        presentation.movementReveal == request && focusRequestID == ownership &&
+            presentation.canMoveTask(state: state) && state.todayKey == request.dayKey &&
+            !state.categoryPreferences.isCollapsed(request.group) &&
+            state.notes.contains { $0.id == request.taskID && TaskGroupID(categoryID: $0.categoryID) == request.group }
+    }
+
+    private func interruptMovement() {
+        presentation.cancelMovement()
+        focusRequestID = UUID()
+        if state.availableProgress == nil, focusedControl != nil { focusedControl = .retry }
     }
 
     private var writeError: String? {
@@ -489,6 +542,7 @@ struct TaskWindowView: View {
     }
 
     private func toggleGroup(_ group: TaskGroup) {
+        interruptMovement()
         let collapse = !state.categoryPreferences.isCollapsed(group.id)
         state.categoryPreferences.setCollapsed(collapse, for: group.id)
         // Its rows leave the view, so keep keyboard focus on the header.
@@ -733,6 +787,7 @@ struct TaskWindowView: View {
         // including an edit-exit observer that has not run yet.
         let requestID = requestID ?? UUID()
         focusRequestID = requestID
+        presentation.cancelMovement()
         Task { @MainActor in
             await Task.yield()
             guard focusRequestID == requestID else { return }
@@ -782,6 +837,7 @@ struct TaskWindowView: View {
     }
 
     private func clearFocus() {
+        interruptMovement()
         focusedControl = nil
         // Clear AppKit's first responder as well as SwiftUI's focus state.
         NSApp.keyWindow?.makeFirstResponder(nil)

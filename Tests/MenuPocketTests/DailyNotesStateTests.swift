@@ -8,6 +8,79 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+    func testDragScrollBoundsCancellationAndSourceUnmount() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 2000))
+        scroll.documentView = document
+        let source = TaskDragHandleView(frame: NSRect(x: 0, y: 0, width: 16, height: 24))
+        document.addSubview(source)
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = scroll
+        window.orderFront(nil)
+        let session = state.taskWindowPresentation.dragSession
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        defer { session.ended(token: payload.token); window.close() }
+        // Lazy source removal must not invalidate a native drag still in flight.
+        source.removeFromSuperview()
+        XCTAssertEqual(session.active, payload)
+        let clip = scroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: 800))
+        let pointer = window.convertPoint(toScreen: clip.convert(
+            NSPoint(x: clip.bounds.midX, y: clip.bounds.minY + 1), to: nil))
+        let before = clip.bounds.origin.y
+        session.scrollAtPointer(screenPoint: pointer)
+        XCTAssertNotEqual(clip.bounds.origin.y, before)
+        XCTAssertLessThanOrEqual(abs(clip.bounds.origin.y - before), 12)
+        session.cancel()
+        let cancelled = clip.bounds.origin
+        session.scrollAtPointer(screenPoint: pointer)
+        XCTAssertEqual(clip.bounds.origin, cancelled)
+        XCTAssertNil(session.active)
+        XCTAssertTrue(session.isDragging, "Reservation lasts until native end")
+        XCTAssertNil(session.begin(taskID: a.id, state: state, source: source))
+        session.ended(token: payload.token)
+        XCTAssertFalse(session.isDragging)
+    }
+
+    func testDragEdgeScrollingIsBoundedAndIgnoresOutsideAndCenter() {
+        let viewport = NSRect(x: 0, y: 0, width: 300, height: 200)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 0), viewport: viewport), -12)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 20), viewport: viewport), -6)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 180), viewport: viewport), 6)
+        for point in [NSPoint(x: 50, y: 100), NSPoint(x: -1, y: 180), NSPoint(x: 50, y: 201)] {
+            XCTAssertEqual(TaskDragSession.edgeStep(point: point, viewport: viewport), 0)
+        }
+    }
+
+    func testSavedMovementRevealIsSupersededAndCancelledByNewAction() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        _ = state.moveTask(moveRequest(a))
+        let first = try XCTUnwrap(presentation.movementReveal)
+        XCTAssertEqual(first.taskID, a.id)
+        _ = state.moveTask(moveRequest(b))
+        let second = try XCTUnwrap(presentation.movementReveal)
+        presentation.consumeMovementReveal(first)
+        XCTAssertEqual(presentation.movementReveal, second)
+        state.draft = "Retained"
+        XCTAssertTrue(presentation.requestNewTask(state: state))
+        XCTAssertNil(presentation.movementReveal)
+        XCTAssertEqual(state.draft, "Retained")
+        _ = state.moveTask(moveRequest(a))
+        presentation.requestDeletion(id: b.id, state: state)
+        XCTAssertNil(presentation.movementReveal)
+        XCTAssertEqual(state.draft, "Retained")
+    }
+
     func testNativeDropCallbacksRouteRowHalvesAndConsumeOnlyOnce() throws {
         let a = note("A", day: "2026-09-27", createdAt: 1)
         let b = note("B", day: a.dayKey, createdAt: 2)
@@ -104,6 +177,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertFalse(target.performDragOperation(info))
         XCTAssertEqual(store.moveAttempts, 1)
         XCTAssertEqual(state.notes, [a])
+        XCTAssertNil(state.taskWindowPresentation.movementReveal)
         XCTAssertEqual(state.draft, "Keep draft")
         XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
         XCTAssertEqual(state.taskIssue, .move)

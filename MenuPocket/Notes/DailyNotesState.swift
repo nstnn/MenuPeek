@@ -169,7 +169,7 @@ final class DailyNotesState {
 
     func stopForTermination() {
         isTerminating = true
-        taskWindowPresentation.dragSession.cancel()
+        taskWindowPresentation.cancelMovement()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
         repository = nil
@@ -396,6 +396,7 @@ final class DailyNotesState {
     /// authorizes a caller to reveal the destination; nil is blocked or failed.
     @discardableResult
     func moveTask(_ request: TaskMoveRequest) -> TaskMoveOutcome? {
+        taskWindowPresentation.cancelMovement()
         guard !isTerminating else {
             taskIssue = .move
             return nil
@@ -425,6 +426,7 @@ final class DailyNotesState {
             case let .changed(saved):
                 notes = saved
                 categoryPreferences.setCollapsed(false, for: request.destinationGroup)
+                taskWindowPresentation.requestMovementReveal(request)
                 taskIssue = nil
             case .unchanged:
                 if taskIssue == .move { taskIssue = nil }

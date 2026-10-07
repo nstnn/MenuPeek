@@ -29,7 +29,29 @@ final class TaskWindowPresentation {
         case notRemoved
     }
 
+    struct MovementReveal: Equatable {
+        let id = UUID()
+        let taskID: UUID
+        let dayKey: String
+        let group: TaskGroupID
+    }
+
     let dragSession = TaskDragSession()
+    private(set) var movementReveal: MovementReveal?
+
+    func requestMovementReveal(_ request: TaskMoveRequest) {
+        movementReveal = MovementReveal(taskID: request.taskID, dayKey: request.expectedDayKey,
+                                       group: request.destinationGroup)
+    }
+
+    func consumeMovementReveal(_ request: MovementReveal) {
+        if movementReveal == request { movementReveal = nil }
+    }
+
+    func cancelMovement() {
+        dragSession.cancel()
+        movementReveal = nil
+    }
 
     private(set) var deletionTarget: DeletionTarget?
     private(set) var newTaskRequestID: UUID?
@@ -50,6 +72,7 @@ final class TaskWindowPresentation {
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
         guard canAddTask(state: state) else { return false }
+        cancelMovement()
         newTaskRequestID = UUID()
         return true
     }
@@ -62,6 +85,7 @@ final class TaskWindowPresentation {
         guard state.availableProgress != nil,
               let note = state.notes.first(where: { $0.id == id }),
               note.dayKey == state.todayKey else { return }
+        cancelMovement()
         deletionTarget = DeletionTarget(id: id, dayKey: note.dayKey)
     }
 
@@ -100,6 +124,7 @@ final class TaskWindowPresentation {
         guard canManageCategories(state: state) else { return false }
         // A reopened manager starts without the last session's messages.
         state.clearCategoryIssues()
+        cancelMovement()
         isManagingCategories = true
         return true
     }
@@ -198,7 +223,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        presentation.dragSession.cancel()
+        presentation.cancelMovement()
         presentation.cancelDeletion()
         presentation.dismissCategoryManager()
     }

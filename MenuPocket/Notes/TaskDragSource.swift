@@ -18,6 +18,9 @@ final class TaskDragSession {
     private(set) var active: Payload?
     private(set) var isDragging = false
     var hoveredRequest: TaskMoveRequest?
+    @ObservationIgnored private var scrollTimer: Timer?
+    @ObservationIgnored private weak var scrollView: NSScrollView?
+    @ObservationIgnored private weak var dragState: DailyNotesState?
     @ObservationIgnored private var nativeToken: UUID?
     @ObservationIgnored private weak var nativeSource: TaskDragHandleView?
 
@@ -32,6 +35,19 @@ final class TaskDragSession {
         nativeToken = payload.token
         nativeSource = source
         active = payload
+        scrollView = source.enclosingScrollView
+        dragState = state
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
+            let hasOwner = MainActor.assumeIsolated {
+                guard let self else { return false }
+                self.scrollAtPointer()
+                return true
+            }
+            if !hasOwner { timer.invalidate() }
+        }
+        scrollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
         return payload
     }
 
@@ -54,6 +70,7 @@ final class TaskDragSession {
 
     func consume(_ payload: Payload) -> Bool {
         guard active == payload, nativeToken == payload.token else { return false }
+        stopScrolling()
         active = nil
         hoveredRequest = nil
         return true
@@ -62,18 +79,69 @@ final class TaskDragSession {
     /// Invalidation removes feedback/authorization immediately, but does not
     /// allow another drag until the old native session actually ends.
     func cancel() {
+        stopScrolling()
         active = nil
         hoveredRequest = nil
     }
 
     func ended(token: UUID) {
         guard nativeToken == token else { return }
+        stopScrolling()
         active = nil
         hoveredRequest = nil
         nativeToken = nil
         nativeSource = nil
         isDragging = false
     }
+
+    private func stopScrolling() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        scrollView = nil
+        dragState = nil
+    }
+
+    /// Uses the existing SwiftUI scroll view's clip viewport; no extra scroll owner.
+    func scrollAtPointer(screenPoint: NSPoint = NSEvent.mouseLocation) {
+        guard let payload = active, let state = dragState,
+              state.taskWindowPresentation.canMoveTask(state: state),
+              state.todayKey == payload.dayKey,
+              state.notes.contains(where: {
+                  $0.id == payload.taskID && TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
+              }) else { cancel(); return }
+        guard let scrollView, let window = scrollView.window, window.isVisible,
+              let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let point = clip.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        let viewport = clip.bounds
+        let topDownPoint = NSPoint(x: point.x - viewport.minX,
+                                   y: clip.isFlipped ? point.y - viewport.minY : viewport.maxY - point.y)
+        let step = Self.edgeStep(point: topDownPoint,
+                                 viewport: NSRect(origin: .zero, size: viewport.size))
+        guard step != 0 else { return }
+        // Account for AppKit document orientation, and constrain both ends.
+        var next = viewport
+        next.origin.y += document.isFlipped ? step : -step
+        next = clip.constrainBoundsRect(next)
+        guard next.origin != viewport.origin else { return }
+        hoveredRequest = nil // Old row halves no longer describe the pointer.
+        clip.scroll(to: next.origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
+
+    /// At most 12 points per 30 Hz tick; outside the viewport never scrolls.
+    static func edgeStep(point: NSPoint, viewport: NSRect) -> CGFloat {
+        guard viewport.contains(point), viewport.height > 0 else { return 0 }
+        let edge = min(40, viewport.height / 2)
+        if point.y < viewport.minY + edge {
+            return -12 * (1 - (point.y - viewport.minY) / edge)
+        }
+        if point.y > viewport.maxY - edge {
+            return 12 * (1 - (viewport.maxY - point.y) / edge)
+        }
+        return 0
+    }
+
 }
 
 struct TaskDragHandle: NSViewRepresentable {
@@ -101,7 +169,7 @@ struct TaskDragHandle: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: TaskDragHandleView, coordinator: ()) {
-        view.invalidateDrag()
+        view.clearMouseTracking()
     }
 }
 
@@ -177,13 +245,10 @@ final class TaskDragHandleView: NSView, NSDraggingSource {
         mouseDownPoint = nil
     }
 
-    func invalidateDrag() {
-        mouseDownPoint = nil
-        if sourceToken != nil { sourceSession?.cancel() }
-    }
+    func clearMouseTracking() { mouseDownPoint = nil }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil { invalidateDrag() }
+        if newWindow == nil { clearMouseTracking() }
         super.viewWillMove(toWindow: newWindow)
     }
 
