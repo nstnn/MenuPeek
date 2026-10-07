@@ -40,6 +40,11 @@ final class TaskWindowPresentation {
             !isManagingCategories
     }
 
+    /// Shared eligibility for drag start, drop, and row-menu movement.
+    func canMoveTask(state: DailyNotesState) -> Bool {
+        state.canMoveTasks && deletionTarget == nil && !isManagingCategories
+    }
+
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
         guard canAddTask(state: state) else { return false }
@@ -153,7 +158,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
 
     init(state: DailyNotesState, onSettings: @escaping () -> Void) {
         self.state = state
-        let presentation = TaskWindowPresentation()
+        let presentation = state.taskWindowPresentation
         self.presentation = presentation
         let hostingController = NSHostingController(
             rootView: TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)

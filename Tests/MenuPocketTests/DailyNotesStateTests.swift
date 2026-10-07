@@ -1760,6 +1760,205 @@ final class DailyNotesStateTests: XCTestCase {
         await Task.yield()
     }
 
+    func testMovePublishesCommittedSnapshotAndOnlyExpandsDestination() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let source = note("Done", day: "2026-09-27", createdAt: 1, completedAt: Date())
+        let anchor = Note(id: UUID(), text: "Work", dayKey: source.dayKey,
+                          createdAt: Date(), completedAt: nil, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [source, anchor], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Pending new task"
+        state.draftCategoryID = work.id
+        state.beginEditing(id: anchor.id)
+        state.editDraft = "Recovery text"
+        store.saved.removeAll { $0.id == anchor.id }
+        state.refresh()
+        state.editDraft = "Unowned edit draft"
+        state.editCategoryID = work.id
+        let recovery = state.recoveredEdit
+        state.categoryPreferences.rememberLastUsed(work.id)
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let progress = state.availableProgress
+        store.onMove = {
+            XCTAssertEqual(state.notes, [source], "No proposal published before commit")
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        }
+        let request = moveRequest(source, destination: .category(work.id))
+        let outcome = state.moveTask(request)
+        guard case let .changed(saved) = outcome else { return XCTFail("Expected saved change") }
+        XCTAssertEqual(state.notes, saved)
+        XCTAssertEqual(state.notes.map(\.id), [source.id])
+        XCTAssertEqual(state.notes.first?.categoryID, work.id)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertEqual(state.notes.first?.completedAt, source.completedAt)
+        XCTAssertEqual(state.notes.first?.createdAt, source.createdAt)
+        XCTAssertEqual(state.notes.first?.text, source.text)
+        XCTAssertEqual(state.draft, "Pending new task")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.editDraft, "Unowned edit draft")
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertEqual(state.recoveredEdit, recovery)
+        XCTAssertEqual(state.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(state.categoryPreferences.collapsedGroupIDs, [.general])
+        XCTAssertNil(state.taskIssue)
+    }
+
+    func testMoveFailureRetryAndReadRecoveryKeepDistinctIssues() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Keep"
+        state.editDraft = "Also keep"
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        let request = moveRequest(a)
+        store.failWrite = .move
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertEqual(state.taskIssue, .move)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
+        store.failSnapshotRead = .notes
+        state.refresh()
+        let attempts = store.moveAttempts
+        XCTAssertFalse(state.taskWindowPresentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(store.moveAttempts, attempts)
+        XCTAssertEqual(state.issue, .load)
+        XCTAssertEqual(state.taskIssue, .move)
+        store.failSnapshotRead = nil
+        state.refresh()
+        XCTAssertEqual(state.issue, .move)
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertEqual(state.draft, "Keep")
+        XCTAssertEqual(state.editDraft, "Also keep")
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.general))
+        store.failWrite = nil
+        XCTAssertEqual(state.moveTask(request), .changed([b, a]))
+        XCTAssertEqual(state.notes, [b, a])
+        XCTAssertNil(state.issue)
+    }
+
+    func testMoveGuardsRevalidateEditDeletionManagerAndTermination() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        let request = moveRequest(a)
+        XCTAssertTrue(presentation.canMoveTask(state: state))
+        state.beginEditing(id: a.id)
+        state.editDraft = "Unsaved edit"
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(state.editDraft, "Unsaved edit")
+        state.cancelEditing()
+        presentation.requestDeletion(id: b.id, state: state)
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        presentation.dismissCategoryManager()
+        state.stopForTermination()
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(state.notes, [a, b])
+    }
+
+    func testMoveUnchangedAndStaleRequestsPreserveSnapshotAndCollapse() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Draft"
+        state.editDraft = "Edit draft"
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let collapsed = state.categoryPreferences.collapsedGroupIDs
+        XCTAssertEqual(state.moveTask(moveRequest(a)), .unchanged)
+        let missing = note("Missing", day: a.dayKey, createdAt: 2)
+        XCTAssertEqual(state.moveTask(moveRequest(missing)), .rejected(.taskNotFound))
+        XCTAssertEqual(state.moveTask(moveRequest(a, destination: .category(UUID()))),
+                       .rejected(.destinationNotFound))
+        let wrongSource = TaskMoveRequest(taskID: a.id, expectedDayKey: a.dayKey,
+                                         expectedSourceGroup: .category(work.id),
+                                         destinationGroup: .general, placement: .endOfGroup)
+        XCTAssertEqual(state.moveTask(wrongSource), .rejected(.sourceChanged))
+        XCTAssertEqual(state.moveTask(moveRequest(a, placement: .before(UUID()))), .rejected(.invalidAnchor))
+        // Storage sees a removal that the displayed snapshot has not seen yet.
+        store.savedCategories = []
+        XCTAssertEqual(state.moveTask(moveRequest(a, destination: .category(work.id))),
+                       .rejected(.destinationNotFound))
+        store.saved = []
+        XCTAssertEqual(state.moveTask(moveRequest(a)), .rejected(.taskNotFound))
+        XCTAssertEqual(state.notes, [a])
+        XCTAssertEqual(state.draft, "Draft")
+        XCTAssertEqual(state.editDraft, "Edit draft")
+        XCTAssertEqual(state.categoryPreferences.collapsedGroupIDs, collapsed)
+    }
+
+    func testMoveRolloverRejectsPayloadEvenAfterNewDayRefresh() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.draft = "Keep new"
+        state.beginEditing(id: a.id)
+        state.editDraft = "Keep recovered"
+        let request = moveRequest(a)
+        current = instant("2026-09-28T00:01:00-04:00")
+        XCTAssertFalse(state.taskWindowPresentation.canMoveTask(state: state))
+        XCTAssertEqual(state.moveTask(request), .rejected(.dayChanged))
+        XCTAssertEqual(state.todayKey, "2026-09-28")
+        XCTAssertEqual(state.moveTask(request), .rejected(.dayChanged))
+        XCTAssertEqual(state.recoveredEditDraft, "Keep recovered")
+        XCTAssertEqual(state.draft, "Keep new")
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(store.saved, [a])
+    }
+
+    func testSQLiteStateMovePersistsOnRefreshAndReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("StateMove-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let store = try SQLiteNoteRepository(databaseURL: url)
+        let category = try store.createCategory(name: "Work")
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        try store.add(a)
+        try store.add(b)
+        let state = DailyNotesState(repositoryFactory: { store },
+                                   day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        state.startup()
+        guard case .changed = state.moveTask(moveRequest(a, destination: .category(category.id))) else {
+            return XCTFail("Expected committed move")
+        }
+        let saved = state.notes
+        state.refresh()
+        XCTAssertEqual(state.notes, saved)
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: url).notes(for: a.dayKey), saved)
+        XCTAssertEqual(saved.map(\.id), [b.id, a.id])
+        XCTAssertEqual(saved.last?.categoryID, category.id)
+    }
+
+    private func moveRequest(_ note: Note, destination: TaskGroupID = .general,
+                             placement: TaskMovePlacement = .endOfGroup) -> TaskMoveRequest {
+        TaskMoveRequest(taskID: note.id, expectedDayKey: note.dayKey,
+                        expectedSourceGroup: TaskGroupID(categoryID: note.categoryID),
+                        destinationGroup: destination, placement: placement)
+    }
+
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date,
                            preferences: TaskCategoryPreferences? = nil) -> DailyNotesState {
         DailyNotesState(repositoryFactory: { store }, day: makeDay(now: now),
@@ -1826,6 +2025,8 @@ private final class FakeNoteRepository: NoteRepository {
     var categoryWriteAttempts = 0
     var failCount = false
     var failWrite: DailyNotesIssue?
+    var moveAttempts = 0
+    var onMove: (() -> Void)?
 
     init(notes: [Note] = [], categories: [TaskCategory] = []) {
         saved = notes
@@ -1833,6 +2034,9 @@ private final class FakeNoteRepository: NoteRepository {
     }
 
     func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome {
+        moveAttempts += 1
+        onMove?()
+        if failWrite == .move { throw FakeFailure.failed }
         let outcome = TaskMovePlanner.plan(request, dayKey: request.expectedDayKey,
                                            notes: try notes(for: request.expectedDayKey),
                                            categories: try categories())

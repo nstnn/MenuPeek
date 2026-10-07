@@ -157,6 +157,7 @@ struct TaskWindowView: View {
         case .complete: "Could not update task. Try again."
         case .edit: "Could not save edit. Try again."
         case .delete: "Could not delete task. Try again."
+        case .move: "Could not move task. Try again."
         default: nil
         }
     }
