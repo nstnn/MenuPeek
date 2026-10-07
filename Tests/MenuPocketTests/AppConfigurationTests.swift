@@ -1627,6 +1627,173 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testGlanceAddTaskTargetsTodayFromIdleLaterAndIsDisabledByEveryGuard() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let task = LaterTask(id: UUID(), text: "Later row", createdAt: Date(), completedAt: nil)
+        fixture.repository.savedLater = [task]
+        fixture.launch()
+        let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController?.presentation)
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.laterDraft = "Retained Later draft"
+        let reads = fixture.repository.readAttempts
+        var add = try glanceItem("Add Task…", status)
+        XCTAssertEqual(fixture.repository.readAttempts, reads, "Building the glance must not read storage")
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertTrue(add.isEnabled)
+        try performGlanceItem("Add Task…", status)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertTrue(presentation.isComposerVisible(in: .today))
+        XCTAssertFalse(presentation.isComposerVisible(in: .later))
+        XCTAssertEqual(presentation.newTaskRequest?.destination, .today)
+        XCTAssertEqual(fixture.state.laterDraft, "Retained Later draft")
+
+        presentation.hideComposer(in: .today)
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.beginEditingLater(id: task.id)
+        fixture.state.laterEditDraft = "Protected edit"
+        add = try glanceItem("Add Task…", status)
+        XCTAssertFalse(add.isEnabled)
+        try performGlanceItem("Add Task…", status)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertEqual(fixture.state.laterEditDraft, "Protected edit")
+        XCTAssertNil(presentation.newTaskRequest)
+        fixture.state.cancelEditingLater()
+        XCTAssertTrue(presentation.requestDeletion(id: task.id, state: fixture.state))
+        XCTAssertFalse(try glanceItem("Add Task…", status).isEnabled)
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertFalse(try glanceItem("Add Task…", status).isEnabled)
+        presentation.dismissCategoryManager()
+        XCTAssertTrue(try glanceItem("Add Task…", status).isEnabled)
+        fixture.repository.failTodayRead = true
+        fixture.state.refresh()
+        add = try glanceItem("Add Task…", status)
+        XCTAssertFalse(add.isEnabled)
+        try performGlanceItem("Add Task…", status)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertNil(presentation.newTaskRequest)
+        XCTAssertEqual(fixture.state.laterDraft, "Retained Later draft")
+    }
+
+    @MainActor
+    func testGlanceAddTaskCreatesTheWindowOnTodayAfterLoginLaunch() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        let add = try glanceItem("Add Task…", status)
+        XCTAssertNil(fixture.delegate.taskWindowController, "Building the glance must not create a window")
+        XCTAssertTrue(add.isEnabled)
+        try performGlanceItem("Add Task…", status)
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        XCTAssertTrue(controller.window?.isVisible == true)
+        XCTAssertEqual(controller.presentation.selectedDestination, .today)
+        XCTAssertTrue(controller.presentation.isComposerVisible(in: .today))
+        XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
+    }
+
+    @MainActor
+    func testGlanceLaterLineOpensLaterLikeCommandTwoAndKeepsGuardedTodayEdit() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let today = Note(id: UUID(), text: "Today row", dayKey: NoteDay().keys().today,
+                         createdAt: Date(), completedAt: nil)
+        fixture.repository.saved = [today]
+        fixture.repository.savedLater = [LaterTask(id: UUID(), text: "Later row", createdAt: Date(), completedAt: nil)]
+        fixture.launch()
+        let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController?.presentation)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        try performGlanceItem("Later · 1 remaining", status)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+
+        XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        try performGlanceItem("Later · 1 remaining", status)
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+
+        XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
+        fixture.state.beginEditing(id: today.id)
+        fixture.state.editDraft = "Protected Today edit"
+        try performGlanceItem("Later · 1 remaining", status)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertEqual(fixture.state.editingNoteID, today.id)
+        XCTAssertEqual(fixture.state.editDraft, "Protected Today edit")
+        fixture.state.cancelEditing()
+
+        // ⌘2 still uses the same route after the refactor.
+        let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
+        XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("2", keyCode: 19)))
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        try performGlanceItem("Today row", status)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+    }
+
+    @MainActor
+    func testGlanceRetryRefreshesAndActionsStopOnceTerminationBegins() throws {
+        let fixture = try AppLifecycleFixture(context: .login)
+        defer { fixture.cleanup() }
+        fixture.repository.failTodayRead = true
+        fixture.repository.savedLater = [LaterTask(id: UUID(), text: "Later row", createdAt: Date(), completedAt: nil)]
+        fixture.launch()
+        let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
+        XCTAssertTrue(try glanceItem("Retry", status).isEnabled)
+        XCTAssertNil(fixture.state.availableProgress)
+        fixture.repository.failTodayRead = false
+        try performGlanceItem("Retry", status)
+        XCTAssertNotNil(fixture.state.availableProgress)
+        XCTAssertNil(fixture.delegate.taskWindowController, "Retry must not raise a window")
+
+        // Menus captured before termination: one available (Later line), one
+        // unavailable (Retry). Quit is not sent, since a missing guard would
+        // terminate the test host; it shares the same isTerminating guard.
+        let menu = try XCTUnwrap(status.makeGlanceMenu?())
+        fixture.repository.failTodayRead = true
+        fixture.state.refresh()
+        let unavailableMenu = try XCTUnwrap(status.makeGlanceMenu?())
+        fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        XCTAssertNil(status.makeGlanceMenu?())
+        XCTAssertNil(status.statusItem)
+        fixture.repository.failTodayRead = false
+        let reads = fixture.repository.readAttempts
+        for (captured, title) in [(menu, "Open Today"), (menu, "Add Task…"), (menu, "Settings…"),
+                                  (menu, "Later · 1 remaining"), (unavailableMenu, "Retry")] {
+            let index = captured.indexOfItem(withTitle: title)
+            XCTAssertGreaterThanOrEqual(index, 0, title)
+            if index >= 0 { captured.performActionForItem(at: index) }
+        }
+        XCTAssertNil(fixture.state.availableProgress, "Retry must not refresh after termination begins")
+        XCTAssertNil(fixture.delegate.taskWindowController)
+        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertEqual(fixture.repository.readAttempts, reads)
+    }
+
+    @MainActor
+    private func glanceItem(_ title: String, _ status: TaskStatusItemController,
+                            file: StaticString = #filePath, line: UInt = #line) throws -> NSMenuItem {
+        let menu = try XCTUnwrap(status.makeGlanceMenu?(), file: file, line: line)
+        XCTAssertNil(status.statusItem?.menu, "The glance stays detached from the status item", file: file, line: line)
+        return try XCTUnwrap(menu.items.first { $0.title == title }, "No glance item \(title)", file: file, line: line)
+    }
+
+    /// Sends the item's action whether or not it is enabled, to prove disabled
+    /// actions are also guarded. Builds a fresh menu, as each right-click does.
+    @MainActor
+    private func performGlanceItem(_ title: String, _ status: TaskStatusItemController,
+                                   file: StaticString = #filePath, line: UInt = #line) throws {
+        let menu = try XCTUnwrap(status.makeGlanceMenu?(), file: file, line: line)
+        let item = try XCTUnwrap(menu.items.first { $0.title == title }, "No glance item \(title)",
+                                 file: file, line: line)
+        let action = try XCTUnwrap(item.action, file: file, line: line)
+        XCTAssertTrue(NSApplication.shared.sendAction(action, to: item.target, from: item), file: file, line: line)
+        withExtendedLifetime(menu) {}
+    }
+
+    @MainActor
     func testQuickAddFromLaterPreservesBothDraftsCategoriesSelectionAndProgress() async throws {
         let fixture = try AppLifecycleFixture(context: .manual, quickAddEnabled: true)
         defer { fixture.cleanup() }
