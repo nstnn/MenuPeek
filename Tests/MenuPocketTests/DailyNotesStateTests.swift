@@ -1208,6 +1208,111 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertNil(releasedController)
     }
 
+    func testStatusItemRoutesRightAndControlClicksToADetachedGlance() async throws {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        var clicks = 0
+        var builds = 0
+        var attachedDuringTracking: [NSMenu?] = []
+        weak var weakController: TaskStatusItemController?
+        let controller = TaskStatusItemController(
+            state: state, showTasks: { clicks += 1 },
+            makeGlanceMenu: { builds += 1; return NSMenu(title: "Glance \(builds)") },
+            presentGlanceMenu: { _ in
+                attachedDuringTracking.append(weakController?.statusItem?.menu)
+                // A click that arrives while the menu tracks neither nests nor opens Today.
+                weakController?.handlePress(self.mouseEvent(.rightMouseUp))
+                weakController?.handlePress(nil)
+            }
+        )
+        weakController = controller
+        defer { controller.remove() }
+        let button = try XCTUnwrap(controller.statusItem?.button)
+
+        controller.handlePress(mouseEvent(.rightMouseUp))
+        controller.handlePress(mouseEvent(.leftMouseUp, modifiers: .control))
+        XCTAssertEqual(builds, 2)
+        XCTAssertEqual(attachedDuringTracking.map { $0?.title }, ["Glance 1", "Glance 2"])
+        XCTAssertNil(controller.statusItem?.menu)
+        XCTAssertEqual(clicks, 0)
+
+        controller.handlePress(mouseEvent(.leftMouseUp))
+        controller.handlePress(nil)
+        button.performClick(nil)
+        XCTAssertEqual(clicks, 3)
+        XCTAssertEqual(builds, 2)
+        XCTAssertNil(controller.statusItem?.menu)
+
+        // The right-mouse-up bit is added to the primary click's original mask.
+        let plain = TaskStatusItemController(state: state, showTasks: {})
+        defer { plain.remove() }
+        let plainButton = try XCTUnwrap(plain.statusItem?.button)
+        let plainMask = plainButton.sendAction(on: .leftMouseUp)
+        plainButton.sendAction(on: NSEvent.EventTypeMask(rawValue: UInt64(plainMask)))
+        let mask = button.sendAction(on: .leftMouseUp)
+        button.sendAction(on: NSEvent.EventTypeMask(rawValue: UInt64(mask)))
+        XCTAssertEqual(UInt64(mask), NSEvent.EventTypeMask(rawValue: UInt64(plainMask)).union(.rightMouseUp).rawValue)
+
+        // Tooltips mention the quick look only when the glance exists; the label is unchanged.
+        let hint = "Right-click for a quick look."
+        XCTAssertEqual(button.toolTip, "MenuPocket, today's tasks are unavailable. Open the task window to load or retry. \(hint)")
+        XCTAssertFalse(plainButton.toolTip?.contains(hint) == true)
+        state.startup()
+        try await waitForStatusTitle("0/0", controller: controller)
+        XCTAssertEqual(button.toolTip, "MenuPocket, today, 0 of 0 tasks completed. Click to show tasks. \(hint)")
+        XCTAssertEqual(button.accessibilityLabel(), "MenuPocket, today, 0 of 0 tasks completed")
+        XCTAssertFalse(plainButton.toolTip?.contains(hint) == true)
+
+        // VoiceOver reaches the glance through a custom action on the button.
+        let actions = try XCTUnwrap(button.accessibilityCustomActions())
+        XCTAssertEqual(actions.map(\.name), ["Show quick look"])
+        XCTAssertTrue(actions.first?.target === controller)
+        XCTAssertNil(plainButton.accessibilityCustomActions()?.first)
+    }
+
+    func testRemovingStatusItemWhileTheGlanceTracksLeavesNoMenu() throws {
+        let store = FakeNoteRepository()
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        weak var weakController: TaskStatusItemController?
+        var clicks = 0
+        var removedItem: NSStatusItem?
+        var nestedResult: Bool?
+        let controller = TaskStatusItemController(
+            state: state, showTasks: { clicks += 1 }, makeGlanceMenu: { NSMenu(title: "Tracked") },
+            presentGlanceMenu: { _ in
+                removedItem = weakController?.statusItem
+                XCTAssertEqual(removedItem?.menu?.title, "Tracked")
+                nestedResult = weakController?.showGlance()
+                weakController?.remove()
+            }
+        )
+        weakController = controller
+        defer { controller.remove() }
+        XCTAssertTrue(controller.showGlance())
+        XCTAssertEqual(nestedResult, false, "A glance already tracking is not presented again")
+        XCTAssertNotNil(removedItem)
+        XCTAssertNil(removedItem?.menu, "The removed item keeps no menu")
+        XCTAssertNil(controller.statusItem)
+        XCTAssertFalse(controller.showGlance())
+        controller.handlePress(nil)
+        XCTAssertEqual(clicks, 1)
+        XCTAssertNil(controller.statusItem)
+
+        // A provider with nothing to show reports that no glance appeared.
+        var presented = false
+        let empty = TaskStatusItemController(state: state, showTasks: {}, makeGlanceMenu: { nil },
+                                             presentGlanceMenu: { _ in presented = true })
+        defer { empty.remove() }
+        XCTAssertFalse(empty.showGlance())
+        XCTAssertFalse(presented)
+        XCTAssertNil(empty.statusItem?.menu)
+    }
+
+    private func mouseEvent(_ type: NSEvent.EventType, modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
+        NSEvent.mouseEvent(with: type, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                           windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+    }
+
     private func waitForStatusTitle(_ title: String, controller: TaskStatusItemController) async throws {
         for _ in 0..<100 {
             if controller.statusItem?.button?.title == title { return }

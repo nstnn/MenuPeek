@@ -59,9 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApplication.shared.setActivationPolicy(.regular)
         installApplicationMenu()
         dailyNotesState.startup()
-        taskStatusItemController = TaskStatusItemController(state: dailyNotesState) { [weak self] in
-            self?.showToday()
-        }
+        taskStatusItemController = TaskStatusItemController(
+            state: dailyNotesState,
+            showTasks: { [weak self] in self?.showToday() },
+            makeGlanceMenu: { [weak self] in self?.makeGlanceMenu() }
+        )
         // Registers in both launch contexts; a press never raises a window on its own.
         model.startQuickAdd { [weak self] in self?.quickAddHotKeyPressed() }
         if context == .manual { showTasks() }
@@ -119,7 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// View > Today (⌘1) and Later (⌘2). Opens the window when needed and
     /// leaves a guarded interaction in place instead of forcing the switch.
     @objc func showDestination(_ sender: NSMenuItem) {
-        guard !isTerminating, let destination = Self.destination(forMenuTag: sender.tag) else { return }
+        guard let destination = Self.destination(forMenuTag: sender.tag) else { return }
+        show(destination)
+    }
+
+    private func show(_ destination: TaskListDestination) {
+        guard !isTerminating else { return }
         showTasks()
         taskWindowController?.presentation.selectDestination(destination, state: dailyNotesState)
     }
@@ -191,9 +198,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let presentation = taskWindowController?.presentation {
             return presentation.canAddTask(state: dailyNotesState)
         }
-        // A fresh window starts at Today.
-        return dailyNotesState.availableProgress != nil &&
+        return canAddTaskToFreshWindow
+    }
+
+    /// The glance's Add Task… targets Today even when Later is selected.
+    private var canAddTaskToToday: Bool {
+        guard !isTerminating else { return false }
+        if let presentation = taskWindowController?.presentation {
+            return presentation.canAddTask(to: .today, state: dailyNotesState)
+        }
+        return canAddTaskToFreshWindow
+    }
+
+    /// A fresh window starts at Today with nothing guarded but the state's edits.
+    private var canAddTaskToFreshWindow: Bool {
+        dailyNotesState.availableProgress != nil &&
             dailyNotesState.editingNoteID == nil && dailyNotesState.editingLaterTaskID == nil
+    }
+
+    private func addTaskToToday() {
+        guard !isTerminating, canAddTaskToToday else { return }
+        showToday()
+        taskWindowController?.presentation.requestNewTask(in: .today, state: dailyNotesState)
+    }
+
+    /// Built from the shared state's published values on each right-click.
+    /// Reading them never opens storage or refreshes; Retry is the only refresh.
+    private func makeGlanceMenu() -> NSMenu? {
+        guard hasFinishedLaunching, !isTerminating else { return nil }
+        let state = dailyNotesState
+        let glance = MenuBarGlance(dayKey: state.todayKey ?? NoteDay().keys().today,
+                                   progress: state.availableProgress, groups: state.groups,
+                                   laterRemainingCount: state.availableLaterRemainingCount,
+                                   canAddTask: canAddTaskToToday)
+        let actions = MenuBarGlanceActions(
+            openToday: { [weak self] in self?.showToday() },
+            addTask: { [weak self] in self?.addTaskToToday() },
+            openLater: { [weak self] in self?.show(.later) },
+            showSettings: { [weak self] in self?.showSettings() },
+            quit: { [weak self] in
+                guard let self, !self.isTerminating else { return }
+                NSApplication.shared.terminate(nil)
+            },
+            retry: { [weak self] in
+                guard let self, !self.isTerminating else { return }
+                self.dailyNotesState.refresh()
+            }
+        )
+        return MenuBarGlanceMenu.make(glance, actions: actions)
     }
 
     static func appearance(for theme: AppTheme) -> NSAppearance? {

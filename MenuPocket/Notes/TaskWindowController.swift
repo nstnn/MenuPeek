@@ -218,7 +218,13 @@ final class TaskWindowPresentation {
 
     /// Also false while the category manager is open, so no task command acts behind it.
     func canAddTask(state: DailyNotesState) -> Bool {
-        !isTerminating && isAvailable(selectedDestination, state: state) && !hasGuardedInteraction(state: state)
+        canAddTask(to: selectedDestination, state: state)
+    }
+
+    /// Whether selecting `destination` and then adding would succeed. The menu
+    /// bar glance uses it for Today, whichever list is selected.
+    func canAddTask(to destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        !isTerminating && isAvailable(destination, state: state) && !hasGuardedInteraction(state: state)
     }
 
     @discardableResult
@@ -253,6 +259,15 @@ final class TaskWindowPresentation {
               showComposer(in: selectedDestination, state: state) else { return false }
         newTaskRequest = NewTaskRequest(id: UUID(), destination: selectedDestination)
         return true
+    }
+
+    /// Selects `destination`, then opens its composer like `requestNewTask`.
+    /// Does nothing while a guarded interaction would block the switch.
+    @discardableResult
+    func requestNewTask(in destination: TaskListDestination, state: DailyNotesState) -> Bool {
+        guard canAddTask(to: destination, state: state),
+              selectDestination(destination, state: state) else { return false }
+        return requestNewTask(state: state)
     }
 
     func consumeNewTaskRequest(in destination: TaskListDestination) {
