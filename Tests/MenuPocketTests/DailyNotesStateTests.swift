@@ -57,6 +57,232 @@ final class DailyNotesStateTests: XCTestCase {
         }
     }
 
+    func testDragSessionBeginMintsOneReservedTokenForEligibleTodayTask() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = Note(id: UUID(), text: "A", dayKey: "2026-09-27", createdAt: Date(timeIntervalSince1970: 1),
+                     completedAt: nil, categoryID: work.id)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let old = note("Old", day: "2026-09-26", createdAt: 3)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b, old], categories: [work]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        XCTAssertNil(session.begin(taskID: UUID(), state: state, source: source))
+        XCTAssertNil(session.begin(taskID: old.id, state: state, source: source))
+        XCTAssertFalse(session.isDragging)
+
+        let first = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        XCTAssertEqual(first.taskID, a.id)
+        XCTAssertEqual(first.dayKey, a.dayKey)
+        XCTAssertEqual(first.sourceGroup, .category(work.id))
+        XCTAssertEqual(session.active, first)
+        XCTAssertTrue(session.isDragging)
+        XCTAssertNil(session.begin(taskID: b.id, state: state, source: TaskDragHandleView(frame: .zero)),
+                     "Only one native session may be reserved")
+        session.ended(token: UUID())
+        XCTAssertEqual(session.active, first, "A foreign session end must not release the reservation")
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: first.token)
+        XCTAssertNil(session.active)
+        XCTAssertFalse(session.isDragging)
+
+        let second = try XCTUnwrap(session.begin(taskID: b.id, state: state, source: source))
+        defer { session.ended(token: second.token) }
+        XCTAssertEqual(second.sourceGroup, .general)
+        XCTAssertNotEqual(second.token, first.token)
+    }
+
+    func testDragSessionBeginIsRefusedBehindEveryMovementGuard() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let guards: [(String, (DailyNotesState) -> Void)] = [
+            ("inline edit", { $0.beginEditing(id: a.id) }),
+            ("deletion confirmation", { $0.taskWindowPresentation.requestDeletion(id: a.id, state: $0) }),
+            ("category manager", { XCTAssertTrue($0.taskWindowPresentation.showCategoryManager(state: $0)) }),
+            ("termination", { $0.stopForTermination() })
+        ]
+        for (name, apply) in guards {
+            let state = makeState(store: FakeNoteRepository(notes: [a]),
+                                  now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            apply(state)
+            let session = state.taskWindowPresentation.dragSession
+            XCTAssertNil(session.begin(taskID: a.id, state: state, source: TaskDragHandleView(frame: .zero)), name)
+            XCTAssertFalse(session.isDragging, name)
+            XCTAssertNil(session.active, name)
+        }
+        let store = FakeNoteRepository(notes: [a])
+        store.failSnapshotRead = .notes
+        let unavailable = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        unavailable.startup()
+        XCTAssertNil(unavailable.taskWindowPresentation.dragSession.begin(
+            taskID: a.id, state: unavailable, source: TaskDragHandleView(frame: .zero)), "unavailable read")
+    }
+
+    func testDragPayloadValidationAcceptsOnlyLiveLocalSourceAndPrivateToken() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close(); session.ended(token: payload.token) }
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window, point: .zero)
+        defer { info.draggingPasteboard.releaseGlobally() }
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+
+        info.draggingSource = TaskDragHandleView(frame: .zero)
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Another handle is not this session")
+        info.draggingSource = nil
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "External drag")
+        info.draggingSource = source
+
+        let pasteboard = info.draggingPasteboard
+        func write(_ items: [[NSPasteboard.PasteboardType: String]]) {
+            pasteboard.clearContents()
+            pasteboard.writeObjects(items.map { values in
+                let item = NSPasteboardItem()
+                for (type, value) in values { item.setString(value, forType: type) }
+                return item
+            })
+        }
+        let type = TaskDragSession.pasteboardType
+        write([[type: UUID().uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Unmatched token")
+        write([[.string: payload.token.uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Generic text")
+        write([[type: payload.token.uuidString, .string: "A"]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Extra representation")
+        write([[type: payload.token.uuidString], [type: payload.token.uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Bulk drag")
+        write([[type: payload.token.uuidString]])
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+
+        state.beginEditing(id: a.id)
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Guard appears mid-drag")
+        state.cancelEditing()
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+        session.cancel()
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Cancelled token")
+        XCTAssertFalse(session.consume(payload))
+        XCTAssertTrue(session.isDragging, "Native reservation lasts until source end")
+    }
+
+    func testDragPayloadIsInvalidatedWhenSourceTaskChangesGroupOrDay() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        var now = instant("2026-09-27T12:00:00-04:00")
+        let state = makeState(store: FakeNoteRepository(notes: [a], categories: [work]), now: { now })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window, point: .zero)
+        defer { info.draggingPasteboard.releaseGlobally() }
+        guard case .changed? = state.moveTask(moveRequest(a, destination: .category(work.id))) else {
+            return XCTFail("Expected a saved move")
+        }
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Source group changed")
+        session.ended(token: payload.token)
+
+        let moved = try XCTUnwrap(state.notes.first)
+        let next = try XCTUnwrap(session.begin(taskID: moved.id, state: state, source: source))
+        let nextInfo = MovementDraggingInfo(source: source, token: next.token, window: window, point: .zero)
+        defer { nextInfo.draggingPasteboard.releaseGlobally(); session.ended(token: next.token) }
+        XCTAssertEqual(session.validatedPayload(for: nextInfo, state: state), next)
+        now = instant("2026-09-28T00:01:00-04:00")
+        state.refresh()
+        XCTAssertNil(session.validatedPayload(for: nextInfo, state: state), "Day rolled over")
+    }
+
+    func testDragConsumeIsOneShotAndLifecycleCancellationClearsFeedback() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        let session = presentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        session.hoveredRequest = moveRequest(a)
+        XCTAssertTrue(session.consume(payload))
+        XCTAssertFalse(session.consume(payload), "A drop consumes a session once")
+        XCTAssertNil(session.active)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: payload.token)
+        XCTAssertFalse(session.isDragging)
+
+        let window = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        session.hoveredRequest = moveRequest(a)
+        presentation.cancelMovement() // Window close/teardown and modal routes.
+        XCTAssertNil(session.active)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.begin(taskID: a.id, state: state, source: source),
+                     "No new drag until the cancelled native session ends")
+        session.ended(token: window.token)
+
+        let terminating = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        state.stopForTermination()
+        XCTAssertNil(session.active)
+        session.ended(token: terminating.token)
+        XCTAssertFalse(session.isDragging)
+    }
+
+    func testDragHandleNeedsEnabledThresholdAndKeepsNativeControlsOutOfDragging() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let handle = TaskDragHandleView(frame: NSRect(x: 10, y: 10, width: 16, height: 20))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
+        content.addSubview(handle)
+        let window = NSWindow(contentRect: content.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        defer { window.close() }
+        handle.taskID = a.id
+        handle.state = state
+        handle.session = session
+        XCTAssertFalse(handle.acceptsFirstResponder, "The handle never takes keyboard focus")
+        XCTAssertFalse(handle.mouseDownCanMoveWindow)
+
+        func event(_ type: NSEvent.EventType, dx: CGFloat = 0) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: 18 + dx, y: 20),
+                                             modifierFlags: [], timestamp: 0,
+                                             windowNumber: window.windowNumber, context: nil,
+                                             eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        handle.isEnabled = false
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging, "A disabled handle never starts")
+
+        handle.isEnabled = true
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 3))
+        XCTAssertFalse(session.isDragging, "Below the 4 pt threshold a click stays a click")
+        handle.mouseUp(with: try event(.leftMouseUp, dx: 3))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging, "Mouse-up ends tracking")
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.clearMouseTracking() // SwiftUI dismantle/unmount.
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging)
+        XCTAssertNil(session.active)
+    }
+
     func testSavedMovementRevealIsSupersededAndCancelledByNewAction() throws {
         let a = note("A", day: "2026-09-27", createdAt: 1)
         let b = note("B", day: a.dayKey, createdAt: 2)

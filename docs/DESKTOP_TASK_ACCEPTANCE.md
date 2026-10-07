@@ -385,3 +385,20 @@ Final executable SHA-256: `9e94882b6e1e661a3223ac9baf845dc2b55e4bca725bb53b04173
 | Oldest supported OS, minimum window, full changed-data relaunch | Not tested; later acceptance cards retain these checks |
 
 Final [automated/review evidence](DESKTOP_TASK_REGRESSION.md#movement-scrolling-and-reveal--task-7-2026-10-07) is 69/69 author tests and 6/6 independent checks. Both fixture processes and all created temporary hosts were stopped/unregistered/trash-moved; original paths gone and main app hash unchanged. No real user task data or preferences were modified. Resolve native drag/drop/scroll/reveal observations before closing Tasks 6/7 acceptance.
+
+## Native movement source — Task 5 (2026-10-07)
+
+**Native source acceptance: Pass on macOS 26.6.2 (user-operated).** The isolated fixture `/private/tmp/menupocket-task5-native/DragSourceFixture.app` (executable SHA-256 `c74879fd7e522a1d40af1fd065c2abfaed2ba4b34aff8f9b42c1c480b63ae4c5`, PID 91645, source ignored `build/task5/DragSourceFixture.swift`, built from HEAD `0502d41`) used production `TaskWindowController`/`TaskWindowView`, SQLite in that folder, defaults suite `local.menupocket.task5-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. A fixture-only status panel showed the live `active` payload and `isDragging` reservation. Data: Work (one open, one completed), Home, empty category, and one long General task.
+
+| Scenario | Result |
+| --- | --- |
+| Open-hand cursor on the handle; drag shows a task-shaped preview; session becomes active/reserved | Pass |
+| Escape mid-drag: preview returns, session clears (`active: none`, `reserved: false`), transient empty groups disappear | Pass |
+| Release outside the window: same clearing, no task change | Pass |
+| Completed task preview shows checked box and secondary text | Pass |
+| Checkbox, text selection/⌘C and ⋯ menu do not start a drag | Pass |
+| Click on the handle without movement does not start a drag | Pass |
+| Handle disabled and no drag while another task is in inline edit | Pass |
+| Oldest supported OS (macOS 14) runtime | Not tested (no environment) |
+
+The user performed and reported these observations; Claude did not operate the interface. The fixture process was stopped, unregistered, moved to Trash with `FileManager.trashItem`, and the Trash path unregistered (`build/task5/cleanup-final.txt`); no real tasks or preferences were changed. Saved native drops, insertion feedback and edge scrolling remain Task 6/7 acceptance work.
