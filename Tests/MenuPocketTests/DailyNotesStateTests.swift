@@ -2448,6 +2448,216 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(saved.last?.categoryID, category.id)
     }
 
+    /// Task 9 integration: menu and drop-shaped requests through SQLite-backed
+    /// state, then the existing daily writes, across refresh and fresh reopens.
+    func testIntegratedSQLiteMovementSurvivesReopenAndLaterDailyWrites() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("IntegratedMove-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let defaults = isolatedDefaults()
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                            notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
+        }
+        let seed = try SQLiteNoteRepository(databaseURL: url)
+        let yesterday = note("Yesterday", day: "2026-09-26", createdAt: 1)
+        try seed.add(yesterday)
+        let later = LaterTask(id: UUID(), text: "Later", createdAt: Date(timeIntervalSince1970: 2),
+                              completedAt: nil, categoryID: nil)
+        try seed.addLater(later)
+
+        let first = makeState()
+        first.windowWillOpen()
+        let work = try XCTUnwrap(first.createCategory(name: "Work"))
+        let study = try XCTUnwrap(first.createCategory(name: "Study"))
+        let empty = try XCTUnwrap(first.createCategory(name: "Empty"))
+        for (text, category) in [("W1", work.id), ("G1", nil), ("W2", work.id), ("S1", study.id), ("W3", work.id)] {
+            first.draft = text
+            first.draftCategoryID = category
+            XCTAssertTrue(first.addDraft())
+        }
+        func id(_ text: String, in state: DailyNotesState) throws -> UUID {
+            try XCTUnwrap(state.notes.first(where: { $0.text == text })?.id)
+        }
+        XCTAssertTrue(first.setCompleted(id: try id("W2", in: first), completed: true))
+        let original = Dictionary(uniqueKeysWithValues: first.notes.map { ($0.id, $0) })
+        first.categoryPreferences.setCollapsed(true, for: .category(study.id))
+        first.draft = "Unsaved"
+        first.draftCategoryID = study.id
+        let progress = first.availableProgress
+        XCTAssertEqual(progress, NoteProgress(completed: 1, total: 5))
+        XCTAssertEqual(first.categoryPreferences.lastUsedCategoryID, work.id)
+
+        // Row-menu Move Up within Work.
+        let menu = try XCTUnwrap(first.taskWindowPresentation.menuMoves(for: try id("W3", in: first), state: first))
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(try XCTUnwrap(menu.moveUp)))))
+        XCTAssertEqual(groupTexts(first), [["W1", "W3", "W2"], ["S1"], ["G1"]])
+        // Drop-shaped request: completed task after an anchor in the collapsed Study group.
+        let w2 = try XCTUnwrap(original[try id("W2", in: first)])
+        let s1 = try id("S1", in: first)
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(
+            moveRequest(w2, destination: .category(study.id), placement: .after(s1))))))
+        XCTAssertFalse(first.categoryPreferences.isCollapsed(.category(study.id)))
+        // Row-menu Move To General, then General to an empty category.
+        let toGeneral = try XCTUnwrap(first.taskWindowPresentation.menuMoves(for: try id("W1", in: first), state: first)?
+            .destinations.first(where: { $0.group == .general })?.request)
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(toGeneral))))
+        let g1 = try XCTUnwrap(first.notes.first(where: { $0.text == "G1" }))
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(moveRequest(g1, destination: .category(empty.id))))))
+        // An equivalent visible placement is not a write.
+        let movedW2 = try XCTUnwrap(first.notes.first(where: { $0.id == w2.id }))
+        XCTAssertEqual(first.moveTask(moveRequest(movedW2, destination: .category(study.id), placement: .after(s1))),
+                       .unchanged)
+
+        let expectedOrder = ["W1", "W3", "S1", "W2", "G1"]
+        let expectedGroups = [["W3"], ["S1", "W2"], ["G1"], ["W1"]]
+        XCTAssertEqual(first.notes.map(\.text), expectedOrder)
+        XCTAssertEqual(groupTexts(first), expectedGroups)
+        for moved in first.notes {
+            let before = try XCTUnwrap(original[moved.id])
+            XCTAssertEqual([moved.text, moved.dayKey], [before.text, before.dayKey])
+            XCTAssertEqual(moved.createdAt, before.createdAt)
+            XCTAssertEqual(moved.completedAt, before.completedAt)
+        }
+        XCTAssertEqual(first.availableProgress, progress)
+        assertGroupCounts(first, equal: try XCTUnwrap(progress))
+        XCTAssertEqual(first.draft, "Unsaved")
+        XCTAssertEqual(first.draftCategoryID, study.id)
+        XCTAssertEqual(first.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(first.categoryPreferences.collapsedGroupIDs.isEmpty)
+        XCTAssertNil(first.issue)
+        let movedSnapshot = first.notes
+        first.refresh()
+        XCTAssertEqual(first.notes, movedSnapshot)
+
+        let second = makeState()
+        second.windowWillOpen()
+        XCTAssertEqual(second.notes, movedSnapshot)
+        XCTAssertEqual(groupTexts(second), expectedGroups)
+        XCTAssertEqual(second.availableProgress, progress)
+        XCTAssertEqual(second.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(second.categoryPreferences.collapsedGroupIDs.isEmpty)
+        XCTAssertEqual(second.draft, "", "Unsaved drafts are process-local")
+
+        // Today Add (remembered Work) and Quick Add (General) append after the reorder.
+        second.startNewDraft()
+        XCTAssertEqual(second.draftCategoryID, work.id)
+        second.draft = "W4"
+        XCTAssertTrue(second.addDraft())
+        XCTAssertEqual(second.add(text: "Quick"), .added)
+        XCTAssertEqual(second.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(groupTexts(second), [["W3", "W4"], ["S1", "W2"], ["G1"], ["W1", "Quick"]])
+        // Category-only Edit keeps S1's daily rank, unlike an explicit Move To (append).
+        second.beginEditing(id: try id("S1", in: second))
+        second.editCategoryID = work.id
+        XCTAssertTrue(second.saveEdit())
+        XCTAssertEqual(groupTexts(second), [["W3", "S1", "W4"], ["W2"], ["G1"], ["W1", "Quick"]])
+        XCTAssertTrue(second.setCompleted(id: try id("W3", in: second), completed: true))
+        XCTAssertTrue(second.delete(id: try id("W1", in: second)))
+        XCTAssertEqual(second.notes.map(\.text), ["W3", "S1", "W2", "G1", "W4", "Quick"])
+        // Removal merges Work into General in saved daily order.
+        XCTAssertTrue(second.removeCategory(id: work.id))
+        XCTAssertEqual(groupTexts(second), [["W2"], ["G1"], ["W3", "S1", "W4", "Quick"]])
+        XCTAssertEqual(second.availableProgress, NoteProgress(completed: 2, total: 6))
+        assertGroupCounts(second, equal: NoteProgress(completed: 2, total: 6))
+
+        let third = makeState()
+        third.windowWillOpen()
+        XCTAssertEqual(third.notes, second.notes)
+        XCTAssertEqual(third.categories.map(\.id), [study.id, empty.id])
+        XCTAssertNil(third.categoryPreferences.lastUsedCategoryID, "Removed category falls back to General")
+        let reopened = try SQLiteNoteRepository(databaseURL: url)
+        XCTAssertEqual(try reopened.notes(for: yesterday.dayKey), [yesterday])
+        XCTAssertEqual(try reopened.laterTasks(), [later])
+        XCTAssertThrowsError(try reopened.moveLaterToToday(id: later.id, dayKey: "2026-09-27")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .unsupported("moveLaterToToday"))
+        }
+    }
+
+    /// Task 9 scale probe. Asserts correctness only; latency is logged, not gated,
+    /// because hosted Debug timing varies with the machine and its load.
+    func testScaleProbeMovesAndReadsOneThousandTasksAcrossCategories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScaleProbe-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let store = try SQLiteNoteRepository(databaseURL: url)
+        let categories = try (0..<10).map { try store.createCategory(name: "Category \($0)") }
+        let day = "2026-09-27"
+        let clock = ContinuousClock()
+        var seeded: [Note] = []
+        let seedTime = try clock.measure {
+            for index in 0..<1_000 {
+                // Interleave ten categories and General across the canonical day.
+                let category = index % 11 == 10 ? nil : categories[index % 11].id
+                let row = Note(id: UUID(), text: "Task \(index)", dayKey: day,
+                               createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                               completedAt: index % 3 == 0 ? Date(timeIntervalSince1970: TimeInterval(index) + 0.5) : nil,
+                               categoryID: category)
+                try store.add(row)
+                seeded.append(row)
+            }
+        }
+        let state = DailyNotesState(repositoryFactory: { store },
+                                   day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        let readTime = clock.measure { state.startup() }
+        XCTAssertEqual(state.notes, seeded)
+        let progress = try XCTUnwrap(state.availableProgress)
+        var groups: [TaskGroup] = []
+        let groupTime = clock.measure { groups = state.groups }
+        XCTAssertEqual(groups.count, 11)
+        let menuTime = clock.measure {
+            _ = state.taskWindowPresentation.menuMoves(for: seeded[999].id, state: state)
+        }
+
+        var moveTimes: [Duration] = []
+        func timedMove(_ request: TaskMoveRequest) throws {
+            let before = state.notes
+            var outcome: TaskMoveOutcome?
+            moveTimes.append(clock.measure { outcome = state.moveTask(request) })
+            guard case let .changed(saved)? = outcome else { return XCTFail("Expected committed move") }
+            // Every other task keeps its relative order; nothing is duplicated or lost.
+            XCTAssertEqual(saved.filter { $0.id != request.taskID }, before.filter { $0.id != request.taskID })
+            XCTAssertEqual(Set(saved.map(\.id)).count, 1_000)
+        }
+        for round in 0..<10 {
+            // Worst-case same-group reorder: the group's last task to its first position.
+            let category = TaskGroupID.category(categories[round].id)
+            let siblings = state.notes.filter { TaskGroupID(categoryID: $0.categoryID) == category }
+            let last = try XCTUnwrap(siblings.last)
+            try timedMove(moveRequest(last, destination: category, placement: .before(siblings[0].id)))
+            XCTAssertEqual(state.notes.first(where: { TaskGroupID(categoryID: $0.categoryID) == category })?.id, last.id)
+            // Cross-category: the day's first task to the end of the next group.
+            let head = state.notes[0]
+            let next = TaskGroupID.category(categories[(round + 5) % 10].id)
+            let target = TaskGroupID(categoryID: head.categoryID) == next ? TaskGroupID.general : next
+            try timedMove(moveRequest(head, destination: target))
+            XCTAssertEqual(state.notes.last(where: { TaskGroupID(categoryID: $0.categoryID) == target })?.id, head.id)
+        }
+        XCTAssertEqual(state.availableProgress, progress)
+        let reopenTime = try clock.measure {
+            XCTAssertEqual(try SQLiteNoteRepository(databaseURL: url).notes(for: day), state.notes)
+        }
+
+        let sorted = moveTimes.sorted()
+        let report = """
+        SCALE-PROBE tasks=1000 categories=10+General moves=\(moveTimes.count)
+        SCALE-PROBE seed1000Adds=\(seedTime) stateRead=\(readTime) grouping=\(groupTime) menuMoves=\(menuTime)
+        SCALE-PROBE moveMedian=\(sorted[sorted.count / 2]) moveMax=\(sorted.last!) moveMin=\(sorted.first!)
+        SCALE-PROBE freshReopenRead=\(reopenTime)
+        """
+        print(report)
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "scale-probe"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func moveRequest(_ note: Note, destination: TaskGroupID = .general,
                              placement: TaskMovePlacement = .endOfGroup) -> TaskMoveRequest {
         TaskMoveRequest(taskID: note.id, expectedDayKey: note.dayKey,

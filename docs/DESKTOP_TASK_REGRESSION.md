@@ -726,3 +726,29 @@ Source: `feat/task-movement`, HEAD `ecd9cbc` (row-menu Move Up/Down/To, minimal-
 New checks cover menu destinations in catalog order with the current group checked and unavailable, boundary-disabled Move Up/Down within a group, saved up/down/Move To results that preserve completion, progress and expansion, guards (inline edit, deletion confirmation) and unknown tasks, and request equality with drop routing for the same placement. The run also re-verifies the Task 5–7 drag/drop/reveal tests after the shared reveal change. Native evidence: [Task 8 acceptance](DESKTOP_TASK_ACCEPTANCE.md#row-menu-movement--task-8-2026-10-07).
 
 Cleanup: the test host was unregistered, moved with `FileManager.trashItem`, and its Trash path unregistered (`build/task8/cleanup-tests.txt`); the build-for-testing host was cleaned earlier (`build/task8/cleanup-build-for-testing.txt`). This session never wrote to `/Applications/MenuPocket.app`. Its executable hash was `2f230e6c…` through the 17:18 fixture cleanup; it was replaced at 17:27 outside this session (now `716fe6cc…`), before this test run.
+
+## Integrated movement regression and scale probe — Task 9 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `400ef7577773bebb711a6569831faeb75cc39d51`, plus two new tests in `DailyNotesStateTests.swift` (file SHA-256 `5874d666159806669ca8bad6c25c92dee7646bba91d911e09ae0c7d575fb09b0`). No production source change. macOS 26.6.2 (`25G83`), Xcode 27.0, shared `MenuPocket` scheme, `platform=macOS`.
+
+| Check | Result | Evidence and limit |
+| --- | --- | --- |
+| Full shared-scheme Debug suite | Pass | **274/274**, zero failures/skips, finished 2026-10-07 23:15:09 local. Includes all 35 `AppConfigurationTests`; the three native configuration failures seen during Task 4 did not reproduce in this run. Log: ignored `build/task9/tests.log`; result bundle `build/task9/Tests.xcresult`. |
+| Integrated SQLite movement | Pass | `testIntegratedSQLiteMovementSurvivesReopenAndLaterDailyWrites`: row-menu Move Up, drop-shaped completed task into a collapsed group, Move To General, General → empty category, then an equivalent no-op. Exact order/groups, unchanged text/day/created/completed fields, unchanged progress, preserved new-task draft and last-used category, and destination-only expansion survive refresh and a fresh state/repository reopen with shared isolated defaults. After the moves it also covers Today Add (remembered category) and Quick Add-path append, category-only Edit keeping its daily rank (unlike the explicit Move To append), completion, delete, and category removal merging into General in saved order. A third reopen matches. The other-day row and the Later row are unchanged, and `moveLaterToToday` stays unsupported. |
+| 1,000-task scale probe | Pass (correctness); latency recorded | `testScaleProbeMovesAndReadsOneThousandTasksAcrossCategories`: 1,000 tasks across 10 categories + General (one third completed), 20 state-level saved moves (10 worst-case same-group last→first, 10 cross-category). Each move keeps every other task's relative order with no loss or duplication. Progress is unchanged, and a fresh reopen matches. Hosted Debug (unoptimized) timings: move median **15.6 ms**, min 14.5 ms, max 16.6 ms; state read 7.6 ms; grouping 3.2 ms; one row's menu moves 1.2 ms; fresh reopen read 8.7 ms; seeding 1,000 individual Add transactions 4.0 s (about 4 ms per add). Timing is logged, not gated. |
+| Debug and Release builds | Pass | `build` for both configurations succeeded (`build/task9/build-Debug.log`, `build-Release.log`). Debug executable SHA-256 `5567dfe4bd494c830953667a43365b26601f36a5fbfff969147d887df587eec2` (arm64). Release `da4c3ecfef137a5bbcb19ec1b38d14199bdc5ce9a8241429da27e80fe49e7af4` (x86_64 + arm64). Strict deep `codesign --verify` passed for both. |
+
+The scale result supports keeping dense O(n) per-day rank rewriting. A worst-case 1,000-task move costs about one 60 Hz frame in unoptimized Debug, so no fractional ranking is needed. Whether this produces a visible stall in the native interface is a Task 10 observation; these tests do not establish it. Native drag, VoiceOver, macOS 14, minimum window, production-data upgrade and remote CI were not exercised.
+
+Commands:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug \
+  -destination 'platform=macOS' -derivedDataPath build/task9/DerivedData \
+  -resultBundlePath build/task9/Tests.xcresult test
+
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Release \
+  -destination 'platform=macOS' -derivedDataPath build/task9/DerivedData build
+```
+
+Cleanup: the Debug test host/app and the Release app under `build/task9/DerivedData/Build/Products/` were confirmed not running. They were unregistered, moved with `FileManager.trashItem`, and their Trash paths were unregistered. No `.app` remains under `build/task9`, and neither LaunchServices nor Spotlight lists either path (`build/task9/cleanup.txt`). `/Applications/MenuPocket.app` executable SHA-256 is unchanged (`716fe6cc…`). Task 10 must build and identify its own artifact from this source.
