@@ -560,3 +560,43 @@ Not tested: oldest supported OS (macOS 14), the 600 × 400 pt minimum window, a 
 Step 6 initial failure (fixture executable `ceff298f…`, 811 × 430 pt window): moving G1 back into a re-created, last General group left the list area blank until the user scrolled. Claude reproduced the setup in a separate debug fixture. One capture right after the move was blank, but the persistent blank was not reproduced, so the root cause is unconfirmed. Repair: the saved-move reveal now scrolls minimally (`scrollTo` without `.top`/`.center` anchors), so it never targets an offset past the end of the content. This also applies to drag reveal. On the repaired fixture (`65c9a5b7…`), the user reported step 6 and steps 7–10 Pass. Final SQLite (17:17): Work `W01 W02 W03 W04 W06 … W12`, Home `H1 W05`, General `G1`; 14 tasks, W02 the only completed task (`build/task8/final-saved-order.txt`).
 
 Claude used background Computer Use only on the separate debug fixture (`/private/tmp/menupocket-task8-debug`, now trashed) and took read-only screenshots of the user's fixture. Not tested: VoiceOver spoken output, macOS 14, and the 600 × 400 pt minimum. Every fixture was stopped, unregistered and moved to Trash, with Trash paths unregistered (`build/task8/cleanup-*.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.
+
+## Movement native acceptance — Task 10 (2026-10-08)
+
+**Native acceptance: partial on macOS 26.6.2; drag-dependent and system scenarios remain Not tested.** Isolated fixture `/private/tmp/menupocket-task10-native/MovementFixture.app` (bundle `local.menupocket.task10.fixture`, executable SHA-256 `3042bf4ee05ec2b30b802eb9d49ac58e649aa9680965a94565abef627f3c72e4`), built from clean `main` `1775a38` (PR #49 merge) with every production source except `MenuPocketApp.swift` plus ignored harness `build/task10/FixtureMain.swift` (SHA-256 `66762d57…`): Swift 6.4 (Xcode 27.0, `27A266a`), `-Onone`, macOS 14 arm64 target, ad-hoc signed. Unlike the Task 5–8 fixtures it runs the production `AppDelegate`, so the status item, glance, Quick Add panel, Later tab and History are live. Each scenario (`main`, `scale`) has its own SQLite file under `/private/tmp/menupocket-task10-native/data/` and defaults suite `local.menupocket.task10-presentation.<scenario>`; fixed Toronto clock Thursday, October 8, 2026 12:00 with a shell-driven day offset; fake login item; a fake Quick Add hotkey pressed by `SIGUSR1`; flag files injecting move-write and Today-read failures. `lsof` showed only the isolated database open. PIDs: 49125 and 67895 (`main`, before and after relaunch), 68400 (`scale`), 69853 (`main`). Dark appearance, 800 × 612 pt window. Seed `main`: Work W01–W14 (W02 completed, W04 long text), collapsed Home (H1, H2✓), empty Errands, a 78-character category (L1), General (G1), Later LA (Work), LB, LC✓, and two tasks on October 7. Seed `scale`: 1,000 tasks interleaved across C01–C09 and General, every seventh completed.
+
+The user operated A1–A4 with a physical mouse and typed one Quick Add. Claude operated the other checks through background Computer Use, limited to the fixture bundle. Each saved result was checked against SQLite.
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| A1 | Escape mid-drag clears line and temporary group; nothing saved | Pass (user) |
+| A2–A3 | Row lower/upper half within Work: `W01 W05 …`, then `W06 W01 W05 …` | Pass (user; SQLite and window) |
+| A4 | Equivalent placement: no line, no write | Pass (user) |
+| — | Cross-category row drop General → long category | Saved once by a Claude single-motion drag (G1 joined the category with fields and completion unchanged), but it landed before L1 rather than the intended after. Drop placement is recomputed from the pointer at drop time; with no visible line in a sub-second synthetic drag, the target half is **inconclusive**, not a placement failure |
+| — | Three further Claude single-motion drags (no visible target, temporary Errands footer, collapsed Work 2 header) | No drop landed. Each cancelled cleanly: temporary groups cleared, no write, process idle, draft unchanged. Successful empty/collapsed-destination drops are **Not tested** here |
+| B3 | Checkbox toggles `3/18` → `2/18`; no drag | Pass (accessibility press; physical click covered in Task 5) |
+| B4 | Text selection by dragging across task text; no task drag | Pass. ⌘C Not tested (tool refuses clipboard menu items; covered in Task 5) |
+| B5 | Edit → Cancel and Delete… → Cancel | Pass; new-task draft kept |
+| C1 | Space on a focused ⋯ opens Edit / Move Up / Move Down / Move To ▸ / Delete… | Pass |
+| C2 | Keyboard Move Up then Move Down; menu reopens at the row's new position | Pass (saved `W01 W06 …`, then `W06 W01 …`) |
+| C3 | Move Up disabled at the top of a group; both disabled in a one-task group | Pass. Bottom-of-group menu fell outside the captured window |
+| C4–C5 | Move To submenu, current group checked/disabled, long label, collapsed destination | **Not tested**: the submenu opens outside the window, beyond background control |
+| D1 | Inline edit blocks dragging another task; handle and ⋯ dimmed | Pass |
+| D2 | Delete confirmation blocks dragging | Pass |
+| D3 | Category manager blocks dragging | **Not tested** natively (window-modal sheet; tool would not deliver the drag) |
+| E2 | Quick Add with another app frontmost appends after the reordered day (rank 18, end of General), `2/19`; Today draft kept | Pass (user keystrokes). Two earlier panels closed on focus loss by design and saved nothing |
+| E3 | Later rows have no handle; Later ⋯ = Move to Today / Edit / Delete… | Pass |
+| E4 | Later → Today after reordering: LA appended to the end of Work 2 (rank 19); `2/20` | Pass |
+| E6 | Row-menu Move Up then History: saved `W06 W05 W01 …`; History stays open; Today shows no error afterwards | Pass |
+| E7 | Rename Work → Work 2 keeps order; removing Home merges into General in saved daily order `G1 H1 H2✓ QA1`; stale collapsed ID pruned | Pass |
+| E8 | Injected Today read failure: close and Show Tasks → "Tasks are unavailable" + Retry, no rows/handles; Retry restores saved order; draft kept | Pass |
+| F1 | ⌘Q, confirmed exit, relaunch of the same artifact without reseeding | Pass. Full dumps (schema, rows with rowids, ranks, fields, defaults) before quit, while stopped and after relaunch are identical; the window shows the same groups/order; the blank composer shows General. The unsaved draft is not kept (process-local) |
+| G1 | Idle rollover to Friday, October 9: empty Today, date-changed notice, "18 unfinished tasks from yesterday" | Pass |
+| G3 | Day reset returns to October 8; store unchanged by rollover/reset | Pass |
+| H1 | 1,000 tasks: seeded in ~4.4 s; scrolled top, middle and end; keyboard Move Up saved `S0970 S0990 S0980 S1000` within a second; process idle afterwards | Pass. Hosted latency remains the Task 9 probe (15.6 ms median) |
+
+**Not tested** (no user or tool observation in this session): cross-category row/header drops with a visible insertion line, transient empty General and custom destinations, collapsed-header drop, completed-row drag, outside-window drop, failed-write drop (A5–A15); bottom/top edge scrolling and Escape while scrolling (A16–A18); 600 × 400 pt minimum window and Light/Dark drag feedback (A19–A20); draft and category choice during a drag (D4); ⌘2 and rollover during a drag (E5, G2); glance order after moves (E1); 1,000-task edge-scrolled drag (H2); VoiceOver; macOS 14. Tasks 5–8 native records cover several of these on the pre-merge branch; they are not re-established on the merged build.
+
+Automation-only observations: an accessibility press on History, delivered before the row menu's queued Move Up ran, made that move hit the History guard and show "Could not move task. Try again." with no write. A physical click cannot precede that dispatch; with realistic timing E6 passed. Background menus sometimes closed before keystrokes arrived; those attempts changed nothing.
+
+Cleanup: the fixture was quit (no process), unregistered from LaunchServices, moved to Trash with `FileManager.trashItem` (2026-10-08T05:51Z), and the Trash path unregistered. The original path is gone and neither LaunchServices nor Spotlight lists the bundle. `/Applications/MenuPocket.app` (executable `41b7a235…`, PID 99856) was not touched. Fixture data and its defaults suites are isolated test data. Evidence: ignored `build/task10/` (`MANUAL_CHECKS.md`, `RESULTS.md`, `artifact-identity.txt`, `session-identity.txt`, dumps, `cleanup-final.txt`).
