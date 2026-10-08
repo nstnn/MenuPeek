@@ -312,7 +312,7 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    /// One statement gives a coherent snapshot and uses notes_day_key_idx.
+    /// One statement gives a coherent snapshot and uses a day_key index search.
     func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
         let statement = try prepare(
             """

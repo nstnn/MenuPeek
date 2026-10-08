@@ -883,7 +883,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             FROM notes WHERE day_key >= '2025-12-01' AND day_key < '2026-01-01'
             GROUP BY day_key ORDER BY day_key ASC
             """)
-        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+        XCTAssertTrue(usesDayKeyIndexSearch(plan), "\(plan)")
         print("History summary query plan: \(plan)")
     }
 
@@ -1091,7 +1091,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             GROUP BY day_key HAVING COUNT(*) > COUNT(completed_at)
             ORDER BY day_key DESC LIMIT 3
             """)
-        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+        XCTAssertTrue(usesDayKeyIndexSearch(plan), "\(plan)")
     }
 
     func testUnfinishedPageRejectsInvalidLimitsAndEmptySuccessIsDistinctFromFailure() throws {
@@ -1696,6 +1696,17 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
         XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [today, savedNote])
         XCTAssertEqual(try reopened.laterTasks(), [])
+    }
+
+    /// Schema v4 adds a second index that starts with day_key, and SQLite versions
+    /// differ in which one they choose. Either keeps the read a bounded day_key search.
+    private func usesDayKeyIndexSearch(_ plan: [[String?]]) -> Bool {
+        plan.contains { row in
+            guard let detail = row.last ?? nil else { return false }
+            return ["notes_day_key_idx", "notes_day_display_order_idx"].contains {
+                detail.contains("SEARCH notes USING INDEX \($0) (day_key")
+            }
+        }
     }
 
     private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,
