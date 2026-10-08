@@ -88,7 +88,12 @@ struct TaskWindowView: View {
         editingID.map(FocusControl.edit) ?? .draft
     }
 
+    // Split so older Swift type checkers can check each piece in reasonable time.
     var body: some View {
+        observingMovement(taskWindow)
+    }
+
+    private var taskWindow: some View {
         GeometryReader { geometry in
             let horizontalPadding: CGFloat = geometry.size.width < 700 ? 24 : 32
             VStack(alignment: .leading, spacing: 0) {
@@ -116,127 +121,7 @@ struct TaskWindowView: View {
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity)
                 }
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            recoveryNotice
-                            if isAvailable {
-                                if rows.isEmpty {
-                                    emptyState
-                                } else {
-                                    LazyVStack(alignment: .leading, spacing: 24) {
-                                        ForEach(groups) { group in
-                                            groupSurface(group)
-                                                .id(group.id)
-                                        }
-                                    }
-                                    .scrollTargetLayout()
-                                }
-                                if !isLater, state.yesterdayIncompleteCount > 0 {
-                                    Button {
-                                        openHistory(.yesterday)
-                                    } label: {
-                                        Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                            .font(.callout.weight(.semibold))
-                                            .foregroundStyle(.red)
-                                    }
-                                    .focusable()
-                                    .keyboardFocusAppearance()
-                                    .focused($focusedControl, equals: .yesterday)
-                                    .onKeyPress(keys: [.space, .return]) { _ in
-                                        openHistory(.yesterday)
-                                        return .handled
-                                    }
-                                    .disabled(!presentation.canBrowse(state: state))
-                                    .help("View yesterday's unfinished tasks")
-                                    .accessibilityIdentifier("yesterdayHistoryEntry")
-                                }
-                            } else {
-                                unavailableState
-                            }
-                        }
-                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                        .padding(.horizontal, horizontalPadding)
-                        .padding(.bottom, horizontalPadding)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scrollPosition(id: Binding(
-                        // The retained anchor belongs to Today's groups only.
-                        get: { isLater ? nil : presentation.todayScrollAnchor },
-                        set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
-                    ))
-                    .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
-                    .id(destination)
-                    .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
-                    .contentShape(Rectangle())
-                    .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
-                    .onChange(of: presentation.movementReveal) { _, request in
-                        guard let request else { return }
-                        let ownership = focusRequestID
-                        Task { @MainActor in
-                            defer {
-                                presentation.consumeMovementReveal(request)
-                                if menuMoveFocusID == request.taskID {
-                                    menuMoveFocusID = nil
-                                    if focusRequestID == ownership {
-                                        focusedControl = focusAfterLeavingRow(request.taskID,
-                                                                              fallbackGroup: request.group)
-                                    }
-                                }
-                            }
-                            await Task.yield()
-                            guard canReveal(request, ownership: ownership) else { return }
-                            // Minimal scrolling: a .top/.center target past the end
-                            // of a re-created last group can leave the lazy list
-                            // blank until the user scrolls.
-                            scroll.scrollTo(request.group)
-                            await Task.yield()
-                            guard canReveal(request, ownership: ownership) else { return }
-                            scroll.scrollTo(request.taskID)
-                            // Pointer movement does not create a keyboard ring. A
-                            // preexisting focused control keeps its row identity.
-                        }
-                    }
-                    .onChange(of: presentation.todayScrollRestoreID) { _, _ in
-                        if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
-                    }
-                    .onChange(of: geometry.size) { _, _ in
-                        guard let id = editingID else { return }
-                        let requestID = focusRequestID
-                        let owner = destination
-                        Task { @MainActor in
-                            await Task.yield()
-                            guard focusRequestID == requestID, destination == owner, editingID == id else { return }
-                            scroll.scrollTo(id, anchor: .center)
-                        }
-                    }
-                    .onChange(of: editingID, initial: true) { old, new in
-                        // Keep the editor or its saved destination visible when
-                        // the Add composer changes the list's available height.
-                        if let id = new ?? old {
-                            if new != nil {
-                                focusRequestID = UUID()
-                                editFocusRequestID = focusRequestID
-                            }
-                            let requestID = editFocusRequestID ?? focusRequestID
-                            Task { @MainActor in
-                                await Task.yield()
-                                guard presentation.route == .today, focusRequestID == requestID else { return }
-                                if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
-                                    // Entry/exit changes the space above the list.
-                                    // Mount the group before targeting its row.
-                                    scroll.scrollTo(group.id, anchor: .top)
-                                    await Task.yield()
-                                }
-                                guard presentation.route == .today, focusRequestID == requestID else { return }
-                                scroll.scrollTo(id, anchor: .center)
-                                if new != nil { focusDraft(requestID: requestID) }
-                                else { restoreRowFocus(id, requestID: requestID) }
-                            }
-                        }
-                    }
-                }
+                taskList(geometry: geometry, horizontalPadding: horizontalPadding)
                 if hasFooterContent {
                     Divider()
                     footer
@@ -303,45 +188,6 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: state.hasLoadedToday) { _, _ in presentation.validateDeletion(state: state) }
-        .onChange(of: presentation.dragSession.active) { _, payload in
-            if payload != nil {
-                focusRequestID = UUID()
-                if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
-            }
-        }
-        .onDisappear { interruptMovement() }
-        .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
-            if !eligible { interruptMovement() }
-        }
-        .onChange(of: state.todayKey) { _, _ in interruptMovement() }
-        .onChange(of: state.notes) { _, notes in
-            if let payload = presentation.dragSession.active,
-               !notes.contains(where: {
-                   $0.id == payload.taskID && $0.dayKey == payload.dayKey &&
-                   TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
-               }) {
-                presentation.cancelMovement()
-            }
-        }
-        .onChange(of: groups.map(\.id)) { _, ids in
-            if !isLater, case let .group(id) = focusedControl, !ids.contains(id) {
-                focusedControl = state.availableProgress == nil ? .retry : .add
-            }
-        }
-        .onChange(of: state.categories) { _, _ in
-            if presentation.dragSession.active != nil { interruptMovement() }
-            if let request = presentation.movementReveal,
-               !state.groups.contains(where: { $0.id == request.group }) {
-                interruptMovement()
-            }
-        }
-        .onChange(of: focusedControl) { old, new in
-            // Hierarchy removal can clear focus or invoke the fallback above;
-            // neither is a newer user navigation action.
-            guard new != nil else { return }
-            if case let .group(id) = old, !groups.contains(where: { $0.id == id }) { return }
-            if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
-        }
         .onChange(of: state.laterTasks) { old, new in
             presentation.validateDeletion(state: state)
             if isLater, let id = focusedNoteID, !new.contains(where: { $0.id == id }),
@@ -353,6 +199,174 @@ struct TaskWindowView: View {
         .onChange(of: presentation.deletionTarget) { old, new in
             if let old, new == nil, old.destination == destination { restoreRowFocus(old.id) }
         }
+    }
+
+    private func taskList(geometry: GeometryProxy, horizontalPadding: CGFloat) -> some View {
+        ScrollViewReader { scroll in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    recoveryNotice
+                    if isAvailable {
+                        if rows.isEmpty {
+                            emptyState
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 24) {
+                                ForEach(groups) { group in
+                                    groupSurface(group)
+                                        .id(group.id)
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        if !isLater, state.yesterdayIncompleteCount > 0 {
+                            Button {
+                                openHistory(.yesterday)
+                            } label: {
+                                Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
+                                    .font(.callout.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+                            .focusable()
+                            .keyboardFocusAppearance()
+                            .focused($focusedControl, equals: .yesterday)
+                            .onKeyPress(keys: [.space, .return]) { _ in
+                                openHistory(.yesterday)
+                                return .handled
+                            }
+                            .disabled(!presentation.canBrowse(state: state))
+                            .help("View yesterday's unfinished tasks")
+                            .accessibilityIdentifier("yesterdayHistoryEntry")
+                        }
+                    } else {
+                        unavailableState
+                    }
+                }
+                .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.bottom, horizontalPadding)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollPosition(id: Binding(
+                // The retained anchor belongs to Today's groups only.
+                get: { isLater ? nil : presentation.todayScrollAnchor },
+                set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
+            ))
+            .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
+            .id(destination)
+            .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+            .onChange(of: presentation.movementReveal) { _, request in
+                guard let request else { return }
+                let ownership = focusRequestID
+                Task { @MainActor in
+                    defer {
+                        presentation.consumeMovementReveal(request)
+                        if menuMoveFocusID == request.taskID {
+                            menuMoveFocusID = nil
+                            if focusRequestID == ownership {
+                                focusedControl = focusAfterLeavingRow(request.taskID,
+                                                                      fallbackGroup: request.group)
+                            }
+                        }
+                    }
+                    await Task.yield()
+                    guard canReveal(request, ownership: ownership) else { return }
+                    // Minimal scrolling: a .top/.center target past the end
+                    // of a re-created last group can leave the lazy list
+                    // blank until the user scrolls.
+                    scroll.scrollTo(request.group)
+                    await Task.yield()
+                    guard canReveal(request, ownership: ownership) else { return }
+                    scroll.scrollTo(request.taskID)
+                    // Pointer movement does not create a keyboard ring. A
+                    // preexisting focused control keeps its row identity.
+                }
+            }
+            .onChange(of: presentation.todayScrollRestoreID) { _, _ in
+                if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
+            }
+            .onChange(of: geometry.size) { _, _ in
+                guard let id = editingID else { return }
+                let requestID = focusRequestID
+                let owner = destination
+                Task { @MainActor in
+                    await Task.yield()
+                    guard focusRequestID == requestID, destination == owner, editingID == id else { return }
+                    scroll.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: editingID, initial: true) { old, new in
+                // Keep the editor or its saved destination visible when
+                // the Add composer changes the list's available height.
+                if let id = new ?? old {
+                    if new != nil {
+                        focusRequestID = UUID()
+                        editFocusRequestID = focusRequestID
+                    }
+                    let requestID = editFocusRequestID ?? focusRequestID
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard presentation.route == .today, focusRequestID == requestID else { return }
+                        if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
+                            // Entry/exit changes the space above the list.
+                            // Mount the group before targeting its row.
+                            scroll.scrollTo(group.id, anchor: .top)
+                            await Task.yield()
+                        }
+                        guard presentation.route == .today, focusRequestID == requestID else { return }
+                        scroll.scrollTo(id, anchor: .center)
+                        if new != nil { focusDraft(requestID: requestID) }
+                        else { restoreRowFocus(id, requestID: requestID) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clears drag sessions and pending reveals when their context changes.
+    private func observingMovement(_ content: some View) -> some View {
+        content
+            .onChange(of: presentation.dragSession.active) { _, payload in
+                if payload != nil {
+                    focusRequestID = UUID()
+                    if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+                }
+            }
+            .onDisappear { interruptMovement() }
+            .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
+                if !eligible { interruptMovement() }
+            }
+            .onChange(of: state.todayKey) { _, _ in interruptMovement() }
+            .onChange(of: state.notes) { _, notes in
+                if let payload = presentation.dragSession.active,
+                   !notes.contains(where: {
+                       $0.id == payload.taskID && $0.dayKey == payload.dayKey &&
+                       TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
+                   }) {
+                    presentation.cancelMovement()
+                }
+            }
+            .onChange(of: groups.map(\.id)) { _, ids in
+                if !isLater, case let .group(id) = focusedControl, !ids.contains(id) {
+                    focusedControl = state.availableProgress == nil ? .retry : .add
+                }
+            }
+            .onChange(of: state.categories) { _, _ in
+                if presentation.dragSession.active != nil { interruptMovement() }
+                if let request = presentation.movementReveal,
+                   !state.groups.contains(where: { $0.id == request.group }) {
+                    interruptMovement()
+                }
+            }
+            .onChange(of: focusedControl) { old, new in
+                // Hierarchy removal can clear focus or invoke the fallback above;
+                // neither is a newer user navigation action.
+                guard new != nil else { return }
+                if case let .group(id) = old, !groups.contains(where: { $0.id == id }) { return }
+                if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+            }
     }
 
     private func canReveal(_ request: TaskWindowPresentation.MovementReveal, ownership: UUID) -> Bool {
