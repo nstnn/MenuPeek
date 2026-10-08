@@ -669,6 +669,7 @@ final class DailyNotesState {
             switch outcome {
             case let .changed(saved):
                 notes = saved
+                historyRevision += 1
                 categoryPreferences.setCollapsed(false, for: request.destinationGroup)
                 taskWindowPresentation.requestMovementReveal(request)
                 taskIssue = nil

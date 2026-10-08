@@ -2,7 +2,7 @@
 
 **TASK-012 documentation and partial handoff: complete. Category feature acceptance: partial; TASK-011 remains open.** The user separately requested this documentation task while interface acceptance was incomplete. This record consolidates existing evidence; it does not turn unavailable observations into passes.
 
-The implemented product contract is [REQ-014 and Category contract](REQUIREMENTS.md#category-contract), including optional categories, grouping/order, collapse/counts, atomic drafts, all-days removal, and recovery. [Architecture](ARCHITECTURE.md) owns the state/storage boundaries and additive schema v2; [Workflow](WORKFLOW.md#category-verification) owns verification, preferences isolation, and [first real-data upgrade preparation](WORKFLOW.md#schema-v2-upgrade-preparation). [README](../README.md#use-the-today-window) provides usage.
+The implemented product contract is [REQ-014 and Category contract](REQUIREMENTS.md#category-contract), including optional categories, grouping/order, collapse/counts, atomic drafts, all-days removal, and recovery. [Architecture](ARCHITECTURE.md) owns the state/storage boundaries and additive schema v2; [Workflow](WORKFLOW.md#category-verification) owns verification, preferences isolation, and [first real-data upgrade preparation](WORKFLOW.md#schema-v4-upgrade-preparation). [README](../README.md#use-the-today-window) provides usage.
 
 ## Verified source and artifacts
 

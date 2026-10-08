@@ -600,3 +600,102 @@ The user operated A1–A4 with a physical mouse and typed one Quick Add. Claude 
 Automation-only observations: an accessibility press on History, delivered before the row menu's queued Move Up ran, made that move hit the History guard and show "Could not move task. Try again." with no write. A physical click cannot precede that dispatch; with realistic timing E6 passed. Background menus sometimes closed before keystrokes arrived; those attempts changed nothing.
 
 Cleanup: the fixture was quit (no process), unregistered from LaunchServices, moved to Trash with `FileManager.trashItem` (2026-10-08T05:51Z), and the Trash path unregistered. The original path is gone and neither LaunchServices nor Spotlight lists the bundle. `/Applications/MenuPocket.app` (executable `41b7a235…`, PID 99856) was not touched. Fixture data and its defaults suites are isolated test data. Evidence: ignored `build/task10/` (`MANUAL_CHECKS.md`, `RESULTS.md`, `artifact-identity.txt`, `session-identity.txt`, dumps, `cleanup-final.txt`).
+
+## Movement acceptance summary — Task 11 (2026-10-08)
+
+**Movement acceptance: partial.** This section brings together the Task 5–10 native records above for the handoff. It adds no new observations: Task 11 built, ran, and tested nothing. Saved task movement (REQ-017) was merged into `main` by nstnn/MenuPeek#49 at `1775a38720939db5e47792bcb4aa66d6c0bf669b`. `main` later gained only the Task 10 documentation (`2290aa2`, nstnn/MenuPeek#50), so the app source is unchanged since `1775a38`. Automated and CI evidence is in [Desktop regression](DESKTOP_TASK_REGRESSION.md#movement-feature-handoff--task-11-2026-10-08). On 2026-10-08 the user asked to proceed with Task 11, so the Task 10 gaps below are recorded as open rather than tested.
+
+The Task 5–8 fixtures ran production window, view, and state code from the pre-merge `feat/task-movement` branch without the app delegate, Later tab, or History. The Task 10 fixture ran the merged build with the production `AppDelegate`. All sessions ran on macOS 26.6.2 with isolated SQLite and defaults. A dash means the scenario did not exist on that build.
+
+| Scenario | Pre-merge fixtures (Tasks 5–8) | Merged build (Task 10) |
+| --- | --- | --- |
+| Handle drag start, task-shaped preview, cursor | Pass (T5) | Pass (A1–A4, user) |
+| Escape mid-drag clears feedback, temporary groups, and session | Pass (T5; T6/7 #1) | Pass (A1, user) |
+| Release outside the window cancels | Pass (T5) | Not tested |
+| Row lower/upper half within a group | Pass (T6/7 #2–3) | Pass (A2–A3, user) |
+| Equivalent placement offers no target and writes nothing | Pass (T6/7 #4) | Pass (A4, user) |
+| Cross-group row drop | Pass (T6/7 #6) | Inconclusive: one synthetic drop saved once, row half not established |
+| Header drop places at the end of a group | Pass (T6/7 #5) | Not tested |
+| Temporary empty custom destination | Pass (T6/7 #7) | Not tested |
+| Temporary empty General destination | Not tested | Not tested |
+| Collapsed header accepts without expanding on hover, expands after save | Pass (T6/7 #8) | Not tested |
+| Completed task keeps completion; progress unchanged | Pass (T6/7 #9 drag; T8 #7 menu) | Not tested |
+| Top and bottom edge scrolling; Escape while scrolling | Pass (T6/7 #10–12) | Not tested |
+| Offscreen collapsed destination revealed | Pass (T6/7 #13 drag; T8 #5 menu) | Not tested |
+| No keyboard focus ring after pointer drops | Pass (T6/7 #14) | Not tested |
+| Checkbox, text selection, and ⋯ do not start a drag; Edit/Delete work | Pass (T5; T8 #9) | Pass (B3–B5; Command-C not tested) |
+| Click on the handle without movement does nothing | Pass (T5) | Not tested |
+| Keyboard ⋯ menu, Move Up/Down, focus follows the row | Pass (T8 #1–3) | Pass (C1–C2) |
+| Move Up/Down disabled at group boundaries | Pass (T8 #4) | Pass (C3; bottom boundary not captured) |
+| Move To: current group checked and disabled, long label, collapsed destination | Pass (T8 #5) | Not tested (C4–C5) |
+| Move into a re-created last group reveals the row | Fail, then Pass after the minimal-scroll repair (T8 #6) | Not tested |
+| Inline edit blocks moving | Pass (T5; T8 #8) | Pass (D1) |
+| Deletion confirmation blocks dragging | Not tested | Pass (D2) |
+| Category manager blocks dragging | Not tested (hosted only) | Not tested (hosted only) |
+| Draft and category choice kept during a drag | Not tested | Not tested |
+| Command-2 or a day change during a drag | — | Not tested |
+| Row-menu move, then History | — | Pass (E6) |
+| Later rows have no handle; Later ⋯ menu | — | Pass (E3) |
+| Later Move to Today and Quick Add append after a reorder | — | Pass (E2 user keystrokes, E4) |
+| Category rename and removal keep saved order | — | Pass (E7) |
+| Unavailable Today read, then Retry | — | Pass (E8) |
+| Injected failed write shows the move error and keeps data | Not tested | Not tested |
+| Changed-data Command-Q and relaunch of the same artifact | Pass (T6/7 #15; T8 #10) | Pass (F1, identical full dumps) |
+| Idle day rollover and reset | — | Pass (G1, G3) |
+| 1,000 tasks: scrolling and a keyboard move | — | Pass (H1) |
+| 1,000-task drag with edge scrolling | — | Not tested |
+| Menu bar glance order after a move | — | Not tested |
+| 600 × 400 pt minimum window | Not tested | Not tested |
+| Light appearance (recorded sessions were Dark or did not record it) | Not tested | Not tested |
+| VoiceOver | Not tested | Not tested |
+| macOS 14 | Not tested | Not tested |
+| Production-identity app, App Sandbox, first real-data v4 upgrade | Not tested | Not tested |
+
+Remaining movement acceptance gate:
+
+1. On a fixture built from the current source, with a physical mouse, re-establish the pre-merge drag results on the merged build: cross-group row and header drops with a visible line, empty custom and General destinations, a collapsed header, a completed row, an outside-window release, edge scrolling with Escape, and offscreen reveal. Then exercise the scenarios never observed: an injected failed write, a draft during a drag, Command-2 and a day change during a drag, the category-manager guard, glance order, Move To on the merged build, and a 1,000-task drag.
+2. Check the 600 × 400 pt minimum by a real window drag, Light appearance, and VoiceOver (handle label, menu hint, Move items). Record macOS 14 as Not tested unless a macOS 14 environment is available.
+3. Before the first real-data launch of a v4 build, follow [Schema v4 upgrade preparation](WORKFLOW.md#schema-v4-upgrade-preparation). A production-identity observation needs its own identified artifact.
+
+Open issue found during Task 11 by source inspection, not reproduced in the interface: a committed move does not advance `historyRevision`. A History day detail already loaded for Today can therefore keep its pre-move grouping and order until the next refresh ([Architecture](ARCHITECTURE.md#history-read-facade-and-invalidation)). Counts are unaffected.
+
+Cleanup: Task 11 created no app bundle, ran no fixture or test host, and changed no saved data, so it needed no artifact cleanup. Every earlier session's cleanup is recorded in its own section.
+
+
+## Movement follow-up — interrupted scroll verification (2026-10-08)
+
+Session in progress, not full acceptance. The user requested completing Tasks 10/11 and guided physical checks. A new isolated fixture `/private/tmp/menupocket-task10-final-native/MovementFixture.app` uses bundle `local.menupocket.task10.final.fixture`, separate data/defaults, production AppDelegate and fake system services. First artifact executable `4a45ef278ea94ec7f8093dfd2f69d75ff212b8861ebe7f7f166641a05cb61793` includes the History invalidation repair. User physically passed row lower/upper halves, equivalent no-op and Escape. SQLite confirmed Work `W06 W01 W05 W02✓ W03…`; no-op/Escape schema/rows/defaults dumps were identical. These observations preceded the scrolling repair and are not blanket acceptance of the later artifact.
+
+Before cross-group step 5, the fixture stopped; no saved change or corrupted data was observed (`integrity_check=ok`). Logs indicate termination and a hang dialog. A reopened fixture then used ~100% CPU; a sampled main-thread stack was in SwiftUI/AttributeGraph updates. A diagnostic variant idled at startup but ordinary user scrolling reproduced the hang. The user's later screenshot/clarification identifies ordinary scrolling, not drag/drop, as the trigger; machine load was an earlier unverified hypothesis.
+
+The minimal final source repair changes group `LazyVStack` to `VStack`, preserving existing scroll-position/reveal behavior. Earlier diagnostic variants and the passive-geometry attempted patch were discarded after a reveal hang and are not shipped. Final fixture executable `b21e2ff984e7bac91af60194fc22e15a3e4b0223c31f4b81bba8f01d116e5637` responds to mid-list and bottom scrolling via Computer Use, with idle CPU after observation. Eager diagnostic variant also passed menu movement/recreation of General with focus following G1; this is narrower than a final-artifact observation. G1 restored to General before resuming the user's guide. Full final hosted suite 404/404 and Release pass; logs/results/review input under `build/task10-final/`.
+
+The active final fixture is retained only for this ongoing guided session. Completed test hosts and replaced/stopped diagnostic bundles were unregistered and trashed; main app hash remains `41b7a235259fd71e04a04882c094253e25b7daad8c17597164ea9f2c677a1aed`. Final fixture cleanup and remaining native scenarios are pending; Task 10 is not complete.
+
+User subsequently reports step 5 Pass on the eager-group artifact: L1 is saved in Work immediately before W03. G1's move into the long-name category was intentional, as clarified by the user. The next reported gap is the left six-dot handle's hand cursor after scrolling/dropping. A visible-rect tracking area was added to `TaskDragHandleView`; updated fixture executable `af2aa412571af88f0336c67e1b43a0132a79abd86f8f67c5eadd1cfb75f01069` is open for physical hover checks. Cursor acceptance is pending, including leaving the handle and hover after a drop. Updated hosted suite passes 404/404; Release passes. Replaced fixture and completed hosts were cleaned; the active fixture belongs to the continuing manual session.
+
+Physical hover on `af2aa412…` failed: the user still sees no hand cursor. The cursor tracking change is not an accepted repair; diagnostic investigation continues. Step 5 remains a saved-move Pass, independent of this feedback defect.
+
+The user explicitly deferred cursor verification during this session to prioritize the remaining feature acceptance scenarios. The current candidate confines the native handle with `clipsToBounds = true`; automated checks pass, but cursor behavior is **Deferred by user**, not Pass. Other native movement checks continue.
+
+## Movement follow-up — session closure with user-accepted gaps (2026-10-08)
+
+The user reports physical steps 6 and 7 Pass and explicitly asks to stop further manual checks because of the time required. Cursor verification was already deferred. Task 10's verification handoff and Task 11's evidence handoff are closed within this reduced scope. This is not a claim that every original native/system criterion passed.
+
+| Follow-up scenario | Result / evidence |
+| --- | --- |
+| Row lower/upper placement | Pass, user physical steps 1/2; SQLite confirms order on the first artifact |
+| Equivalent no-op and Escape | Pass, user physical steps 3/4; saved dumps identical on the first artifact |
+| Ordinary scrolling after layout repair | Pass, responsive native AX and idle CPU on eager-group fixture |
+| L1 into Work before W03 | Pass, user step 5 and SQLite on eager-group fixture |
+| Long W04 into empty General header | Pass, user step 6; SQLite and AX confirm General contains W04 |
+| G1 from Errands into Work after W06 | Pass, user step 7; SQLite and AX confirm `W06 G1 W01…` |
+| Retained History invalidation after move | Automated Pass, real SQLite/retained-presentation regression; no new final-artifact physical History acceptance |
+| Hand cursor on hover | Deferred by user; unclipped candidate failed; clipped candidate's physical behavior unverified |
+| Remaining original native scenarios | Not tested in this follow-up / skipped by user; earlier dated results retain their own artifact boundaries |
+
+Final observed fixture executable SHA-256 `9062af8128be3acfa5588a6913f47f22f58a1b0bdb272b82b989f2967dfc0ee2` uses the current production sources plus `FixtureCursorProbe.swift`, a diagnostic pointer-state timer, fake system services and isolated fixed-clock storage. It is not the production-identity sandboxed app. Snapshot `build/task10-final/after-steps6-7.txt` preserves schema, rowids, saved fields/ranks and scoped defaults. Final five-file code/test diff SHA-256 `9fb2196dd2757ba7d1c89a6e1561a612b0d19400101262eb56095ac01fdff992` against `c0853af`; `ClippedCursor.xcresult` passes 404/404 with zero failures/skips, and Release build passes. Independent review found no confirmed source defect but native cursor evidence remains deferred. No full-feature READY verdict is inferred.
+
+Outstanding original criteria include final-source sustained edge scrolling/1,000-task drag, collapsed/completed/outside drops, injected failed writes and mid-drag draft/tab/day/modal guards, final-source reveal/relaunch and glance checks, minimum size, Light appearance and VoiceOver. macOS 14, production identity and first real-data v4 upgrade remain Not tested. Earlier observations for these paths are preserved above, not transferred to this revised artifact.
+
+Cleanup completed: fixture exited via Command-Q; no exact-path fixture process remains. Final fixture and Debug/Release hosts were unregistered and moved to Trash via `FileManager.trashItem`; resulting Trash paths were unregistered. Original bundle paths are absent. Logs `cleanup-session-final.log` and `cleanup-clipped-cursor-hosts.log` preserve identities. Logs, test results, isolated SQLite/defaults and snapshots remain available; no app bundle remains at the original test paths. Main `/Applications/MenuPocket.app` executable hash stays `41b7a235259fd71e04a04882c094253e25b7daad8c17597164ea9f2c677a1aed`. No production data, real login/hotkey registration, commit, push or PR was changed.

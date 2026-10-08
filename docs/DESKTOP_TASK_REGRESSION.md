@@ -126,7 +126,7 @@ Results/logs are `Verified-tests.xcresult`, `verified-tests.log`, and `test-summ
 
 The final Debug bundle is `build/task-categories/task-002/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle ID `local.menupocket.app`, version `0.1.0` / build `1`. Its executable SHA-256 is `ef8d8cfe2fcbc7d0ada90d6a1e795f5fb82efc2e9ed49d658c0e17652612c7a6`; `MenuPocket.debug.dylib` SHA-256 is `fb90ce6bb4ad03d1f70b27e6cdd06573e38d2d3d8aeab2e4f7b259377c3250dc`.
 
-Fixtures use per-test temporary databases and are removed by teardown; the Debug XCTest host skips production delegate/storage initialization. No user database was upgraded, no real login/hotkey registration was changed, and no production backup/app launch was performed. Category repository operations, associated-task reads/writes, and interface controls remain later work. No full-suite run, Release build, remote CI, actual-interface acceptance, commit, or push was performed for this card. Before a first real-data launch, follow [upgrade preparation](WORKFLOW.md#schema-v2-upgrade-preparation); a v1 binary cannot reopen v2.
+Fixtures use per-test temporary databases and are removed by teardown; the Debug XCTest host skips production delegate/storage initialization. No user database was upgraded, no real login/hotkey registration was changed, and no production backup/app launch was performed. Category repository operations, associated-task reads/writes, and interface controls remain later work. No full-suite run, Release build, remote CI, actual-interface acceptance, commit, or push was performed for this card. Before a first real-data launch, follow [upgrade preparation](WORKFLOW.md#schema-v4-upgrade-preparation); a v1 binary cannot reopen v2.
 
 ## Category repository operations — Task 3, 2026-09-30
 
@@ -583,14 +583,6 @@ The new state APIs publish Later add/edit/completion/deletion and Later-to-Today
 
 Final verification used macOS 26.6.2 (25G83), Xcode 27.0 (27A266a), on `feat/later-tasks`, base/HEAD `963f17586eb99783bb84504babadec190ab1199f` plus uncommitted state/helper/test/architecture/workflow changes. The independently tested six-file binary diff SHA-256 was `10ab3624414b3e64a699f958c265d4644bf38a77d6940a9013aa1ff5da1dcd89`, unchanged before and after verification. The later additions to this regression record and English plan are documentation-only. The tested temporary app was `build/task006-review/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle `local.menupocket.app`, version `0.1.0`, build `1`; executable SHA-256 `bdc10dab13dcbce91b4757f21f74a4ef808ddc3664d3eae2e18463df3d09c0e2`. Exact artifact identity and cleanup observations are retained in the review report.
 
-## Movement contract and pure ordering — 2026-10-06
-
-Task 1 adds a pure movement planner and UUID-based request/placement/outcome types in [TaskMovement.swift](../MenuPocket/Notes/TaskMovement.swift), with [contract tests](../Tests/MenuPocketTests/TaskMovementTests.swift) registered in the shared Xcode project. It supports before/after and end-of-group placement, validates expected day/source and destination/anchor identities, preserves task fields and every other task's relative order, and returns unchanged for equivalent visible positions. Malformed/stale snapshots reject without mutation. The planner's changed result is only a proposal; repository persistence and state/UI integration remain future work.
-
-Source baseline: branch `feat/task-movement`, HEAD `34b789f2333b7f53dfabfb38b472617ce13cab4e`, initially clean tracked tree. Dirty build inputs were the new planner/tests and project membership. Schema remains v3 and daily reads remain rowid ordered. Today and Quick Add share `DailyNotesState.add(text:categoryID:)` → `SQLiteNoteRepository.add(_:)`, the sole production daily INSERT. Later-to-Today transfer still throws unsupported. The next ordering migration must guard Later-table creation by `version < 3`; v4 is available at this baseline. No real database, defaults, login registration, or hotkey was changed.
-
-The final shared-scheme Debug hosted run passed **13/13**, zero failures: 8 `TaskMovementTests` and 5 existing `TaskGroupingTests`. Xcode 27.0 (27A266a), macOS arm64 destination. Command:
-
 ```bash
 xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
   -configuration Debug -destination 'platform=macOS' \
@@ -738,6 +730,17 @@ Source: committed HEAD `b700eafca3f09c492dcdcf4e1ca75cadca7b3d80` (TASK-004), cl
 
 Logs/results: ignored `build/glance-task005/` (`debug-build-for-testing.log`, `release.log`, `full.log`, `full.xcresult`, `artifact-identity.txt`). The Debug test host and the Release app were unregistered from LaunchServices, moved to Trash with `FileManager.trashItem`, and their Trash paths unregistered. The user's `/Applications/MenuPocket.app` (not running) and its data were not touched. Interface results from the isolated glance fixture are recorded separately; they are not established by this run. Not run: remote CI.
 
+## Movement contract and pure ordering — 2026-10-06
+
+Task 1 adds a pure movement planner and UUID-based request/placement/outcome types in [TaskMovement.swift](../MenuPocket/Notes/TaskMovement.swift), with [contract tests](../Tests/MenuPocketTests/TaskMovementTests.swift) registered in the shared Xcode project. It supports before/after and end-of-group placement, validates expected day/source and destination/anchor identities, preserves task fields and every other task's relative order, and returns unchanged for equivalent visible positions. Malformed/stale snapshots reject without mutation. The planner's changed result is only a proposal; repository persistence and state/UI integration remain future work.
+
+Source baseline: branch `feat/task-movement`, HEAD `34b789f2333b7f53dfabfb38b472617ce13cab4e`, initially clean tracked tree. Dirty build inputs were the new planner/tests and project membership. Schema remains v3 and daily reads remain rowid ordered. Today and Quick Add share `DailyNotesState.add(text:categoryID:)` → `SQLiteNoteRepository.add(_:)`, the sole production daily INSERT. Later-to-Today transfer still throws unsupported. The next ordering migration must guard Later-table creation by `version < 3`; v4 is available at this baseline. No real database, defaults, login registration, or hotkey was changed.
+
+The final shared-scheme Debug hosted run passed **13/13**, zero failures: 8 `TaskMovementTests` and 5 existing `TaskGroupingTests`. Xcode 27.0 (27A266a), macOS arm64 destination. Command:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData \
   -only-testing:MenuPocketTests/TaskMovementTests \
   -only-testing:MenuPocketTests/TaskGroupingTests test
@@ -916,3 +919,57 @@ Source: merge commit `bc98c8a` of `origin/main` `90d32b8` (Later, History, Today
 | Debug test build and Release build | Pass | `build/merge/build-for-testing.log`, `build/merge/build-Release.log`. Debug test host SHA-256 `16db8ddd…`, Release `0fcaa1f8…`. |
 
 Not tested: native drag/menu movement alongside the Today/Later tabs and History, and Xcode 16.4 (CI). These belong to Task 10 and the PR's CI run. Cleanup: both apps were unregistered, moved with `FileManager.trashItem`, and their Trash paths unregistered. No `.app` remains under `build/merge`, and `/Applications/MenuPocket.app` is unchanged (`716fe6cc…`; `build/merge/cleanup.txt`).
+
+## Movement feature handoff — Task 11 (2026-10-08)
+
+Documentation handoff for saved task movement (REQ-017). Task 11 built, ran, and tested nothing, and created no app bundle, so no artifact cleanup was needed. It collects the automated evidence already recorded above, adds the CI results that came after the [merge record](#merge-with-main--2026-10-07), and identifies the final source.
+
+Final source: `main` merge commit `1775a38720939db5e47792bcb4aa66d6c0bf669b` (nstnn/MenuPeek#49, 2026-10-07 23:49 EDT). `main` then advanced only to `2290aa28666731bb5fcb17261639af2b2dd791a8` (nstnn/MenuPeek#50), which adds the Task 10 acceptance record and changes no app or test source. Two commits landed on the branch after the merge record's local 403/403 run. `7c79eea` split `TaskWindowView.body` into `taskWindow`, `taskList`, and `observingMovement`, because Xcode 16.4 could not type-check it in reasonable time. `1b4afd9` made two History `EXPLAIN QUERY PLAN` assertions accept either day_key-first index, since CI's SQLite chose `notes_day_display_order_idx`. No local full-suite run of `1775a38` is recorded. CI below is its automated evidence, and the Task 10 fixture compiled the same source.
+
+CI ([workflow](WORKFLOW.md#github-ci): `macos-15` arm64, Xcode 16.4, Debug hosted suite, then a Release build):
+
+| Run | Event and commit | Result |
+| --- | --- | --- |
+| 37723685004 | nstnn/MenuPeek#49, `13fd8b8` | Fail: `TaskWindowView.body` type-check timeout |
+| 37724021157 | nstnn/MenuPeek#49, `7c79eea` | Fail: two History query-plan assertions |
+| 37724281517 | nstnn/MenuPeek#49, `1b4afd9` | Pass |
+| 37724510545 | push to `main`, `1775a38` | Pass |
+| 37734932466 | push to `main`, `2290aa2` (documentation only) | Pass |
+
+Automated movement evidence by card (local runs on macOS 26.6.2 with Xcode 27.0, shared `MenuPocket` scheme, isolated databases and defaults):
+
+| Card | Result | Record |
+| --- | --- | --- |
+| 1. Request/planner contract | 13/13 focused | [Movement contract](#movement-contract-and-pure-ordering--2026-10-06) |
+| 2. Schema v4 migration | 92/92 focused; v0–v3 upgrades, rollback, refusal | [Daily ordering migration](#daily-ordering-migration--2026-10-06) |
+| 3. Atomic repository move | 112/112 focused; independent rerun 112/112 | [Atomic repository movement](#atomic-repository-movement--2026-10-07) |
+| 4. State command and guards | 100/100 focused; review reproduced three native configuration failures on the unchanged baseline | [Guarded state movement](#guarded-state-movement--2026-10-07) |
+| 5. Drag source and session | Compile-only, then 69/69 focused | [Source](#native-movement-source--2026-10-07), [verification](#native-movement-source-verification--task-5-2026-10-07) |
+| 6. Drop targets and feedback | 74/74 focused; independent 9/9 | [Movement destinations](#movement-destinations--task-6-2026-10-07) |
+| 7. Edge scrolling and reveal | 69/69 focused; independent 6/6 | [Scrolling and reveal](#movement-scrolling-and-reveal--task-7-2026-10-07) |
+| 8. Row-menu moves | 86/86 focused | [Row-menu movement](#row-menu-movement--task-8-2026-10-07) |
+| 9. Integrated regression and scale | Full suite 274/274; Debug/Release builds; 1,000-task move median 15.6 ms | [Integrated regression](#integrated-movement-regression-and-scale-probe--task-9-2026-10-07) |
+| Merge with `main` | 401/403 (two schema-v3 fixtures), then 403/403; Release build | [Merge with main](#merge-with-main--2026-10-07) |
+
+These results establish storage, state, routing, and build behavior. They do not establish native drag, placement, scrolling, VoiceOver, the minimum window, macOS 14, or the first real-data v4 upgrade. The [movement acceptance summary](DESKTOP_TASK_ACCEPTANCE.md#movement-acceptance-summary--task-11-2026-10-08) records the interface results and open gaps. Source inspection during Task 11 found one open issue that no test covers: a committed move does not advance `historyRevision` (see [Architecture](ARCHITECTURE.md#history-read-facade-and-invalidation)).
+
+Two documentation repairs, with no recorded result changed: merge `bc98c8a` had interleaved the [movement contract](#movement-contract-and-pure-ordering--2026-10-06) section with [Later shared-state commands](#later-shared-state-commands--2026-10-05) and dropped the first three lines of the Task 1 command block. The stray fence left behind rendered the next section, [Daily ordering migration](#daily-ordering-migration--2026-10-06), as code. Both sections were restored verbatim from the merge parents (`60e8e76` and `90d32b8`); every line of the damaged region is retained. Two links to the removed Schema v2 workflow section now point to [Schema v4 upgrade preparation](WORKFLOW.md#schema-v4-upgrade-preparation). Documentation checks: `git diff --check` passed, and a script resolving every relative link and heading anchor in `README.md`, `AGENTS.md`, and `docs/*.md` found none broken.
+
+
+## Movement History invalidation repair — Task 10 follow-up (2026-10-08)
+
+The independent whole-feature review reproduced a stale retained History detail on source `c0853af`: load Today in History, return to Today, reorder, reopen History before a lifecycle refresh. SQLite/Today had `[B, A]` while History retained `[A, B]`. This confirmed the Task 11 source-inspection hypothesis; original dated records above remain historical.
+
+The follow-up advances `historyRevision` only after repository `.changed` returns from COMMIT. A new real-SQLite integration test follows the retained History presentation through reorder and category movement, verifying saved order, grouping and progress without a general refresh. Existing movement tests now assert failed/rejected/equivalent requests retain the revision.
+
+Fresh shared-scheme Debug full suite: **404/404**, zero failures (24.336 s), including the new integration test; Release **BUILD SUCCEEDED** (arm64/x86_64). Xcode 27.0 (27A266a), Swift 6.4, macOS 26.6.2. Commands use `-project MenuPocket.xcodeproj -scheme MenuPocket -destination 'platform=macOS' -derivedDataPath build/task10-final/DerivedData`, Debug `test` with `-resultBundlePath build/task10-final/Full.xcresult`, then Release `build`. The exact three-file repair diff SHA-256 is `9d23f094e47504ade241b34a5b8dfc81ad0c4063295cfe3f98f5971faf045ed0`, against HEAD `c0853af43db7b9318f7a5a3ab6b1edb9ce105c2e`, with existing Task 11 documentation preserved.
+
+Fresh reviewer `/root/review_history_fix` did not author the repair and concluded **READY for the three-file repair**, independently inspecting callers and full-log/xcresult evidence. This does not close native feature acceptance. Logs, result bundle, exact diff and review are under ignored `build/task10-final/`. `xcresulttool` summary access initially hit a sandbox TestReport write restriction; the tests themselves passed, and the independent reviewer parsed their results.
+
+Completed Debug/Release test hosts were unregistered and moved to Trash using `FileManager.trashItem`, with resulting paths unregistered; original paths gone. Main `/Applications/MenuPocket.app` executable SHA-256 remains `41b7a235259fd71e04a04882c094253e25b7daad8c17597164ea9f2c677a1aed`. A separate native fixture session remains in progress and owns its own cleanup/evidence below; no production database, preferences, login registration or real hotkey was changed. No commit/push/PR.
+
+## Movement scroll and cursor follow-up (2026-10-08)
+
+The subsequent native session reproduced a SwiftUI update-loop hang during ordinary scrolling. Production groups now use `VStack` while retaining the existing scroll-position and reveal behavior. After a further user report of missing hand cursor feedback, the AppKit handle adds a visible-rect cursor tracking area. Exact five-file source/test diff SHA-256 `8e9c311ff5446e02422948437bd756055be737bfdd9b9d1c457d576a524c9086` against `c0853af`; latest shared-scheme `CursorFeedback.xcresult` independently confirms **404/404**, no failures/skips, and `cursor-release.log` records **BUILD SUCCEEDED**. Completed test hosts were unregistered/trashed (including unregistering Trash paths), as recorded in `cleanup-cursor-hosts.log`. Independent `CURSOR_FIX_REVIEW.md` finds no confirmed source defect but remains **BLOCKED on native cursor observations**. This result does not establish full Task 10 acceptance; the ongoing isolated fixture session is recorded in [Acceptance](DESKTOP_TASK_ACCEPTANCE.md#movement-follow-up--interrupted-scroll-verification-2026-10-08).
+
+Final clipped-handle snapshot: five-file diff SHA-256 `9fb2196dd2757ba7d1c89a6e1561a612b0d19400101262eb56095ac01fdff992`, `ClippedCursor.xcresult` 404/404, zero failures/skips, Release pass. `clipsToBounds = true` confines the handle's native visible tracking area; physical cursor verification is deferred by user. The user ended further manual checks after passing steps 6/7, and final fixture cleanup completed in `cleanup-session-final.log`. [Session closure](DESKTOP_TASK_ACCEPTANCE.md#movement-follow-up--session-closure-with-user-accepted-gaps-2026-10-08) records the accepted verification scope and remaining gaps.

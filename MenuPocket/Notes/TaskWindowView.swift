@@ -210,7 +210,9 @@ struct TaskWindowView: View {
                         if rows.isEmpty {
                             emptyState
                         } else {
-                            LazyVStack(alignment: .leading, spacing: 24) {
+                            // Tall groups must keep stable geometry while scrolling/revealing.
+                            // Lazy group layout can spin SwiftUI's update graph on macOS.
+                            VStack(alignment: .leading, spacing: 24) {
                                 ForEach(groups) { group in
                                     groupSurface(group)
                                         .id(group.id)
