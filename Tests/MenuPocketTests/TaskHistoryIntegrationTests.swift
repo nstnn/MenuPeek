@@ -27,6 +27,39 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testRetainedTodayHistoryReloadsAfterReorderAndCategoryMove() throws {
+        let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try repository.createCategory(name: "Work")
+        let a = note("A", "2026-10-06", done: false, categoryID: work.id)
+        let b = note("B", "2026-10-06", done: false, categoryID: work.id)
+        try repository.add(a)
+        try repository.add(b)
+        let (daily, presentation) = makeApp(repository: repository)
+        defer { presentation.stopForTermination(); daily.stopForTermination() }
+        daily.startup()
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        let history = try XCTUnwrap(presentation.historyState)
+        try history.select(GregorianDay(key: a.dayKey))
+        XCTAssertEqual(history.daySnapshot?.notes.map(\.id), [a.id, b.id])
+        XCTAssertTrue(presentation.showToday(state: daily))
+        let revision = daily.historyRevision
+        let up = try XCTUnwrap(presentation.menuMoves(for: b.id, state: daily)?.moveUp)
+        guard case .changed? = daily.moveTask(up) else { return XCTFail("Expected saved reorder") }
+        XCTAssertEqual(daily.historyRevision, revision + 1)
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        XCTAssertTrue(presentation.historyState === history)
+        XCTAssertEqual(history.daySnapshot?.notes.map(\.id), [b.id, a.id])
+        XCTAssertTrue(presentation.showToday(state: daily))
+        let move = TaskMoveRequest(taskID: b.id, expectedDayKey: b.dayKey,
+                                  expectedSourceGroup: .category(work.id), destinationGroup: .general,
+                                  placement: .endOfGroup)
+        guard case .changed? = daily.moveTask(move) else { return XCTFail("Expected saved category move") }
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["Work", "General"])
+        XCTAssertEqual(history.detailGroups.map { $0.visibleNotes.map(\.id) }, [[a.id], [b.id]])
+        XCTAssertEqual(history.progress, daily.availableProgress)
+    }
+
     func testCountsAgreeAcrossLayersThroughTodayCategoryAndDayChanges() throws {
         let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
         let work = try repository.createCategory(name: "Work")

@@ -2464,7 +2464,9 @@ final class DailyNotesStateTests: XCTestCase {
         state.categoryPreferences.setCollapsed(true, for: .general)
         let request = moveRequest(a)
         store.failWrite = .move
+        let failedRevision = state.historyRevision
         XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(state.historyRevision, failedRevision)
         XCTAssertEqual(state.notes, [a, b])
         XCTAssertEqual(state.taskIssue, .move)
         XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
@@ -2530,6 +2532,7 @@ final class DailyNotesStateTests: XCTestCase {
         state.categoryPreferences.setCollapsed(true, for: .general)
         state.categoryPreferences.setCollapsed(true, for: .category(work.id))
         let collapsed = state.categoryPreferences.collapsedGroupIDs
+        let revision = state.historyRevision
         XCTAssertEqual(state.moveTask(moveRequest(a)), .unchanged)
         let missing = note("Missing", day: a.dayKey, createdAt: 2)
         XCTAssertEqual(state.moveTask(moveRequest(missing)), .rejected(.taskNotFound))
@@ -2546,6 +2549,7 @@ final class DailyNotesStateTests: XCTestCase {
                        .rejected(.destinationNotFound))
         store.saved = []
         XCTAssertEqual(state.moveTask(moveRequest(a)), .rejected(.taskNotFound))
+        XCTAssertEqual(state.historyRevision, revision)
         XCTAssertEqual(state.notes, [a])
         XCTAssertEqual(state.draft, "Draft")
         XCTAssertEqual(state.editDraft, "Edit draft")

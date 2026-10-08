@@ -152,7 +152,11 @@ struct TaskDragHandle: NSViewRepresentable {
     let enabled: Bool
 
     func makeNSView(context: Context) -> TaskDragHandleView {
-        TaskDragHandleView(frame: .zero)
+        let view = TaskDragHandleView(frame: .zero)
+        // macOS 14+ permits visibleRect beyond bounds unless clipping is enabled.
+        // Cursor tracking must remain confined to this small handle.
+        view.clipsToBounds = true
+        return view
     }
 
     func updateNSView(_ view: TaskDragHandleView, context: Context) {
@@ -186,6 +190,7 @@ final class TaskDragHandleView: NSView, NSDraggingSource {
     private var sourceToken: UUID?
     // Retain the session owner independently of SwiftUI row updates/removal.
     private var sourceSession: TaskDragSession?
+    private var cursorTrackingArea: NSTrackingArea?
 
     override var acceptsFirstResponder: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
@@ -202,6 +207,20 @@ final class TaskDragHandleView: NSView, NSDraggingSource {
 
     override func resetCursorRects() {
         if isEnabled { addCursorRect(bounds, cursor: .openHand) }
+    }
+
+    override func updateTrackingAreas() {
+        if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        cursorTrackingArea = area
+        super.updateTrackingAreas()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        (isEnabled ? NSCursor.openHand : NSCursor.arrow).set()
     }
 
     override func mouseDown(with event: NSEvent) {
