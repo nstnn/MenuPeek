@@ -312,6 +312,89 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    /// One statement gives a coherent snapshot and uses notes_day_key_idx.
+    func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary] {
+        let statement = try prepare(
+            """
+            SELECT day_key, COUNT(*), COUNT(completed_at),
+                   SUM(CASE WHEN completed_at IS NULL OR
+                       (typeof(completed_at) IN ('integer', 'real') AND
+                        completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                       THEN 0 ELSE 1 END)
+            FROM notes WHERE day_key >= ? AND day_key < ?
+            GROUP BY day_key ORDER BY day_key ASC
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(range.start.key, at: 1, to: statement)
+        try bind(range.end.key, at: 2, to: statement)
+
+        var summaries: [DayTaskSummary] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return summaries }
+            try check(step, expected: SQLITE_ROW, operation: "read day summaries")
+            let summary = try daySummary(from: statement)
+            guard range.contains(summary.day) else { throw SQLiteNoteStoreError.invalidNoteRow }
+            summaries.append(summary)
+        }
+    }
+
+    func unfinishedDayPage(before: GregorianDay, limit: Int) throws -> UnfinishedDayPage {
+        guard limit > 0, limit < Int.max else { throw TaskHistoryDomainError.invalidPage }
+        let statement = try prepare(
+            """
+            SELECT day_key, COUNT(*), COUNT(completed_at),
+                   SUM(CASE WHEN completed_at IS NULL OR
+                       (typeof(completed_at) IN ('integer', 'real') AND
+                        completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                       THEN 0 ELSE 1 END) AS invalid_completion
+            FROM notes WHERE day_key < ?
+            GROUP BY day_key
+            HAVING COUNT(*) > COUNT(completed_at) OR invalid_completion > 0
+            ORDER BY day_key DESC LIMIT ?
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(before.key, at: 1, to: statement)
+        try check(sqlite3_bind_int64(statement, 2, Int64(limit + 1)), operation: "bind unfinished limit")
+
+        var summaries: [DayTaskSummary] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { break }
+            try check(step, expected: SQLITE_ROW, operation: "read unfinished day page")
+            // Validate the lookahead too: corrupt data must not imply a valid next page.
+            summaries.append(try daySummary(from: statement))
+        }
+        return try UnfinishedDayPage(before: before, limit: limit,
+                                     summaries: Array(summaries.prefix(limit)),
+                                     hasMore: summaries.count > limit)
+    }
+
+    private func daySummary(from statement: OpaquePointer) throws -> DayTaskSummary {
+        guard sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
+              sqlite3_column_type(statement, 2) == SQLITE_INTEGER,
+              sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
+              sqlite3_column_int64(statement, 3) == 0,
+              let total = Int(exactly: sqlite3_column_int64(statement, 1)),
+              let completed = Int(exactly: sqlite3_column_int64(statement, 2)),
+              total > 0 else {
+            throw SQLiteNoteStoreError.invalidNoteRow
+        }
+        return try DayTaskSummary(dayKey: text(at: 0, from: statement),
+                                  progress: NoteProgress(completed: completed, total: total))
+    }
+
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
+        let day = try GregorianDay(key: dayKey)
+        return try readTransaction {
+            let catalog = try categories()
+            let orderedNotes = try notes(for: day.key)
+            return try HistoryDaySnapshot(dayKey: day.key, notes: orderedNotes, categories: catalog)
+        }
+    }
+
     func incompleteCount(for dayKey: String) throws -> Int {
         let statement = try prepare(
             "SELECT COUNT(*) FROM notes WHERE day_key = ? AND completed_at IS NULL"
@@ -450,9 +533,83 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
-    // The transfer arrives in TASK-004; until then it fails without touching the database.
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
-        throw LaterTaskRepositoryError.unsupported("moveLaterToToday")
+        try transaction {
+            let readStatement = try prepare(
+                "SELECT text, created_at, completed_at, category_id FROM later_tasks WHERE id = ?"
+            )
+            defer { sqlite3_finalize(readStatement) }
+            try bind(id.uuidString, at: 1, to: readStatement)
+            let step = sqlite3_step(readStatement)
+            if step == SQLITE_DONE {
+                throw LaterTaskRepositoryError.notFound(id)
+            }
+            try check(step, expected: SQLITE_ROW, operation: "read Later task for transfer")
+            guard let createdAt = try instant(at: 1, from: readStatement) else {
+                throw SQLiteNoteStoreError.invalidNoteRow
+            }
+            if sqlite3_column_type(readStatement, 2) != SQLITE_NULL {
+                throw LaterTaskRepositoryError.alreadyCompleted(id)
+            }
+            let text = try self.text(at: 0, from: readStatement)
+            let categoryID: UUID?
+            if sqlite3_column_type(readStatement, 3) == SQLITE_NULL {
+                categoryID = nil
+            } else {
+                guard let catUUID = UUID(uuidString: try self.text(at: 3, from: readStatement)) else {
+                    throw SQLiteNoteStoreError.invalidNoteRow
+                }
+                _ = try requireCategory(catUUID)
+                categoryID = catUUID
+            }
+
+            let collisionStatement = try prepare("SELECT 1 FROM notes WHERE id = ?")
+            defer { sqlite3_finalize(collisionStatement) }
+            try bind(id.uuidString, at: 1, to: collisionStatement)
+            let collisionStep = sqlite3_step(collisionStatement)
+            if collisionStep == SQLITE_ROW {
+                throw LaterTaskRepositoryError.idCollision(id)
+            }
+            try check(collisionStep, expected: SQLITE_DONE, operation: "check destination note collision")
+
+            // Transfers append to the day's saved order like Add and Quick Add.
+            let order = try nextDailyOrder(for: dayKey)
+            let insertStatement = try prepare(
+                "INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id, display_order) VALUES (?, ?, ?, ?, NULL, ?, ?)"
+            )
+            defer { sqlite3_finalize(insertStatement) }
+            try bind(id.uuidString, at: 1, to: insertStatement)
+            try bind(text, at: 2, to: insertStatement)
+            try bind(dayKey, at: 3, to: insertStatement)
+            try check(sqlite3_bind_double(insertStatement, 4, createdAt.timeIntervalSince1970),
+                      operation: "bind created_at")
+            try bindCategoryID(categoryID, at: 5, to: insertStatement)
+            try check(sqlite3_bind_int64(insertStatement, 6, order), operation: "bind display_order")
+            try check(sqlite3_step(insertStatement), expected: SQLITE_DONE, operation: "insert transferred note")
+
+            let deleteStatement = try prepare("DELETE FROM later_tasks WHERE id = ?")
+            defer { sqlite3_finalize(deleteStatement) }
+            try bind(id.uuidString, at: 1, to: deleteStatement)
+            try executeWrite(deleteStatement, id: id, operation: "delete transferred Later task",
+                             notFound: LaterTaskRepositoryError.notFound(id))
+
+            return Note(id: id, text: text, dayKey: dayKey, createdAt: createdAt,
+                        completedAt: nil, categoryID: categoryID)
+        }
+    }
+
+    /// The first SELECT establishes the snapshot shared by all required reads.
+    /// Unlike mutation transactions, this does not reserve the writer lock.
+    private func readTransaction<Result>(_ body: () throws -> Result) throws -> Result {
+        try Self.execute("BEGIN DEFERRED", in: database)
+        do {
+            let result = try body()
+            try Self.execute("COMMIT", in: database)
+            return result
+        } catch {
+            try? Self.execute("ROLLBACK", in: database)
+            throw error
+        }
     }
 
     private func transaction<Result>(_ body: () throws -> Result) throws -> Result {

@@ -40,6 +40,16 @@ protocol NoteRepository {
     /// authorizes the action-time Today key. Changed snapshots return only after
     /// COMMIT; rejected/unchanged requests perform no updates. Storage failures throw.
     func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome
+    /// Sparse whole-day counts, ordered oldest first, in [start, end).
+    /// A failed or malformed read throws; only successful reads may be empty.
+    func daySummaries(in range: HistoryDayRange) throws -> [DayTaskSummary]
+    /// Current catalog and ordered tasks from one coherent, read-only snapshot.
+    /// Required-read or validation failures throw, never publish a partial day.
+    func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot
+    /// Newest-first whole-day counts for unfinished days strictly before cutoff.
+    /// Positive limit must leave room for one lookahead row. Failures throw;
+    /// nextBefore is the oldest published day only when another page exists.
+    func unfinishedDayPage(before: GregorianDay, limit: Int) throws -> UnfinishedDayPage
     func incompleteCount(for dayKey: String) throws -> Int
     /// Appends a task after the day's existing tasks.
     func add(_ note: Note) throws

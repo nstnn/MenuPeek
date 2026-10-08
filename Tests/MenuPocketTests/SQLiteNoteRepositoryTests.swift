@@ -827,6 +827,337 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try store.categories().first?.id, category.id)
     }
 
+    func testDaySummariesAreSparseOrderedAssignedDayCountsAndPreserveStorage() throws {
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2025-12-15"))
+        let beforeMonth = note("Excluded", day: "2025-11-30", createdAt: 1)
+        let first = note("First", day: "2025-12-01", createdAt: 2)
+        let nextMonth = note("Excluded next", day: "2026-01-01", createdAt: 3)
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            let done = note("Done outside assigned month", day: "2025-12-01", createdAt: 4,
+                            completedAt: Date(timeIntervalSince1970: 1), categoryID: category.id)
+            let last = note("All completed", day: "2025-12-31", createdAt: 5,
+                            completedAt: Date(timeIntervalSince1970: 2))
+            let middle = note("All incomplete", day: "2025-12-15", createdAt: 6)
+            for row in [last, nextMonth, beforeMonth, done, middle, first] { try store.add(row) }
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let categories = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+            let later = try laterRows()
+            let schema = try schemaSnapshot()
+            let version = try schemaVersion()
+            let suite = "HistorySummaryTests-\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("Keep", forKey: "unrelated")
+            let preferences = defaults.persistentDomain(forName: suite)
+
+            let summaries = try store.daySummaries(in: range)
+            XCTAssertEqual(summaries.map(\.dayKey), ["2025-12-01", "2025-12-15", "2025-12-31"])
+            XCTAssertEqual(summaries.map(\.progress), [NoteProgress(completed: 1, total: 2),
+                                                      NoteProgress(completed: 0, total: 1),
+                                                      NoteProgress(completed: 1, total: 1)])
+            for summary in summaries {
+                XCTAssertEqual(summary.progress,
+                               NoteProgress(notes: try store.notes(for: summary.dayKey), for: summary.dayKey))
+            }
+            XCTAssertEqual(try store.daySummaries(in: .month(containing: GregorianDay(key: "2026-01-20")))
+                .map(\.dayKey), ["2026-01-01"])
+            XCTAssertEqual(try store.daySummaries(in: .month(containing: GregorianDay(key: "2024-02-29"))), [])
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), categories)
+            XCTAssertEqual(try laterRows(), later)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try schemaVersion(), version)
+            XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, preferences as NSDictionary?)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.daySummaries(in: range).map(\.dayKey),
+                       ["2025-12-01", "2025-12-15", "2025-12-31"])
+        let plan = try rawRows("""
+            EXPLAIN QUERY PLAN SELECT day_key, COUNT(*), COUNT(completed_at),
+            SUM(CASE WHEN completed_at IS NULL OR
+                (typeof(completed_at) IN ('integer', 'real') AND
+                 completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
+                THEN 0 ELSE 1 END)
+            FROM notes WHERE day_key >= '2025-12-01' AND day_key < '2026-01-01'
+            GROUP BY day_key ORDER BY day_key ASC
+            """)
+        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+        print("History summary query plan: \(plan)")
+    }
+
+    func testDaySummariesRejectInvalidCompletionOnlyWithinRequestedRange() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(note("In range", day: "2024-02-29", createdAt: 1))
+        try store.add(note("Outside", day: "2024-03-01", createdAt: 2))
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2024-02-29"))
+        try executeRaw("UPDATE notes SET completed_at = 'invalid' WHERE day_key = '2024-03-01'")
+        XCTAssertEqual(try store.daySummaries(in: range).first?.progress, NoteProgress(completed: 0, total: 1))
+        for representation in ["'invalid'", "X'0102'", "1e999", "-1e999"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2024-02-29'")
+            XCTAssertThrowsError(try store.daySummaries(in: range)) { error in
+                guard case SQLiteNoteStoreError.invalidNoteRow = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+        for representation in ["0", "-1", "1.5", "NULL"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2024-02-29'")
+            XCTAssertEqual(try store.daySummaries(in: range).first?.progress.completed,
+                           representation == "NULL" ? 0 : 1)
+        }
+    }
+
+    func testDaySummariesRejectMalformedInRangeDayAndQueryFailures() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.add(note("Malformed day", day: "2025-02-30", createdAt: 1))
+        let range = try HistoryDayRange.month(containing: GregorianDay(key: "2025-02-01"))
+        XCTAssertThrowsError(try store.daySummaries(in: range))
+        try executeRaw("DELETE FROM notes; DROP TABLE notes")
+        XCTAssertThrowsError(try store.daySummaries(in: range)) { error in
+            guard case SQLiteNoteStoreError.databaseError = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testHistoryDaySnapshotPreservesFullRowsOrderCatalogAndStorage() throws {
+        let day = "2025-12-31"
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let work = try store.createCategory(name: "Work")
+            let unused = try store.createCategory(name: "Unused")
+            let first = note("First", day: day, createdAt: 10, categoryID: work.id)
+            let second = note("Second", day: day, createdAt: 10,
+                              completedAt: Date(timeIntervalSince1970: 100), categoryID: work.id)
+            let general = note("General", day: day, createdAt: 1)
+            for saved in [first, second, general, note("Other day", day: "2026-01-01", createdAt: 0)] {
+                try store.add(saved)
+            }
+            try executeRaw("INSERT INTO later_tasks (id, text, created_at) VALUES ('\(UUID().uuidString)', 'Later', 2)")
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let catalog = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+            let later = try laterRows()
+            let schema = try schemaSnapshot()
+            let version = try schemaVersion()
+
+            let snapshot = try store.historyDaySnapshot(for: day)
+            XCTAssertEqual(snapshot.notes, [first, second, general])
+            XCTAssertEqual(snapshot.categories, [work, unused])
+            XCTAssertEqual(snapshot.progress, NoteProgress(completed: 1, total: 3))
+            XCTAssertEqual(snapshot.filteredNotes(.unfinished), [first, general])
+            XCTAssertEqual(snapshot.groups, TaskGroup.groups(categories: [work, unused], notes: [first, second, general]))
+            let empty = try store.historyDaySnapshot(for: "2024-02-29")
+            XCTAssertEqual(empty.notes, [])
+            XCTAssertEqual(empty.categories, [work, unused])
+            XCTAssertEqual(empty.progress, NoteProgress(completed: 0, total: 0))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), catalog)
+            XCTAssertEqual(try laterRows(), later)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try schemaVersion(), version)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.historyDaySnapshot(for: day).notes.map(\.text), ["First", "Second", "General"])
+    }
+
+    func testHistoryDaySnapshotUsesRenamedCatalogAndRemovedCategoryBecomesGeneral() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        let saved = note("Saved", day: "2025-12-31", createdAt: 1, categoryID: category.id)
+        try store.add(saved)
+        let initial = try store.historyDaySnapshot(for: saved.dayKey)
+        let renamed = try store.renameCategory(id: category.id, name: "Projects")
+        let snapshot = try store.historyDaySnapshot(for: saved.dayKey)
+        XCTAssertEqual(snapshot.categories, [renamed])
+        XCTAssertEqual(snapshot.notes, initial.notes)
+        XCTAssertEqual(snapshot.progress, initial.progress)
+        try store.removeCategory(id: category.id)
+        let removed = try store.historyDaySnapshot(for: saved.dayKey)
+        let general = Note(id: saved.id, text: saved.text, dayKey: saved.dayKey,
+                           createdAt: saved.createdAt, completedAt: saved.completedAt, categoryID: nil)
+        XCTAssertEqual(removed.categories, [])
+        XCTAssertEqual(removed.notes, [general])
+        XCTAssertEqual(removed.progress, initial.progress)
+    }
+
+    func testHistoryDaySnapshotFailuresLeaveNoTransactionAndRetryAfterRepair() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        let saved = note("Saved", day: "2025-12-31", createdAt: 1, categoryID: category.id)
+        try store.add(saved)
+        XCTAssertThrowsError(try store.historyDaySnapshot(for: "2025-02-30"))
+        let faults = [
+            ("UPDATE categories SET name_key = 'wrong'", "UPDATE categories SET name_key = 'work'"),
+            ("UPDATE notes SET created_at = 'invalid'", "UPDATE notes SET created_at = 1"),
+            ("UPDATE notes SET completed_at = 'invalid'", "UPDATE notes SET completed_at = NULL"),
+            ("PRAGMA foreign_keys = OFF; UPDATE notes SET category_id = '\(UUID().uuidString)'",
+             "UPDATE notes SET category_id = '\(category.id.uuidString)'"),
+            ("ALTER TABLE notes RENAME TO hidden_notes", "ALTER TABLE hidden_notes RENAME TO notes")
+        ]
+        for (fault, repair) in faults {
+            try executeRaw(fault)
+            XCTAssertThrowsError(try store.historyDaySnapshot(for: saved.dayKey), fault)
+            // Another connection can repair the fault only after the read lock is released.
+            try executeRaw(repair)
+            XCTAssertEqual(try store.historyDaySnapshot(for: saved.dayKey).notes, [saved])
+            // A mutation's BEGIN IMMEDIATE also proves no transaction was left open.
+            try store.setCompleted(id: saved.id, completedAt: nil)
+        }
+    }
+
+    func testHistoryDaySnapshotReadsCommittedDataWhileAnotherWriterIsActive() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try store.createCategory(name: "Work")
+        let saved = note("Saved", day: "2025-12-31", createdAt: 1, categoryID: category.id)
+        try store.add(saved)
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &connection), SQLITE_OK)
+        let writer = try XCTUnwrap(connection)
+        defer { sqlite3_close(writer) }
+        XCTAssertEqual(sqlite3_exec(writer, "BEGIN IMMEDIATE", nil, nil, nil), SQLITE_OK)
+        defer { sqlite3_exec(writer, "ROLLBACK", nil, nil, nil) }
+        XCTAssertEqual(sqlite3_exec(writer, "UPDATE categories SET name = 'Projects', name_key = 'projects'; UPDATE notes SET text = 'Changed'", nil, nil, nil), SQLITE_OK)
+        // A history BEGIN IMMEDIATE would fail here with SQLITE_BUSY.
+        let beforeCommit = try store.historyDaySnapshot(for: saved.dayKey)
+        XCTAssertEqual(beforeCommit.categories, [category])
+        XCTAssertEqual(beforeCommit.notes, [saved])
+        XCTAssertEqual(sqlite3_exec(writer, "COMMIT", nil, nil, nil), SQLITE_OK)
+        let afterCommit = try store.historyDaySnapshot(for: saved.dayKey)
+        XCTAssertEqual(afterCommit.categories.first?.name, "Projects")
+        XCTAssertEqual(afterCommit.notes.first?.text, "Changed")
+    }
+
+    func testUnfinishedPagesCoverPriorYearsWithWholeDayCountsAndPreserveStorage() throws {
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        let expected = ["2026-10-05", "2026-09-01", "2025-12-31", "2024-02-29", "2001-01-01"]
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            for day in expected.reversed() {
+                try store.add(note("Unfinished", day: day, createdAt: 1, categoryID: category.id))
+            }
+            // The newest day is 3/5, even when filtering for unfinished days.
+            try store.add(note("Another unfinished", day: expected[0], createdAt: 2))
+            for index in 0..<3 {
+                try store.add(note("Completed", day: expected[0], createdAt: Double(index),
+                                   completedAt: Date(timeIntervalSince1970: 999)))
+            }
+            try store.add(note("Completed-only day", day: "2026-10-04", createdAt: 1,
+                               completedAt: Date(timeIntervalSince1970: 0)))
+            for day in [cutoff.key, "2027-01-01"] {
+                try store.add(note("Excluded", day: day, createdAt: 1))
+            }
+            try executeRaw("INSERT INTO later_tasks (id, text, created_at) VALUES ('\(UUID().uuidString)', 'Later', 2)")
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let catalog = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+            let later = try laterRows()
+            let schema = try schemaSnapshot()
+            let version = try schemaVersion()
+            var before = cutoff
+            var days: [String] = []
+            repeat {
+                let page = try store.unfinishedDayPage(before: before, limit: 2)
+                days += page.summaries.map(\.dayKey)
+                if days.count == 2 {
+                    XCTAssertEqual(page.summaries[0].progress, NoteProgress(completed: 3, total: 5))
+                    XCTAssertEqual(page.summaries[0].incomplete, 2)
+                    XCTAssertEqual(page.nextBefore?.key, expected[1])
+                }
+                guard let next = page.nextBefore else { break }
+                before = next
+            } while days.count <= expected.count
+            XCTAssertEqual(days, expected)
+            let end = try store.unfinishedDayPage(before: GregorianDay(key: expected.last!), limit: 2)
+            XCTAssertEqual(end.summaries, [])
+            XCTAssertNil(end.nextBefore)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), catalog)
+            XCTAssertEqual(try laterRows(), later)
+            XCTAssertEqual(try schemaSnapshot(), schema)
+            XCTAssertEqual(try schemaVersion(), version)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let exact = try reopened.unfinishedDayPage(before: cutoff, limit: expected.count)
+        XCTAssertEqual(exact.summaries.map(\.dayKey), expected)
+        XCTAssertNil(exact.nextBefore)
+        let single = try reopened.unfinishedDayPage(before: cutoff, limit: 1)
+        XCTAssertEqual(single.summaries.map(\.dayKey), [expected[0]])
+        XCTAssertEqual(single.nextBefore?.key, expected[0])
+        let plan = try rawRows("""
+            EXPLAIN QUERY PLAN SELECT day_key, COUNT(*), COUNT(completed_at)
+            FROM notes WHERE day_key < '2026-10-06'
+            GROUP BY day_key HAVING COUNT(*) > COUNT(completed_at)
+            ORDER BY day_key DESC LIMIT 3
+            """)
+        XCTAssertTrue(plan.contains { ($0.last ?? nil)?.contains("SEARCH notes USING INDEX notes_day_key_idx") == true })
+    }
+
+    func testUnfinishedPageRejectsInvalidLimitsAndEmptySuccessIsDistinctFromFailure() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        for limit in [-1, 0, Int.max] {
+            XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: limit)) { error in
+                XCTAssertEqual(error as? TaskHistoryDomainError, .invalidPage)
+            }
+        }
+        let empty = try store.unfinishedDayPage(before: cutoff, limit: 31)
+        XCTAssertEqual(empty.summaries, [])
+        XCTAssertNil(empty.nextBefore)
+        try executeRaw("DROP TABLE notes")
+        XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: 31)) { error in
+            guard case SQLiteNoteStoreError.databaseError = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testUnfinishedPageValidatesCompletionIncludingCompletedOnlyDaysAndLookahead() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        try store.add(note("Newest", day: "2026-10-05", createdAt: 1))
+        try store.add(note("Lookahead", day: "2026-10-04", createdAt: 1))
+        try store.add(note("Outside cutoff", day: cutoff.key, createdAt: 1))
+        try executeRaw("UPDATE notes SET completed_at = 'invalid' WHERE day_key = '2026-10-06'")
+        XCTAssertEqual(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore?.key, "2026-10-05")
+        for representation in ["'invalid'", "X'0102'", "1e999", "-1e999"] {
+            // This day has no NULL completion left, but corruption cannot hide as completed-only.
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2026-10-04'")
+            XCTAssertThrowsError(try store.unfinishedDayPage(before: cutoff, limit: 1))
+        }
+        for representation in ["0", "-1", "1.5"] {
+            try executeRaw("UPDATE notes SET completed_at = \(representation) WHERE day_key = '2026-10-04'")
+            XCTAssertNil(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore)
+        }
+        try executeRaw("UPDATE notes SET completed_at = NULL WHERE day_key = '2026-10-04'")
+        XCTAssertEqual(try store.unfinishedDayPage(before: cutoff, limit: 1).nextBefore?.key, "2026-10-05")
+    }
+
+    func testUnfinishedLoadMoreThrowsOnMalformedDayThenCanRetrySameCursor() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let cutoff = try GregorianDay(key: "2026-10-06")
+        for day in ["2026-10-05", "2026-10-04", "2025-02-28"] {
+            try store.add(note("Saved", day: day, createdAt: 1))
+        }
+        let first = try store.unfinishedDayPage(before: cutoff, limit: 1)
+        let next = try XCTUnwrap(first.nextBefore)
+        // Add a malformed day in the next page's lookahead after the first read.
+        try store.add(note("Malformed", day: "2025-02-30", createdAt: 1))
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        XCTAssertThrowsError(try store.unfinishedDayPage(before: next, limit: 1)) { error in
+            XCTAssertEqual(error as? TaskHistoryDomainError, .invalidDayKey("2025-02-30"))
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+        try executeRaw("DELETE FROM notes WHERE day_key = '2025-02-30'")
+        let retry = try store.unfinishedDayPage(before: next, limit: 1)
+        XCTAssertEqual(retry.summaries.map(\.dayKey), ["2026-10-04"])
+        XCTAssertEqual(retry.nextBefore?.key, "2026-10-04")
+        let last = try store.unfinishedDayPage(before: XCTUnwrap(retry.nextBefore), limit: 1)
+        XCTAssertEqual(last.summaries.map(\.dayKey), ["2025-02-28"])
+        XCTAssertNil(last.nextBefore)
+    }
+
     func testLaterActionsPreserveIdentityOrderAndTodayAndSurviveReopen() throws {
         let today = note("Today", day: "2026-10-05", createdAt: 1)
         let first = later("First", createdAt: 10)
@@ -1232,6 +1563,139 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             // Reopening must still reject the corrupt store; operations did not repair it.
             XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: url))
         }
+    }
+
+    func testMoveLaterToTodayPreservesFieldsAppendsToDailyRowsAndSurvivesReopen() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let existing1 = note("First Today", day: "2026-10-05", createdAt: 10, categoryID: work.id)
+        let existing2 = note("Second Today", day: "2026-10-05", createdAt: 20,
+                             completedAt: Date(timeIntervalSince1970: 25))
+        try store.add(existing1)
+        try store.add(existing2)
+
+        let source = later("Unscheduled task", createdAt: 5, categoryID: work.id)
+        let otherLater = later("Stay in Later", createdAt: 30)
+        try store.addLater(source)
+        try store.addLater(otherLater)
+
+        let moved = try store.moveLaterToToday(id: source.id, dayKey: "2026-10-05")
+        XCTAssertEqual(moved.id, source.id)
+        XCTAssertEqual(moved.text, source.text)
+        XCTAssertEqual(moved.dayKey, "2026-10-05")
+        XCTAssertEqual(moved.createdAt, source.createdAt)
+        XCTAssertNil(moved.completedAt)
+        XCTAssertEqual(moved.categoryID, work.id)
+
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [existing1, existing2, moved])
+        XCTAssertEqual(try store.incompleteCount(for: "2026-10-05"), 2)
+        XCTAssertEqual(try store.laterTasks(), [otherLater])
+        XCTAssertEqual(try rawRows("SELECT id FROM notes WHERE id = '\(source.id.uuidString)'"),
+                       [[source.id.uuidString]])
+        XCTAssertEqual(try rawRows("SELECT id FROM later_tasks WHERE id = '\(source.id.uuidString)'"), [])
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [existing1, existing2, moved])
+        XCTAssertEqual(try reopened.incompleteCount(for: "2026-10-05"), 2)
+        XCTAssertEqual(try reopened.laterTasks(), [otherLater])
+    }
+
+    func testMoveLaterToTodayRejectsMissingCompletedCollidingAndMissingCategoryTasks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+
+        let missingID = UUID()
+        XCTAssertThrowsError(try store.moveLaterToToday(id: missingID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .notFound(missingID))
+        }
+
+        let done = later("Already finished", createdAt: 10, completedAt: Date(timeIntervalSince1970: 20))
+        try store.addLater(done)
+        XCTAssertThrowsError(try store.moveLaterToToday(id: done.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .alreadyCompleted(done.id))
+        }
+        XCTAssertEqual(try store.laterTasks(), [done])
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [])
+
+        let valid = later("Move once", createdAt: 15)
+        try store.addLater(valid)
+        let moved = try store.moveLaterToToday(id: valid.id, dayKey: "2026-10-05")
+        XCTAssertEqual(moved.id, valid.id)
+        XCTAssertThrowsError(try store.moveLaterToToday(id: valid.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .notFound(valid.id))
+        }
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [moved])
+
+        let collisionID = UUID()
+        let dailyNote = Note(id: collisionID, text: "Existing daily", dayKey: "2026-10-05",
+                             createdAt: Date(timeIntervalSince1970: 1), completedAt: nil)
+        try store.add(dailyNote)
+        try executeRaw(
+            """
+            INSERT INTO later_tasks (id, text, created_at, completed_at, category_id)
+            VALUES ('\(collisionID.uuidString)', 'Colliding later', 2, NULL, NULL);
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: collisionID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? LaterTaskRepositoryError, .idCollision(collisionID))
+        }
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [moved, dailyNote])
+        XCTAssertEqual(try store.laterTasks().map(\.id), [done.id, collisionID])
+
+        let badCatID = UUID()
+        let badTaskID = UUID()
+        try executeRaw(
+            """
+            PRAGMA foreign_keys = OFF;
+            INSERT INTO later_tasks (id, text, created_at, completed_at, category_id)
+            VALUES ('\(badTaskID.uuidString)', 'Bad category', 3, NULL, '\(badCatID.uuidString)');
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: badTaskID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(badCatID))
+        }
+    }
+
+    func testMoveLaterToTodayRollsBackOnInsertOrDeleteFailuresAndPreservesState() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let today = note("Existing", day: "2026-10-05", createdAt: 10, categoryID: work.id)
+        try store.add(today)
+        let candidate = later("Candidate", createdAt: 20, categoryID: work.id)
+        try store.addLater(candidate)
+        let notesBefore = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterBefore = try laterRows()
+
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_transfer_insert BEFORE INSERT ON notes
+            BEGIN SELECT RAISE(FAIL, 'write rejected on transfer insert'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05"))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notesBefore)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        try executeRaw("DROP TRIGGER reject_transfer_insert")
+
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_transfer_delete BEFORE DELETE ON later_tasks
+            BEGIN SELECT RAISE(FAIL, 'write rejected on transfer delete'); END;
+            """
+        )
+        XCTAssertThrowsError(try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05"))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notesBefore)
+        XCTAssertEqual(try laterRows(), laterBefore)
+        try executeRaw("DROP TRIGGER reject_transfer_delete")
+
+        let savedNote = try store.moveLaterToToday(id: candidate.id, dayKey: "2026-10-05")
+        XCTAssertEqual(savedNote.id, candidate.id)
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [today, savedNote])
+        XCTAssertEqual(try store.laterTasks(), [])
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [today, savedNote])
+        XCTAssertEqual(try reopened.laterTasks(), [])
     }
 
     private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,

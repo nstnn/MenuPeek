@@ -59,9 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApplication.shared.setActivationPolicy(.regular)
         installApplicationMenu()
         dailyNotesState.startup()
-        taskStatusItemController = TaskStatusItemController(state: dailyNotesState) { [weak self] in
-            self?.showTasks()
-        }
+        taskStatusItemController = TaskStatusItemController(
+            state: dailyNotesState,
+            showTasks: { [weak self] in self?.showToday() },
+            makeGlanceMenu: { [weak self] in self?.makeGlanceMenu() }
+        )
         // Registers in both launch contexts; a press never raises a window on its own.
         model.startQuickAdd { [weak self] in self?.quickAddHotKeyPressed() }
         if context == .manual { showTasks() }
@@ -72,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         model.stopQuickAdd()
         quickAddPanelController?.dismiss()
         quickAddPanelController?.panel.close()
+        taskWindowController?.stopForTermination()
         dailyNotesState.stopForTermination()
         taskStatusItemController?.remove()
         taskStatusItemController = nil
@@ -88,19 +91,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func showTasks() {
         guard !isTerminating else { return }
-        if taskWindowController == nil {
-            taskWindowController = TaskWindowController(state: dailyNotesState) { [weak self] in
-                self?.showSettings()
-            }
-        }
-        taskWindowController?.showTasks()
+        makeTaskWindowController().showTasks()
         if taskWindowController?.window?.isVisible == true { completeOnboardingAfterPresentation() }
     }
 
-    @objc func addTask() {
+    /// Status-item and unavailable Quick Add routes request Today without
+    /// discarding a guarded interaction in the retained window.
+    private func showToday() {
         guard !isTerminating else { return }
+        makeTaskWindowController().showToday()
+        if taskWindowController?.window?.isVisible == true { completeOnboardingAfterPresentation() }
+    }
+
+    private func makeTaskWindowController() -> TaskWindowController {
+        if let taskWindowController { return taskWindowController }
+        let controller = TaskWindowController(state: dailyNotesState) { [weak self] in
+            self?.showSettings()
+        }
+        taskWindowController = controller
+        return controller
+    }
+
+    @objc func addTask() {
+        guard !isTerminating, canAddTask else { return }
         showTasks()
         taskWindowController?.presentation.requestNewTask(state: dailyNotesState)
+    }
+
+    /// View > Today (⌘1) and Later (⌘2). Opens the window when needed and
+    /// leaves a guarded interaction in place instead of forcing the switch.
+    @objc func showDestination(_ sender: NSMenuItem) {
+        guard let destination = Self.destination(forMenuTag: sender.tag) else { return }
+        show(destination)
+    }
+
+    private func show(_ destination: TaskListDestination) {
+        guard !isTerminating else { return }
+        showTasks()
+        taskWindowController?.presentation.selectDestination(destination, state: dailyNotesState)
+    }
+
+    private static func destination(forMenuTag tag: Int) -> TaskListDestination? {
+        switch tag {
+        case 1: .today
+        case 2: .later
+        default: nil
+        }
     }
 
     @objc func showSettings() {
@@ -121,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         if dailyNotesState.availableProgress == nil { dailyNotesState.refresh() }
         guard dailyNotesState.availableProgress != nil else {
-            showTasks()
+            showToday()
             return
         }
         let controller = quickAddPanelController ?? makeQuickAddPanelController()
@@ -143,14 +179,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard !isTerminating else { return false }
         if menuItem.action == #selector(addTask) {
-            // The window's presentation also blocks Add behind deletion
-            // confirmation and the category manager.
-            if let presentation = taskWindowController?.presentation {
-                return presentation.canAddTask(state: dailyNotesState)
+            return canAddTask
+        }
+        if menuItem.action == #selector(showDestination(_:)),
+           let destination = Self.destination(forMenuTag: menuItem.tag) {
+            // A fresh window starts at Today with nothing guarded.
+            guard let presentation = taskWindowController?.presentation else {
+                menuItem.state = destination == .today ? .on : .off
+                return true
             }
-            return dailyNotesState.availableProgress != nil && dailyNotesState.editingNoteID == nil
+            menuItem.state = presentation.selectedDestination == destination ? .on : .off
+            return presentation.canSelectDestination(destination, state: dailyNotesState)
         }
         return true
+    }
+
+    private var canAddTask: Bool {
+        if let presentation = taskWindowController?.presentation {
+            return presentation.canAddTask(state: dailyNotesState)
+        }
+        return canAddTaskToFreshWindow
+    }
+
+    /// The glance's Add Task… targets Today even when Later is selected.
+    private var canAddTaskToToday: Bool {
+        guard !isTerminating else { return false }
+        if let presentation = taskWindowController?.presentation {
+            return presentation.canAddTask(to: .today, state: dailyNotesState)
+        }
+        return canAddTaskToFreshWindow
+    }
+
+    /// A fresh window starts at Today with nothing guarded but the state's edits.
+    private var canAddTaskToFreshWindow: Bool {
+        dailyNotesState.availableProgress != nil &&
+            dailyNotesState.editingNoteID == nil && dailyNotesState.editingLaterTaskID == nil
+    }
+
+    private func addTaskToToday() {
+        guard !isTerminating, canAddTaskToToday else { return }
+        showToday()
+        taskWindowController?.presentation.requestNewTask(in: .today, state: dailyNotesState)
+    }
+
+    /// Built from the shared state's published values on each right-click.
+    /// Reading them never opens storage or refreshes; Retry is the only refresh.
+    private func makeGlanceMenu() -> NSMenu? {
+        guard hasFinishedLaunching, !isTerminating else { return nil }
+        let state = dailyNotesState
+        let glance = MenuBarGlance(dayKey: state.todayKey ?? NoteDay().keys().today,
+                                   progress: state.availableProgress, groups: state.groups,
+                                   laterRemainingCount: state.availableLaterRemainingCount,
+                                   canAddTask: canAddTaskToToday)
+        let actions = MenuBarGlanceActions(
+            openToday: { [weak self] in self?.showToday() },
+            addTask: { [weak self] in self?.addTaskToToday() },
+            openLater: { [weak self] in self?.show(.later) },
+            showSettings: { [weak self] in self?.showSettings() },
+            quit: { [weak self] in
+                guard let self, !self.isTerminating else { return }
+                NSApplication.shared.terminate(nil)
+            },
+            retry: { [weak self] in
+                guard let self, !self.isTerminating else { return }
+                self.dailyNotesState.refresh()
+            }
+        )
+        return MenuBarGlanceMenu.make(glance, actions: actions)
     }
 
     static func appearance(for theme: AppTheme) -> NSAppearance? {
@@ -214,6 +309,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         menu.addItem(editItem)
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        for (tag, title, key) in [(1, "Today", "1"), (2, "Later", "2")] {
+            let item = viewMenu.addItem(withTitle: title, action: #selector(showDestination(_:)), keyEquivalent: key)
+            item.tag = tag
+            item.target = self
+        }
+        viewItem.submenu = viewMenu
+        menu.addItem(viewItem)
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

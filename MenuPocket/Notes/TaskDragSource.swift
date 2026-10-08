@@ -145,7 +145,8 @@ final class TaskDragSession {
 }
 
 struct TaskDragHandle: NSViewRepresentable {
-    let note: Note
+    let taskID: UUID
+    let text: String
     let state: DailyNotesState
     let session: TaskDragSession
     let enabled: Bool
@@ -155,7 +156,7 @@ struct TaskDragHandle: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TaskDragHandleView, context: Context) {
-        view.taskID = note.id
+        view.taskID = taskID
         view.state = state
         view.session = session
         if view.isEnabled != enabled {
@@ -163,8 +164,8 @@ struct TaskDragHandle: NSViewRepresentable {
             view.window?.invalidateCursorRects(for: view)
         }
         view.toolTip = "Drag to move task"
-        view.setAccessibilityLabel("Move task: \(note.text)")
-        view.setAccessibilityIdentifier("taskDragHandle-\(note.id)")
+        view.setAccessibilityLabel("Move task: \(text)")
+        view.setAccessibilityIdentifier("taskDragHandle-\(taskID)")
         view.needsDisplay = true
     }
 
