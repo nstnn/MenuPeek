@@ -185,7 +185,8 @@ final class TaskHistoryIntegrationTests: XCTestCase {
             let completed = index % 11
             if completed < 10 { expectedUnfinishedDays += 1 }
             for task in 0..<10 {
-                statements.append("INSERT INTO notes (id, text, day_key, created_at, completed_at) VALUES ('\(UUID().uuidString)', 'Task \(task)', '\(key)', \(1_700_000_000 + index * 100 + task), \(task < completed ? "1700000000" : "NULL"));")
+                // Schema v4 requires a unique saved rank per day.
+                statements.append("INSERT INTO notes (id, text, day_key, created_at, completed_at, display_order) VALUES ('\(UUID().uuidString)', 'Task \(task)', '\(key)', \(1_700_000_000 + index * 100 + task), \(task < completed ? "1700000000" : "NULL"), \(task));")
             }
         }
         statements.append("COMMIT;")

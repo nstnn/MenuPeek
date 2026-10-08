@@ -8,6 +8,502 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+    func testDragScrollBoundsCancellationAndSourceUnmount() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 2000))
+        scroll.documentView = document
+        let source = TaskDragHandleView(frame: NSRect(x: 0, y: 0, width: 16, height: 24))
+        document.addSubview(source)
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = scroll
+        window.orderFront(nil)
+        let session = state.taskWindowPresentation.dragSession
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        defer { session.ended(token: payload.token); window.close() }
+        // Lazy source removal must not invalidate a native drag still in flight.
+        source.removeFromSuperview()
+        XCTAssertEqual(session.active, payload)
+        let clip = scroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: 800))
+        let pointer = window.convertPoint(toScreen: clip.convert(
+            NSPoint(x: clip.bounds.midX, y: clip.bounds.minY + 1), to: nil))
+        let before = clip.bounds.origin.y
+        session.scrollAtPointer(screenPoint: pointer)
+        XCTAssertNotEqual(clip.bounds.origin.y, before)
+        XCTAssertLessThanOrEqual(abs(clip.bounds.origin.y - before), 12)
+        session.cancel()
+        let cancelled = clip.bounds.origin
+        session.scrollAtPointer(screenPoint: pointer)
+        XCTAssertEqual(clip.bounds.origin, cancelled)
+        XCTAssertNil(session.active)
+        XCTAssertTrue(session.isDragging, "Reservation lasts until native end")
+        XCTAssertNil(session.begin(taskID: a.id, state: state, source: source))
+        session.ended(token: payload.token)
+        XCTAssertFalse(session.isDragging)
+    }
+
+    func testDragEdgeScrollingIsBoundedAndIgnoresOutsideAndCenter() {
+        let viewport = NSRect(x: 0, y: 0, width: 300, height: 200)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 0), viewport: viewport), -12)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 20), viewport: viewport), -6)
+        XCTAssertEqual(TaskDragSession.edgeStep(point: NSPoint(x: 50, y: 180), viewport: viewport), 6)
+        for point in [NSPoint(x: 50, y: 100), NSPoint(x: -1, y: 180), NSPoint(x: 50, y: 201)] {
+            XCTAssertEqual(TaskDragSession.edgeStep(point: point, viewport: viewport), 0)
+        }
+    }
+
+    func testDragSessionBeginMintsOneReservedTokenForEligibleTodayTask() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = Note(id: UUID(), text: "A", dayKey: "2026-09-27", createdAt: Date(timeIntervalSince1970: 1),
+                     completedAt: nil, categoryID: work.id)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let old = note("Old", day: "2026-09-26", createdAt: 3)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b, old], categories: [work]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        XCTAssertNil(session.begin(taskID: UUID(), state: state, source: source))
+        XCTAssertNil(session.begin(taskID: old.id, state: state, source: source))
+        XCTAssertFalse(session.isDragging)
+
+        let first = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        XCTAssertEqual(first.taskID, a.id)
+        XCTAssertEqual(first.dayKey, a.dayKey)
+        XCTAssertEqual(first.sourceGroup, .category(work.id))
+        XCTAssertEqual(session.active, first)
+        XCTAssertTrue(session.isDragging)
+        XCTAssertNil(session.begin(taskID: b.id, state: state, source: TaskDragHandleView(frame: .zero)),
+                     "Only one native session may be reserved")
+        session.ended(token: UUID())
+        XCTAssertEqual(session.active, first, "A foreign session end must not release the reservation")
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: first.token)
+        XCTAssertNil(session.active)
+        XCTAssertFalse(session.isDragging)
+
+        let second = try XCTUnwrap(session.begin(taskID: b.id, state: state, source: source))
+        defer { session.ended(token: second.token) }
+        XCTAssertEqual(second.sourceGroup, .general)
+        XCTAssertNotEqual(second.token, first.token)
+    }
+
+    func testDragSessionBeginIsRefusedBehindEveryMovementGuard() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let guards: [(String, (DailyNotesState) -> Void)] = [
+            ("inline edit", { $0.beginEditing(id: a.id) }),
+            ("deletion confirmation", { $0.taskWindowPresentation.requestDeletion(id: a.id, state: $0) }),
+            ("category manager", { XCTAssertTrue($0.taskWindowPresentation.showCategoryManager(state: $0)) }),
+            ("termination", { $0.stopForTermination() })
+        ]
+        for (name, apply) in guards {
+            let state = makeState(store: FakeNoteRepository(notes: [a]),
+                                  now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            apply(state)
+            let session = state.taskWindowPresentation.dragSession
+            XCTAssertNil(session.begin(taskID: a.id, state: state, source: TaskDragHandleView(frame: .zero)), name)
+            XCTAssertFalse(session.isDragging, name)
+            XCTAssertNil(session.active, name)
+        }
+        let store = FakeNoteRepository(notes: [a])
+        store.failSnapshotRead = .notes
+        let unavailable = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        unavailable.startup()
+        XCTAssertNil(unavailable.taskWindowPresentation.dragSession.begin(
+            taskID: a.id, state: unavailable, source: TaskDragHandleView(frame: .zero)), "unavailable read")
+    }
+
+    func testDragPayloadValidationAcceptsOnlyLiveLocalSourceAndPrivateToken() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close(); session.ended(token: payload.token) }
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window, point: .zero)
+        defer { info.draggingPasteboard.releaseGlobally() }
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+
+        info.draggingSource = TaskDragHandleView(frame: .zero)
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Another handle is not this session")
+        info.draggingSource = nil
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "External drag")
+        info.draggingSource = source
+
+        let pasteboard = info.draggingPasteboard
+        func write(_ items: [[NSPasteboard.PasteboardType: String]]) {
+            pasteboard.clearContents()
+            pasteboard.writeObjects(items.map { values in
+                let item = NSPasteboardItem()
+                for (type, value) in values { item.setString(value, forType: type) }
+                return item
+            })
+        }
+        let type = TaskDragSession.pasteboardType
+        write([[type: UUID().uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Unmatched token")
+        write([[.string: payload.token.uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Generic text")
+        write([[type: payload.token.uuidString, .string: "A"]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Extra representation")
+        write([[type: payload.token.uuidString], [type: payload.token.uuidString]])
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Bulk drag")
+        write([[type: payload.token.uuidString]])
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+
+        state.beginEditing(id: a.id)
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Guard appears mid-drag")
+        state.cancelEditing()
+        XCTAssertEqual(session.validatedPayload(for: info, state: state), payload)
+        session.cancel()
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Cancelled token")
+        XCTAssertFalse(session.consume(payload))
+        XCTAssertTrue(session.isDragging, "Native reservation lasts until source end")
+    }
+
+    func testDragPayloadIsInvalidatedWhenSourceTaskChangesGroupOrDay() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        var now = instant("2026-09-27T12:00:00-04:00")
+        let state = makeState(store: FakeNoteRepository(notes: [a], categories: [work]), now: { now })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window, point: .zero)
+        defer { info.draggingPasteboard.releaseGlobally() }
+        guard case .changed? = state.moveTask(moveRequest(a, destination: .category(work.id))) else {
+            return XCTFail("Expected a saved move")
+        }
+        XCTAssertNil(session.validatedPayload(for: info, state: state), "Source group changed")
+        session.ended(token: payload.token)
+
+        let moved = try XCTUnwrap(state.notes.first)
+        let next = try XCTUnwrap(session.begin(taskID: moved.id, state: state, source: source))
+        let nextInfo = MovementDraggingInfo(source: source, token: next.token, window: window, point: .zero)
+        defer { nextInfo.draggingPasteboard.releaseGlobally(); session.ended(token: next.token) }
+        XCTAssertEqual(session.validatedPayload(for: nextInfo, state: state), next)
+        now = instant("2026-09-28T00:01:00-04:00")
+        state.refresh()
+        XCTAssertNil(session.validatedPayload(for: nextInfo, state: state), "Day rolled over")
+    }
+
+    func testDragConsumeIsOneShotAndLifecycleCancellationClearsFeedback() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        let session = presentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        session.hoveredRequest = moveRequest(a)
+        XCTAssertTrue(session.consume(payload))
+        XCTAssertFalse(session.consume(payload), "A drop consumes a session once")
+        XCTAssertNil(session.active)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: payload.token)
+        XCTAssertFalse(session.isDragging)
+
+        let window = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        session.hoveredRequest = moveRequest(a)
+        presentation.cancelMovement() // Window close/teardown and modal routes.
+        XCTAssertNil(session.active)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.begin(taskID: a.id, state: state, source: source),
+                     "No new drag until the cancelled native session ends")
+        session.ended(token: window.token)
+
+        let terminating = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        state.stopForTermination()
+        XCTAssertNil(session.active)
+        session.ended(token: terminating.token)
+        XCTAssertFalse(session.isDragging)
+    }
+
+    func testDragHandleNeedsEnabledThresholdAndKeepsNativeControlsOutOfDragging() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [a]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let handle = TaskDragHandleView(frame: NSRect(x: 10, y: 10, width: 16, height: 20))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
+        content.addSubview(handle)
+        let window = NSWindow(contentRect: content.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        defer { window.close() }
+        handle.taskID = a.id
+        handle.state = state
+        handle.session = session
+        XCTAssertFalse(handle.acceptsFirstResponder, "The handle never takes keyboard focus")
+        XCTAssertFalse(handle.mouseDownCanMoveWindow)
+
+        func event(_ type: NSEvent.EventType, dx: CGFloat = 0) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: 18 + dx, y: 20),
+                                             modifierFlags: [], timestamp: 0,
+                                             windowNumber: window.windowNumber, context: nil,
+                                             eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        handle.isEnabled = false
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging, "A disabled handle never starts")
+
+        handle.isEnabled = true
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 3))
+        XCTAssertFalse(session.isDragging, "Below the 4 pt threshold a click stays a click")
+        handle.mouseUp(with: try event(.leftMouseUp, dx: 3))
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging, "Mouse-up ends tracking")
+        handle.mouseDown(with: try event(.leftMouseDown))
+        handle.clearMouseTracking() // SwiftUI dismantle/unmount.
+        handle.mouseDragged(with: try event(.leftMouseDragged, dx: 20))
+        XCTAssertFalse(session.isDragging)
+        XCTAssertNil(session.active)
+    }
+
+    func testMenuMovesListDestinationsAndAdjacentReordersWithinGroup() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let home = try TaskCategory(name: "Home", creationOrder: 1)
+        let done = instant("2026-09-27T09:00:00-04:00")
+        let w1 = categorized("W1", work, createdAt: 1)
+        let g1 = note("G1", day: w1.dayKey, createdAt: 2)
+        let w2 = categorized("W2", work, createdAt: 3, completedAt: done)
+        let w3 = categorized("W3", work, createdAt: 4)
+        let state = makeState(store: FakeNoteRepository(notes: [w1, g1, w2, w3], categories: [work, home]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+
+        let moves = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state))
+        XCTAssertEqual(moves.destinations.map(\.title), ["Work", "Home", "General"])
+        XCTAssertEqual(moves.destinations.map(\.isCurrent), [true, false, false])
+        XCTAssertNil(moves.destinations[0].request, "The current group is marked, not offered")
+        XCTAssertEqual(moves.destinations[1].request?.placement, .endOfGroup)
+        XCTAssertEqual(moves.destinations[2].request?.destinationGroup, .general)
+        XCTAssertEqual(moves.moveUp?.placement, .before(w1.id))
+        XCTAssertEqual(moves.moveDown?.placement, .after(w3.id))
+        XCTAssertNil(presentation.menuMoves(for: w1.id, state: state)?.moveUp, "Top of its group")
+        XCTAssertNil(presentation.menuMoves(for: w3.id, state: state)?.moveDown, "Bottom of its group")
+        let general = try XCTUnwrap(presentation.menuMoves(for: g1.id, state: state))
+        XCTAssertNil(general.moveUp, "Another group's rows are not neighbours")
+        XCTAssertNil(general.moveDown)
+        XCTAssertEqual(general.destinations.map(\.isCurrent), [false, false, true])
+
+        let progress = state.availableProgress
+        XCTAssertEqual(state.moveTask(try XCTUnwrap(moves.moveUp)).map(isChanged), true)
+        XCTAssertEqual(state.notes.map(\.id), [w2.id, w1.id, g1.id, w3.id])
+        let down = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.moveDown)
+        XCTAssertEqual(down.placement, .after(w1.id))
+        XCTAssertEqual(state.moveTask(down).map(isChanged), true)
+        XCTAssertEqual(state.notes.map(\.id), [w1.id, w2.id, g1.id, w3.id])
+
+        state.categoryPreferences.setCollapsed(true, for: .category(home.id))
+        let toHome = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.destinations[1].request)
+        XCTAssertEqual(state.moveTask(toHome).map(isChanged), true)
+        let moved = try XCTUnwrap(state.notes.first { $0.id == w2.id })
+        XCTAssertEqual(moved.categoryID, home.id)
+        XCTAssertEqual(moved.completedAt, done)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertFalse(state.categoryPreferences.isCollapsed(.category(home.id)))
+        XCTAssertEqual(presentation.movementReveal?.taskID, w2.id)
+        XCTAssertEqual(presentation.menuMoves(for: w2.id, state: state)?.destinations.map(\.isCurrent),
+                       [false, true, false])
+    }
+
+    func testMenuMovesAreDisabledBehindGuardsAndAbsentForUnknownTasks() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        XCTAssertNil(presentation.menuMoves(for: UUID(), state: state))
+        XCTAssertNotNil(presentation.menuMoves(for: b.id, state: state)?.moveUp)
+
+        func assertDisabled(_ reason: String) throws {
+            let moves = try XCTUnwrap(presentation.menuMoves(for: b.id, state: state), reason)
+            XCTAssertNil(moves.moveUp, reason)
+            XCTAssertNil(moves.moveDown, reason)
+            XCTAssertTrue(moves.destinations.allSatisfy { $0.request == nil }, reason)
+        }
+        state.beginEditing(id: a.id)
+        try assertDisabled("inline edit")
+        state.cancelEditing()
+        presentation.requestDeletion(id: a.id, state: state)
+        try assertDisabled("deletion confirmation")
+        presentation.cancelDeletion()
+        XCTAssertNotNil(presentation.menuMoves(for: b.id, state: state)?.moveUp)
+    }
+
+    func testMenuMoveRequestsMatchDropRoutingForTheSamePlacement() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let w1 = categorized("W1", work, createdAt: 1)
+        let w2 = categorized("W2", work, createdAt: 2)
+        let g1 = note("G1", day: w1.dayKey, createdAt: 3)
+        let state = makeState(store: FakeNoteRepository(notes: [w1, w2, g1], categories: [work]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let moves = try XCTUnwrap(state.taskWindowPresentation.menuMoves(for: w2.id, state: state))
+        let payload = TaskDragSession.Payload(token: UUID(), taskID: w2.id, dayKey: w2.dayKey,
+                                              sourceGroup: .category(work.id))
+        func drop(_ group: TaskGroupID, anchor: UUID?, upper: Bool) -> TaskMoveRequest? {
+            TaskDropRouting.request(payload: payload, group: group, anchor: anchor, upperHalf: upper,
+                                    dayKey: w2.dayKey, notes: state.notes, categories: state.categories)
+        }
+        XCTAssertEqual(moves.moveUp, drop(.category(work.id), anchor: w1.id, upper: true))
+        XCTAssertEqual(moves.destinations.last?.request, drop(.general, anchor: nil, upper: false))
+    }
+
+    func testSavedMovementRevealIsSupersededAndCancelledByNewAction() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let state = makeState(store: FakeNoteRepository(notes: [a, b]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        _ = state.moveTask(moveRequest(a))
+        let first = try XCTUnwrap(presentation.movementReveal)
+        XCTAssertEqual(first.taskID, a.id)
+        _ = state.moveTask(moveRequest(b))
+        let second = try XCTUnwrap(presentation.movementReveal)
+        presentation.consumeMovementReveal(first)
+        XCTAssertEqual(presentation.movementReveal, second)
+        state.draft = "Retained"
+        XCTAssertTrue(presentation.requestNewTask(state: state))
+        XCTAssertNil(presentation.movementReveal)
+        XCTAssertEqual(state.draft, "Retained")
+        _ = state.moveTask(moveRequest(a))
+        presentation.requestDeletion(id: b.id, state: state)
+        XCTAssertNil(presentation.movementReveal)
+        XCTAssertEqual(state.draft, "Retained")
+    }
+
+    func testNativeDropCallbacksRouteRowHalvesAndConsumeOnlyOnce() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let c = note("C", day: a.dayKey, createdAt: 3)
+        for upper in [true, false] {
+            let store = FakeNoteRepository(notes: [a, b, c])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            let session = state.taskWindowPresentation.dragSession
+            let source = TaskDragHandleView(frame: .zero)
+            let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+            let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+            let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = target
+            defer { window.close(); session.ended(token: payload.token) }
+            target.state = state; target.session = session; target.group = .general; target.anchor = c.id
+            let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                            point: target.convert(NSPoint(x: 20, y: upper ? 5 : 35), to: nil))
+            defer { info.draggingPasteboard.releaseGlobally() }
+            XCTAssertEqual(target.draggingEntered(info), .move)
+            XCTAssertEqual(session.hoveredRequest?.placement, upper ? .before(c.id) : .after(c.id))
+            XCTAssertTrue(target.prepareForDragOperation(info))
+            XCTAssertEqual(store.moveAttempts, 0)
+            XCTAssertTrue(target.performDragOperation(info))
+            XCTAssertFalse(target.performDragOperation(info))
+            XCTAssertEqual(store.moveAttempts, 1)
+            XCTAssertEqual(state.notes.map(\.id), upper ? [b.id, a.id, c.id] : [b.id, c.id, a.id])
+            XCTAssertNil(session.active)
+            XCTAssertNil(session.hoveredRequest)
+        }
+    }
+
+    func testNativeDropRejectsExternalNoOpSelfAndNewGuardsWithoutWriting() throws {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+        let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = target
+        defer { window.close(); session.ended(token: payload.token) }
+        target.state = state; target.session = session; target.group = .general
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                        point: target.convert(NSPoint(x: 20, y: 5), to: nil))
+        defer { info.draggingPasteboard.releaseGlobally() }
+        info.draggingSource = nil
+        XCTAssertEqual(target.draggingEntered(info), [])
+        info.draggingSource = source
+        target.anchor = a.id
+        XCTAssertEqual(target.draggingUpdated(info), [])
+        target.anchor = b.id // A is already before B.
+        XCTAssertEqual(target.draggingUpdated(info), [])
+        target.anchor = nil
+        XCTAssertEqual(target.draggingUpdated(info), .move)
+        state.beginEditing(id: b.id) // Guard changes between hover and drop.
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.active)
+    }
+
+    func testNativeHeaderDropFailurePreservesDraftCollapseAndClearsFeedback() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Keep draft"
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let session = state.taskWindowPresentation.dragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(taskID: a.id, state: state, source: source))
+        let target = TaskDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
+        let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = target
+        defer { window.close(); session.ended(token: payload.token) }
+        target.state = state; target.session = session; target.group = .category(work.id)
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                        point: target.convert(NSPoint(x: 20, y: 5), to: nil))
+        defer { info.draggingPasteboard.releaseGlobally() }
+        XCTAssertEqual(target.draggingEntered(info), .move)
+        XCTAssertEqual(session.hoveredRequest?.placement, .endOfGroup)
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        store.failWrite = .move
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertFalse(target.performDragOperation(info))
+        XCTAssertEqual(store.moveAttempts, 1)
+        XCTAssertEqual(state.notes, [a])
+        XCTAssertNil(state.taskWindowPresentation.movementReveal)
+        XCTAssertEqual(state.draft, "Keep draft")
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        XCTAssertEqual(state.taskIssue, .move)
+        XCTAssertNil(session.hoveredRequest)
+        XCTAssertNil(session.active)
+    }
+
     func testCatalogIsPublishedWithDailyRowsAndIncludesUnusedReusableCategories() throws {
         let work = try TaskCategory(name: "Work", creationOrder: 2)
         let unused = try TaskCategory(name: "Unused", creationOrder: 8)
@@ -1912,6 +2408,428 @@ final class DailyNotesStateTests: XCTestCase {
         await Task.yield()
     }
 
+    func testMovePublishesCommittedSnapshotAndOnlyExpandsDestination() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let source = note("Done", day: "2026-09-27", createdAt: 1, completedAt: Date())
+        let anchor = Note(id: UUID(), text: "Work", dayKey: source.dayKey,
+                          createdAt: Date(), completedAt: nil, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [source, anchor], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Pending new task"
+        state.draftCategoryID = work.id
+        state.beginEditing(id: anchor.id)
+        state.editDraft = "Recovery text"
+        store.saved.removeAll { $0.id == anchor.id }
+        state.refresh()
+        state.editDraft = "Unowned edit draft"
+        state.editCategoryID = work.id
+        let recovery = state.recoveredEdit
+        state.categoryPreferences.rememberLastUsed(work.id)
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let progress = state.availableProgress
+        store.onMove = {
+            XCTAssertEqual(state.notes, [source], "No proposal published before commit")
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
+        }
+        let request = moveRequest(source, destination: .category(work.id))
+        let outcome = state.moveTask(request)
+        guard case let .changed(saved) = outcome else { return XCTFail("Expected saved change") }
+        XCTAssertEqual(state.notes, saved)
+        XCTAssertEqual(state.notes.map(\.id), [source.id])
+        XCTAssertEqual(state.notes.first?.categoryID, work.id)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertEqual(state.notes.first?.completedAt, source.completedAt)
+        XCTAssertEqual(state.notes.first?.createdAt, source.createdAt)
+        XCTAssertEqual(state.notes.first?.text, source.text)
+        XCTAssertEqual(state.draft, "Pending new task")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.editDraft, "Unowned edit draft")
+        XCTAssertEqual(state.editCategoryID, work.id)
+        XCTAssertEqual(state.recoveredEdit, recovery)
+        XCTAssertEqual(state.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(state.categoryPreferences.collapsedGroupIDs, [.general])
+        XCTAssertNil(state.taskIssue)
+    }
+
+    func testMoveFailureRetryAndReadRecoveryKeepDistinctIssues() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Keep"
+        state.editDraft = "Also keep"
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        let request = moveRequest(a)
+        store.failWrite = .move
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertEqual(state.taskIssue, .move)
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 2))
+        store.failSnapshotRead = .notes
+        state.refresh()
+        let attempts = store.moveAttempts
+        XCTAssertFalse(state.taskWindowPresentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(store.moveAttempts, attempts)
+        XCTAssertEqual(state.issue, .load)
+        XCTAssertEqual(state.taskIssue, .move)
+        store.failSnapshotRead = nil
+        state.refresh()
+        XCTAssertEqual(state.issue, .move)
+        XCTAssertEqual(state.notes, [a, b])
+        XCTAssertEqual(state.draft, "Keep")
+        XCTAssertEqual(state.editDraft, "Also keep")
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.general))
+        store.failWrite = nil
+        XCTAssertEqual(state.moveTask(request), .changed([b, a]))
+        XCTAssertEqual(state.notes, [b, a])
+        XCTAssertNil(state.issue)
+    }
+
+    func testMoveGuardsRevalidateEditDeletionManagerAndTermination() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        let request = moveRequest(a)
+        XCTAssertTrue(presentation.canMoveTask(state: state))
+        state.beginEditing(id: a.id)
+        state.editDraft = "Unsaved edit"
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(state.editDraft, "Unsaved edit")
+        state.cancelEditing()
+        presentation.requestDeletion(id: b.id, state: state)
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        presentation.cancelDeletion()
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        presentation.dismissCategoryManager()
+        state.stopForTermination()
+        XCTAssertFalse(presentation.canMoveTask(state: state))
+        XCTAssertNil(state.moveTask(request))
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(state.notes, [a, b])
+    }
+
+    func testMoveUnchangedAndStaleRequestsPreserveSnapshotAndCollapse() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a], categories: [work])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Draft"
+        state.editDraft = "Edit draft"
+        state.categoryPreferences.setCollapsed(true, for: .general)
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let collapsed = state.categoryPreferences.collapsedGroupIDs
+        XCTAssertEqual(state.moveTask(moveRequest(a)), .unchanged)
+        let missing = note("Missing", day: a.dayKey, createdAt: 2)
+        XCTAssertEqual(state.moveTask(moveRequest(missing)), .rejected(.taskNotFound))
+        XCTAssertEqual(state.moveTask(moveRequest(a, destination: .category(UUID()))),
+                       .rejected(.destinationNotFound))
+        let wrongSource = TaskMoveRequest(taskID: a.id, expectedDayKey: a.dayKey,
+                                         expectedSourceGroup: .category(work.id),
+                                         destinationGroup: .general, placement: .endOfGroup)
+        XCTAssertEqual(state.moveTask(wrongSource), .rejected(.sourceChanged))
+        XCTAssertEqual(state.moveTask(moveRequest(a, placement: .before(UUID()))), .rejected(.invalidAnchor))
+        // Storage sees a removal that the displayed snapshot has not seen yet.
+        store.savedCategories = []
+        XCTAssertEqual(state.moveTask(moveRequest(a, destination: .category(work.id))),
+                       .rejected(.destinationNotFound))
+        store.saved = []
+        XCTAssertEqual(state.moveTask(moveRequest(a)), .rejected(.taskNotFound))
+        XCTAssertEqual(state.notes, [a])
+        XCTAssertEqual(state.draft, "Draft")
+        XCTAssertEqual(state.editDraft, "Edit draft")
+        XCTAssertEqual(state.categoryPreferences.collapsedGroupIDs, collapsed)
+    }
+
+    func testMoveRolloverRejectsPayloadEvenAfterNewDayRefresh() {
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let store = FakeNoteRepository(notes: [a])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.draft = "Keep new"
+        state.beginEditing(id: a.id)
+        state.editDraft = "Keep recovered"
+        let request = moveRequest(a)
+        current = instant("2026-09-28T00:01:00-04:00")
+        XCTAssertFalse(state.taskWindowPresentation.canMoveTask(state: state))
+        XCTAssertEqual(state.moveTask(request), .rejected(.dayChanged))
+        XCTAssertEqual(state.todayKey, "2026-09-28")
+        XCTAssertEqual(state.moveTask(request), .rejected(.dayChanged))
+        XCTAssertEqual(state.recoveredEditDraft, "Keep recovered")
+        XCTAssertEqual(state.draft, "Keep new")
+        XCTAssertEqual(store.moveAttempts, 0)
+        XCTAssertEqual(store.saved, [a])
+    }
+
+    func testSQLiteStateMovePersistsOnRefreshAndReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("StateMove-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let store = try SQLiteNoteRepository(databaseURL: url)
+        let category = try store.createCategory(name: "Work")
+        let a = note("A", day: "2026-09-27", createdAt: 1)
+        let b = note("B", day: a.dayKey, createdAt: 2)
+        try store.add(a)
+        try store.add(b)
+        let state = DailyNotesState(repositoryFactory: { store },
+                                   day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        state.startup()
+        guard case .changed = state.moveTask(moveRequest(a, destination: .category(category.id))) else {
+            return XCTFail("Expected committed move")
+        }
+        let saved = state.notes
+        state.refresh()
+        XCTAssertEqual(state.notes, saved)
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: url).notes(for: a.dayKey), saved)
+        XCTAssertEqual(saved.map(\.id), [b.id, a.id])
+        XCTAssertEqual(saved.last?.categoryID, category.id)
+    }
+
+    /// Task 9 integration: menu and drop-shaped requests through SQLite-backed
+    /// state, then the existing daily writes, across refresh and fresh reopens.
+    func testIntegratedSQLiteMovementSurvivesReopenAndLaterDailyWrites() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("IntegratedMove-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let defaults = isolatedDefaults()
+        let makeState = {
+            DailyNotesState(repositoryFactory: { try SQLiteNoteRepository(databaseURL: url) },
+                            day: self.makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                            notificationCenter: NotificationCenter(),
+                            workspaceNotificationCenter: NotificationCenter(),
+                            categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
+        }
+        let seed = try SQLiteNoteRepository(databaseURL: url)
+        let yesterday = note("Yesterday", day: "2026-09-26", createdAt: 1)
+        try seed.add(yesterday)
+        let later = LaterTask(id: UUID(), text: "Later", createdAt: Date(timeIntervalSince1970: 2),
+                              completedAt: nil, categoryID: nil)
+        try seed.addLater(later)
+
+        let first = makeState()
+        first.windowWillOpen()
+        let work = try XCTUnwrap(first.createCategory(name: "Work"))
+        let study = try XCTUnwrap(first.createCategory(name: "Study"))
+        let empty = try XCTUnwrap(first.createCategory(name: "Empty"))
+        for (text, category) in [("W1", work.id), ("G1", nil), ("W2", work.id), ("S1", study.id), ("W3", work.id)] {
+            first.draft = text
+            first.draftCategoryID = category
+            XCTAssertTrue(first.addDraft())
+        }
+        func id(_ text: String, in state: DailyNotesState) throws -> UUID {
+            try XCTUnwrap(state.notes.first(where: { $0.text == text })?.id)
+        }
+        XCTAssertTrue(first.setCompleted(id: try id("W2", in: first), completed: true))
+        let original = Dictionary(uniqueKeysWithValues: first.notes.map { ($0.id, $0) })
+        first.categoryPreferences.setCollapsed(true, for: .category(study.id))
+        first.draft = "Unsaved"
+        first.draftCategoryID = study.id
+        let progress = first.availableProgress
+        XCTAssertEqual(progress, NoteProgress(completed: 1, total: 5))
+        XCTAssertEqual(first.categoryPreferences.lastUsedCategoryID, work.id)
+
+        // Row-menu Move Up within Work.
+        let menu = try XCTUnwrap(first.taskWindowPresentation.menuMoves(for: try id("W3", in: first), state: first))
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(try XCTUnwrap(menu.moveUp)))))
+        XCTAssertEqual(groupTexts(first), [["W1", "W3", "W2"], ["S1"], ["G1"]])
+        // Drop-shaped request: completed task after an anchor in the collapsed Study group.
+        let w2 = try XCTUnwrap(original[try id("W2", in: first)])
+        let s1 = try id("S1", in: first)
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(
+            moveRequest(w2, destination: .category(study.id), placement: .after(s1))))))
+        XCTAssertFalse(first.categoryPreferences.isCollapsed(.category(study.id)))
+        // Row-menu Move To General, then General to an empty category.
+        let toGeneral = try XCTUnwrap(first.taskWindowPresentation.menuMoves(for: try id("W1", in: first), state: first)?
+            .destinations.first(where: { $0.group == .general })?.request)
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(toGeneral))))
+        let g1 = try XCTUnwrap(first.notes.first(where: { $0.text == "G1" }))
+        XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(moveRequest(g1, destination: .category(empty.id))))))
+        // An equivalent visible placement is not a write.
+        let movedW2 = try XCTUnwrap(first.notes.first(where: { $0.id == w2.id }))
+        XCTAssertEqual(first.moveTask(moveRequest(movedW2, destination: .category(study.id), placement: .after(s1))),
+                       .unchanged)
+
+        let expectedOrder = ["W1", "W3", "S1", "W2", "G1"]
+        let expectedGroups = [["W3"], ["S1", "W2"], ["G1"], ["W1"]]
+        XCTAssertEqual(first.notes.map(\.text), expectedOrder)
+        XCTAssertEqual(groupTexts(first), expectedGroups)
+        for moved in first.notes {
+            let before = try XCTUnwrap(original[moved.id])
+            XCTAssertEqual([moved.text, moved.dayKey], [before.text, before.dayKey])
+            XCTAssertEqual(moved.createdAt, before.createdAt)
+            XCTAssertEqual(moved.completedAt, before.completedAt)
+        }
+        XCTAssertEqual(first.availableProgress, progress)
+        assertGroupCounts(first, equal: try XCTUnwrap(progress))
+        XCTAssertEqual(first.draft, "Unsaved")
+        XCTAssertEqual(first.draftCategoryID, study.id)
+        XCTAssertEqual(first.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(first.categoryPreferences.collapsedGroupIDs.isEmpty)
+        XCTAssertNil(first.issue)
+        let movedSnapshot = first.notes
+        first.refresh()
+        XCTAssertEqual(first.notes, movedSnapshot)
+
+        let second = makeState()
+        second.windowWillOpen()
+        XCTAssertEqual(second.notes, movedSnapshot)
+        XCTAssertEqual(groupTexts(second), expectedGroups)
+        XCTAssertEqual(second.availableProgress, progress)
+        XCTAssertEqual(second.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertTrue(second.categoryPreferences.collapsedGroupIDs.isEmpty)
+        XCTAssertEqual(second.draft, "", "Unsaved drafts are process-local")
+
+        // Today Add (remembered Work) and Quick Add (General) append after the reorder.
+        second.startNewDraft()
+        XCTAssertEqual(second.draftCategoryID, work.id)
+        second.draft = "W4"
+        XCTAssertTrue(second.addDraft())
+        XCTAssertEqual(second.add(text: "Quick"), .added)
+        XCTAssertEqual(second.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(groupTexts(second), [["W3", "W4"], ["S1", "W2"], ["G1"], ["W1", "Quick"]])
+        // Category-only Edit keeps S1's daily rank, unlike an explicit Move To (append).
+        second.beginEditing(id: try id("S1", in: second))
+        second.editCategoryID = work.id
+        XCTAssertTrue(second.saveEdit())
+        XCTAssertEqual(groupTexts(second), [["W3", "S1", "W4"], ["W2"], ["G1"], ["W1", "Quick"]])
+        XCTAssertTrue(second.setCompleted(id: try id("W3", in: second), completed: true))
+        XCTAssertTrue(second.delete(id: try id("W1", in: second)))
+        XCTAssertEqual(second.notes.map(\.text), ["W3", "S1", "W2", "G1", "W4", "Quick"])
+        // Removal merges Work into General in saved daily order.
+        XCTAssertTrue(second.removeCategory(id: work.id))
+        XCTAssertEqual(groupTexts(second), [["W2"], ["G1"], ["W3", "S1", "W4", "Quick"]])
+        XCTAssertEqual(second.availableProgress, NoteProgress(completed: 2, total: 6))
+        assertGroupCounts(second, equal: NoteProgress(completed: 2, total: 6))
+
+        let third = makeState()
+        third.windowWillOpen()
+        XCTAssertEqual(third.notes, second.notes)
+        XCTAssertEqual(third.categories.map(\.id), [study.id, empty.id])
+        XCTAssertNil(third.categoryPreferences.lastUsedCategoryID, "Removed category falls back to General")
+        XCTAssertEqual(third.laterTasks, [later])
+        // Later → Today appends after the reordered day, like Add.
+        XCTAssertTrue(third.moveLaterToToday(id: later.id))
+        XCTAssertEqual(third.notes.map(\.text), ["W3", "S1", "W2", "G1", "W4", "Quick", "Later"])
+        XCTAssertEqual(third.availableProgress, NoteProgress(completed: 2, total: 7))
+        let reopened = try SQLiteNoteRepository(databaseURL: url)
+        XCTAssertEqual(try reopened.notes(for: "2026-09-27"), third.notes)
+        XCTAssertEqual(try reopened.notes(for: yesterday.dayKey), [yesterday])
+        XCTAssertEqual(try reopened.laterTasks(), [])
+    }
+
+    /// Task 9 scale probe. Asserts correctness only; latency is logged, not gated,
+    /// because hosted Debug timing varies with the machine and its load.
+    func testScaleProbeMovesAndReadsOneThousandTasksAcrossCategories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScaleProbe-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("notes.sqlite")
+        let store = try SQLiteNoteRepository(databaseURL: url)
+        let categories = try (0..<10).map { try store.createCategory(name: "Category \($0)") }
+        let day = "2026-09-27"
+        let clock = ContinuousClock()
+        var seeded: [Note] = []
+        let seedTime = try clock.measure {
+            for index in 0..<1_000 {
+                // Interleave ten categories and General across the canonical day.
+                let category = index % 11 == 10 ? nil : categories[index % 11].id
+                let row = Note(id: UUID(), text: "Task \(index)", dayKey: day,
+                               createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                               completedAt: index % 3 == 0 ? Date(timeIntervalSince1970: TimeInterval(index) + 0.5) : nil,
+                               categoryID: category)
+                try store.add(row)
+                seeded.append(row)
+            }
+        }
+        let state = DailyNotesState(repositoryFactory: { store },
+                                   day: makeDay(now: { self.instant("2026-09-27T12:00:00-04:00") }),
+                                   notificationCenter: NotificationCenter(),
+                                   workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        let readTime = clock.measure { state.startup() }
+        XCTAssertEqual(state.notes, seeded)
+        let progress = try XCTUnwrap(state.availableProgress)
+        var groups: [TaskGroup] = []
+        let groupTime = clock.measure { groups = state.groups }
+        XCTAssertEqual(groups.count, 11)
+        let menuTime = clock.measure {
+            _ = state.taskWindowPresentation.menuMoves(for: seeded[999].id, state: state)
+        }
+
+        var moveTimes: [Duration] = []
+        func timedMove(_ request: TaskMoveRequest) throws {
+            let before = state.notes
+            var outcome: TaskMoveOutcome?
+            moveTimes.append(clock.measure { outcome = state.moveTask(request) })
+            guard case let .changed(saved)? = outcome else { return XCTFail("Expected committed move") }
+            // Every other task keeps its relative order; nothing is duplicated or lost.
+            XCTAssertEqual(saved.filter { $0.id != request.taskID }, before.filter { $0.id != request.taskID })
+            XCTAssertEqual(Set(saved.map(\.id)).count, 1_000)
+        }
+        for round in 0..<10 {
+            // Worst-case same-group reorder: the group's last task to its first position.
+            let category = TaskGroupID.category(categories[round].id)
+            let siblings = state.notes.filter { TaskGroupID(categoryID: $0.categoryID) == category }
+            let last = try XCTUnwrap(siblings.last)
+            try timedMove(moveRequest(last, destination: category, placement: .before(siblings[0].id)))
+            XCTAssertEqual(state.notes.first(where: { TaskGroupID(categoryID: $0.categoryID) == category })?.id, last.id)
+            // Cross-category: the day's first task to the end of the next group.
+            let head = state.notes[0]
+            let next = TaskGroupID.category(categories[(round + 5) % 10].id)
+            let target = TaskGroupID(categoryID: head.categoryID) == next ? TaskGroupID.general : next
+            try timedMove(moveRequest(head, destination: target))
+            XCTAssertEqual(state.notes.last(where: { TaskGroupID(categoryID: $0.categoryID) == target })?.id, head.id)
+        }
+        XCTAssertEqual(state.availableProgress, progress)
+        let reopenTime = try clock.measure {
+            XCTAssertEqual(try SQLiteNoteRepository(databaseURL: url).notes(for: day), state.notes)
+        }
+
+        let sorted = moveTimes.sorted()
+        let report = """
+        SCALE-PROBE tasks=1000 categories=10+General moves=\(moveTimes.count)
+        SCALE-PROBE seed1000Adds=\(seedTime) stateRead=\(readTime) grouping=\(groupTime) menuMoves=\(menuTime)
+        SCALE-PROBE moveMedian=\(sorted[sorted.count / 2]) moveMax=\(sorted.last!) moveMin=\(sorted.first!)
+        SCALE-PROBE freshReopenRead=\(reopenTime)
+        """
+        print(report)
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "scale-probe"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func moveRequest(_ note: Note, destination: TaskGroupID = .general,
+                             placement: TaskMovePlacement = .endOfGroup) -> TaskMoveRequest {
+        TaskMoveRequest(taskID: note.id, expectedDayKey: note.dayKey,
+                        expectedSourceGroup: TaskGroupID(categoryID: note.categoryID),
+                        destinationGroup: destination, placement: placement)
+    }
+
+    private func categorized(_ text: String, _ category: TaskCategory, createdAt: TimeInterval,
+                             completedAt: Date? = nil) -> Note {
+        Note(id: UUID(), text: text, dayKey: "2026-09-27", createdAt: Date(timeIntervalSince1970: createdAt),
+             completedAt: completedAt, categoryID: category.id)
+    }
+
+    private func isChanged(_ outcome: TaskMoveOutcome) -> Bool {
+        if case .changed = outcome { true } else { false }
+    }
+
     func testHistoryFacadeUsesOneConnectionWithoutLoadingOrRefreshingToday() throws {
         let old = note("Historical", day: "2026-09-26", createdAt: 1)
         let store = FakeNoteRepository(notes: [old])
@@ -2416,9 +3334,9 @@ final class DailyNotesStateTests: XCTestCase {
         state.startup()
         state.laterDraft = "Pending Later draft"
         let revision = state.historyRevision
-        store.failLaterWrite = .move
+        store.failLaterWrite = .moveToToday
         XCTAssertFalse(state.moveLaterToToday(id: source.id))
-        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(state.laterTaskIssue, .moveToToday)
         XCTAssertEqual(state.historyRevision, revision)
         XCTAssertEqual(state.laterTasks, [source])
         XCTAssertEqual(state.notes, [today])
@@ -2490,7 +3408,7 @@ final class DailyNotesStateTests: XCTestCase {
         store.savedLaterTasks = [completed]
         XCTAssertFalse(state.moveLaterToToday(id: source.id))
         XCTAssertEqual(state.laterTasks, [completed])
-        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(state.laterTaskIssue, .moveToToday)
         XCTAssertEqual(store.saved, [])
         let attempts = store.moveAttempts
         XCTAssertFalse(state.moveLaterToToday(id: source.id))
@@ -2499,7 +3417,7 @@ final class DailyNotesStateTests: XCTestCase {
         store.saved = [Note(id: source.id, text: "History collision", dayKey: "2026-09-26",
                             createdAt: source.createdAt, completedAt: nil)]
         XCTAssertFalse(state.moveLaterToToday(id: source.id))
-        XCTAssertEqual(state.laterTaskIssue, .move)
+        XCTAssertEqual(state.laterTaskIssue, .moveToToday)
         XCTAssertEqual(store.savedLaterTasks.count, 1)
         XCTAssertEqual(state.notes, [])
     }
@@ -2689,7 +3607,8 @@ final class DailyNotesStateTests: XCTestCase {
         // Shared removal only clears assignments; history metadata and rowids survive.
         XCTAssertEqual(try rows("notes").map { Array($0.prefix(6)) }.prefix(2),
                        todayBefore.map { Array($0.prefix(6)) }.prefix(2))
-        XCTAssertNil(try rows("notes").first?.last ?? nil)
+        // Column 6 is category_id; schema v4 appends display_order after it.
+        XCTAssertNil(try rows("notes").first?[6] ?? nil)
         let notesAfter = try rows("notes")
         let laterAfter = try rows("later_tasks")
         let categoriesAfter = try rows("categories")
@@ -2915,6 +3834,20 @@ private final class FakeNoteRepository: NoteRepository {
         }
     }
 
+    func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome {
+        moveAttempts += 1
+        onMove?()
+        if failWrite == .move { throw FakeFailure.failed }
+        let outcome = TaskMovePlanner.plan(request, dayKey: request.expectedDayKey,
+                                           notes: try notes(for: request.expectedDayKey),
+                                           categories: try categories())
+        if case let .changed(ordered) = outcome {
+            saved.removeAll { $0.dayKey == request.expectedDayKey }
+            saved.append(contentsOf: ordered)
+        }
+        return outcome
+    }
+
     func categories() throws -> [TaskCategory] {
         readAttempts += 1
         onCategoryRead?()
@@ -3071,7 +4004,7 @@ private final class FakeNoteRepository: NoteRepository {
     }
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note {
         moveAttempts += 1
-        try checkLaterWrite(.move)
+        try checkLaterWrite(.moveToToday)
         onMove?()
         guard let task = savedLaterTasks.first(where: { $0.id == id }) else {
             throw LaterTaskRepositoryError.notFound(id)
@@ -3102,4 +4035,37 @@ private final class FakeNoteRepository: NoteRepository {
         guard let index = saved.firstIndex(where: { $0.id == id }) else { throw FakeFailure.failed }
         saved[index] = change(saved[index])
     }
+}
+
+/// Callback-level fixture; this does not simulate the system's native drag loop.
+@MainActor
+private final class MovementDraggingInfo: NSObject, NSDraggingInfo {
+    var draggingDestinationWindow: NSWindow?
+    var draggingSourceOperationMask: NSDragOperation = .move
+    var draggingLocation: NSPoint
+    var draggedImageLocation: NSPoint { .zero }
+    nonisolated var draggedImage: NSImage? { nil }
+    let draggingPasteboard = NSPasteboard(name: .init(UUID().uuidString))
+    var draggingSource: Any?
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    init(source: TaskDragHandleView, token: UUID, window: NSWindow, point: NSPoint) {
+        draggingSource = source
+        draggingDestinationWindow = window
+        draggingLocation = point
+        super.init()
+        let item = NSPasteboardItem()
+        item.setString(token.uuidString, forType: TaskDragSession.pasteboardType)
+        draggingPasteboard.writeObjects([item])
+    }
+    func resetSpringLoading() {}
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    func enumerateDraggingItems(options: NSDraggingItemEnumerationOptions, for view: NSView?,
+                                classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+                                using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
 }

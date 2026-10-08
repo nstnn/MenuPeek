@@ -583,6 +583,14 @@ The new state APIs publish Later add/edit/completion/deletion and Later-to-Today
 
 Final verification used macOS 26.6.2 (25G83), Xcode 27.0 (27A266a), on `feat/later-tasks`, base/HEAD `963f17586eb99783bb84504babadec190ab1199f` plus uncommitted state/helper/test/architecture/workflow changes. The independently tested six-file binary diff SHA-256 was `10ab3624414b3e64a699f958c265d4644bf38a77d6940a9013aa1ff5da1dcd89`, unchanged before and after verification. The later additions to this regression record and English plan are documentation-only. The tested temporary app was `build/task006-review/DerivedData/Build/Products/Debug/MenuPocket.app`, bundle `local.menupocket.app`, version `0.1.0`, build `1`; executable SHA-256 `bdc10dab13dcbce91b4757f21f74a4ef808ddc3664d3eae2e18463df3d09c0e2`. Exact artifact identity and cleanup observations are retained in the review report.
 
+## Movement contract and pure ordering — 2026-10-06
+
+Task 1 adds a pure movement planner and UUID-based request/placement/outcome types in [TaskMovement.swift](../MenuPocket/Notes/TaskMovement.swift), with [contract tests](../Tests/MenuPocketTests/TaskMovementTests.swift) registered in the shared Xcode project. It supports before/after and end-of-group placement, validates expected day/source and destination/anchor identities, preserves task fields and every other task's relative order, and returns unchanged for equivalent visible positions. Malformed/stale snapshots reject without mutation. The planner's changed result is only a proposal; repository persistence and state/UI integration remain future work.
+
+Source baseline: branch `feat/task-movement`, HEAD `34b789f2333b7f53dfabfb38b472617ce13cab4e`, initially clean tracked tree. Dirty build inputs were the new planner/tests and project membership. Schema remains v3 and daily reads remain rowid ordered. Today and Quick Add share `DailyNotesState.add(text:categoryID:)` → `SQLiteNoteRepository.add(_:)`, the sole production daily INSERT. Later-to-Today transfer still throws unsupported. The next ordering migration must guard Later-table creation by `version < 3`; v4 is available at this baseline. No real database, defaults, login registration, or hotkey was changed.
+
+The final shared-scheme Debug hosted run passed **13/13**, zero failures: 8 `TaskMovementTests` and 5 existing `TaskGroupingTests`. Xcode 27.0 (27A266a), macOS arm64 destination. Command:
+
 ```bash
 xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
   -configuration Debug -destination 'platform=macOS' \
@@ -729,3 +737,182 @@ Source: committed HEAD `b700eafca3f09c492dcdcf4e1ca75cadca7b3d80` (TASK-004), cl
 - **Full hosted suite (Pass): 361/361**, zero failures, about 19 s, one run with the user's permission (`xcodebuild … -configuration Debug … test`). The previous full-suite baseline (287, TASK-013 History) grew through the Later, History, and glance work; this run includes `MenuBarGlanceTests`, `MenuBarGlanceMenuTests`, the TASK-004 routing/lifecycle tests, and the unchanged status-item and guarded-Later click tests.
 
 Logs/results: ignored `build/glance-task005/` (`debug-build-for-testing.log`, `release.log`, `full.log`, `full.xcresult`, `artifact-identity.txt`). The Debug test host and the Release app were unregistered from LaunchServices, moved to Trash with `FileManager.trashItem`, and their Trash paths unregistered. The user's `/Applications/MenuPocket.app` (not running) and its data were not touched. Interface results from the isolated glance fixture are recorded separately; they are not established by this run. Not run: remote CI.
+
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests test
+```
+
+The initial run also passed 13/13; the final run rebuilt a simplified preservation assertion. Final result: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.06_13-56-53--0400.xcresult`; logs and hashes: `build/task-movement-task1/`. Planner SHA-256: `e4efe76d39df5b51f1c6b823be04bcb35e2a40faa159b8261bbe133d6bc0543d`; tests: `5ac08559712ed3223f51aff9486567d4251a9da5410129af15967840134f6258`; project: `8799d183976677b2b32413718df57a28a7e42714a81136d26848f354b0dcf812`. Debug host executable: `7b066f5ad1c069f4ac6b91f0c31e79892f673224ce9a29381e5e82786d3e7d40`; Debug dylib: `69b96b120b35f294b90635a350830efbc019f0250c55bea93568521acfe253fe`. Project plist validation and `git diff --check` passed.
+
+Cleanup: the only temporary app created was this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`. After both completed runs, no process was running from that path. It was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 13-57-36-795.app`, then unregistered again after LaunchServices re-registration was observed. Final LaunchServices dump contains neither original nor Trash path; Spotlight lists neither temporary copy. The pre-existing main-checkout Debug executable hash was identical before/after cleanup. Another session's Later worktree host was preserved. Cleanup evidence is in `build/task-movement-task1/cleanup.log`, `launchservices-after.txt`, `spotlight-after.txt`, and `main-app-before.txt`/`main-app-after.txt`.
+
+This is focused automated contract evidence. No SQL migration, repository move, persisted ordering, visible drag/menu behavior, full-suite, Release, remote CI, or native/system acceptance is claimed for Task 1.
+
+## Daily ordering migration — 2026-10-06
+
+Movement Task 2 introduces SQLite v4 in [SQLiteNoteRepository.swift](../MenuPocket/Notes/SQLiteNoteRepository.swift): additive integer `notes.display_order`, per-day rowid backfill, unique `notes_day_display_order_idx(day_key, display_order)`, and schema/integrity/order validation before advancing the version. Category/Later steps are guarded by their original versions. Fresh stores and independent historical v0/v1/v2/v3 fixtures verify preserved task fields/rowids, interleaved assigned days/categories, completion, category catalog and Later rows. Index-name failure after backfill proves schema/data/version rollback and safe retry for every historical version. Sparse ranks survive byte-identical reopen; future v5 and malformed indexes/noninteger/negative order are refused without repair.
+
+Minimal append allocation was pulled forward from Task 3 so repeated Add and Quick Add remain valid under the new unique index. It uses the existing write transaction; Int64 exhaustion throws without a write. Task 3 still owns ordered reads/runtime rank validation, overflow compaction and the persisted move command. Reads remain rowid ordered; no visible movement/state action or Later transfer was implemented.
+
+Source baseline: `feat/task-movement`, HEAD `801eb96bf1bc1b505444613e2fa50d8342b05a96`, initially clean tracked tree. Dirty executable inputs: repository and repository tests only. Xcode 27.0; macOS 26.6.2 (25G83), arm64. The shared-scheme Debug hosted run passed **92/92**, zero failures/skips: 33 `SQLiteNoteRepositoryTests`, 51 `DailyNotesStateTests`, 8 `QuickAddPanelTests`.
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+Result: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.06_14-12-00--0400.xcresult`. Logs, summary, source/artifact hashes and cleanup evidence: `build/task-movement-task2/`. Initial sandboxed invocation failed in Xcode macro/test services; the authorized invocation above passed. Repository SHA-256: `f691b4f0da2fedfd140827f224de0137385223b76e255ab70a4757bfb1b9a0ca`; tests: `5ac0bc0dd5ab5a17f649f8256d956b609522fd0955538733bf620c7de51d34e3`. Host executable: `b08651d19c51aeaca3058f0e91f37ddc3839a7b8192c72563f834389b5afac75`; Debug dylib: `715b51f4fe966128540b9aca4ae3ac1e3f92452b1fa70485ce5339ed6b632d1d`. Diff whitespace check passed.
+
+Cleanup: no test host process remained after testing. The only created temporary app, this checkout's `build/DerivedData/Build/Products/Debug/MenuPocket.app`, was unregistered and moved with `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 14-12-44-475.app`. Following automatic Trash-path re-registration it was unregistered again; final LaunchServices dump contains neither path, Spotlight contains neither temporary copy, and the original bundle is absent. Main-checkout Debug executable hash remained `8ee2320cf524a802568da6aad47209d84a7cf3d9e18ddce406e0a54caf3a1c67` before/after.
+
+This establishes isolated migration and focused regression evidence. No production database upgrade/launch, native movement interaction, oldest-OS run, full suite, Release, remote CI, or system acceptance was performed.
+
+
+## Atomic repository movement — 2026-10-07
+
+**Pass for Movement TASK-003 repository handoff; independent review READY.** Baseline: clean `feat/task-movement`, HEAD `c121808`; final source/tests/workflow were uncommitted. SQLite schema remains v4. The repository now reads validated saved `display_order`, executes UUID-based explicit moves against a fresh transaction snapshot, rewrites ranks in two passes and updates the moving category atomically. Changed snapshots return only after COMMIT. Rejected/equivalent moves perform no UPDATE. Add/Quick Add compact only an exhausted day's ranks inside the insertion transaction. Existing Edit/completion and surviving delete/category-removal ranks are retained; Later→Today remains unsupported.
+
+Xcode 27.0 (`27A266a`), macOS 26.6.2 (`25G83`), arm64. Author and fresh independent reviewer runs each passed **112/112**, zero failures/skips: 40 SQLite repository, 51 DailyNotesState, 8 Quick Add, 8 movement planner, 5 grouping. Both used the shared MenuPocket Debug scheme and isolated databases/injected services. The initial sandboxed author invocation failed because Swift macro/test services were blocked; the permitted rerun below succeeded.
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:MenuPocketTests/SQLiteNoteRepositoryTests \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests \
+  -only-testing:MenuPocketTests/QuickAddPanelTests test
+```
+
+Coverage establishes exact order after fresh repository reopen for within/cross-group, before/after and empty/General movements; preservation of rowids/task fields, other days, Later, categories and counts; rejected/stale/no-op requests with an UPDATE-rejecting trigger; rollback after writes in both rank passes and category reassignment; reader-lock **COMMIT/SQLITE_BUSY** failure followed by retry on the same connection; Add after move; Edit/completion/delete/category removal rank retention; Int64-exhaustion compaction with failed-insert rollback; and runtime malformed/noninteger/duplicate/negative ranks rejected without repair.
+
+Author xcresult: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.07_10-13-24--0400.xcresult`. Independent xcresult: `build/DerivedData/Logs/Test/Test-MenuPocket-2026.10.07_10-15-08--0400.xcresult`. Logs and hashes: `build/task-movement-task3/` (`tests.log`, `tests-authorized.log`, `independent-review-tests.log`, `source-hashes.txt`, `artifact-hashes.txt`). Repository SHA-256: `ff6b8378d075c141c9666ea7cd22d6fd5ea6ba82449435194aa1138a4024dc9c`; repository tests: `77cff607aff4188a0c330f6748ef55b83d9b900c5b508a4eadca3991d04273bb`. Debug executable: `98f1ebd3ba7cf5e0e0a33322134986bae8bec2ba47b239291af8fc5f2664a2a6`; Debug dylib: `ec76e491e956c3b869fd68d1dc63876ea2cb331fb60d0c6c9bc1791498f22c50`. Independent reviewer `/root/review_task3` did not author the changes. Final implementation/test snapshot remained stable through review; subsequent edits record handoff/evidence only.
+
+Cleanup: no process remained at this checkout's exact test-host path. `build/DerivedData/Build/Products/Debug/MenuPocket.app` was unregistered and moved using `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 10-16-13-486.app`. Unregistering that Trash path reported scan `-10814`; the final LaunchServices/Spotlight dumps contain neither original nor Trash path. The original bundle is absent. `/Applications/MenuPocket.app` executable SHA-256 is identical before/after. Evidence: `processes-before-cleanup.txt`, `trashed-app-path.txt`, `launchservices-after.txt`, `spotlight-after.txt`, `main-app-before.txt` and `main-app-after.txt` under the log directory. Diff whitespace validation passed.
+
+This is repository/automated evidence. State move command/guards, drag/menu interaction, native changed-data relaunch, production database upgrade, 1,000-task scale, oldest-OS run, full-suite, Release and remote CI remain later-card or separate evidence. No real saved database, defaults, login registration or global hotkey was changed.
+
+
+## Guarded state movement — 2026-10-07
+
+- Scope: TASK-004 only, branch `feat/task-movement`, base/HEAD `559658ffb628ce5bafd58e1d7227d68f70b653e5` plus uncommitted changes to daily state, retained presentation/controller, write-error copy, state tests, and architecture guidance. No schema, repository, drag source/target, or movement-menu implementation changes.
+- Contract: `DailyNotesState.moveTask(_:) -> TaskMoveOutcome?` validates action-time day and displayed task/category/anchor expectations, checks shared presentation guards, and delegates to the cached repository. Only committed `.changed` publishes rows and expands the destination. `.unchanged` never changes collapse state; rejection reports `.move`; nil denotes guards/unavailability/write failure. Read `.load` takes presentation precedence over retained move failure, and explicit Retry restores readiness. Only `.changed` authorizes later UI reveal.
+- Tests: six new state tests cover committed publication, completion/progress/task-field/draft/recovery/last-used preference preservation, destination-only expansion, write failure/retry, unavailable-read recovery, unchanged/stale/removed task/category/source/anchor requests, inline edit/delete/category manager/termination guards, rollover, and isolated SQLite refresh/fresh-repository reopen. Existing state/status-item, Quick Add, and app configuration regressions remain included.
+- Command: `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/task4/DerivedData -only-testing:MenuPocketTests/DailyNotesStateTests -only-testing:MenuPocketTests/QuickAddPanelTests -only-testing:MenuPocketTests/AppConfigurationTests test`.
+- Result: **100/100**, zero failures/skips (57 daily state + 8 Quick Add + 35 configuration). Xcode 27.0 (27A266a); macOS SDK 27.0. Log: `build/task4/tests.log`; result: `build/task4/DerivedData/Logs/Test/Test-MenuPocket-2026.10.07_10-28-44--0400.xcresult`. `git diff --check` passed. Initial sandbox run failed with the Observation macro-plugin malformed-response/access failure; retained in `build/task4-tests.log`, then rerun with permitted access.
+- Author test binary SHA-256: `962d2360807b09ce31d5585f3a98d8cf318db2ebc8e8f1b59b25f33f517e6630` (recorded in `build/task4/app-sha256.txt`). Cleanup after both failed and successful runs: temporary hosts at `build/task4/DerivedData/Build/Products/Debug/MenuPocket.app` were unregistered, moved to Trash, and their Trash paths unregistered; records `build/task4/failed-trash-path.txt` and `build/task4/trash-path.txt`. No session-created app remains under `build/task4`; no host process remained; Spotlight and LaunchServices expose no original host path. `/Applications/MenuPocket.app` retained the same inode and modification time (`241915164`, `1791325693`). No production database/defaults or genuine login/hotkey services were used for movement verification.
+- Evidence limits: these are hosted automated state/integration checks. Native move error interaction, drag/menu movement, scrolling/reveal, macOS 14, Release/full-suite/remote CI, and real-user data acceptance were not performed; later feature cards own integrated acceptance.
+
+- Independent review: fresh reviewer `/root/review_task4` found no actionable Task 4 defect. Its rebuilt run passed all 57 state and 8 Quick Add tests and 32/35 configuration tests; three existing native configuration tests failed with seven assertions: composer undo, native text select/paste, and Settings/window close. Isolated rerun reproduced those assertions, and an unchanged HEAD baseline reproduced the **same three tests/seven assertions**. This establishes a pre-existing failure in that execution environment, not a Task 4 regression. The author's 100/100 run remains separately recorded above; the review run is not described as entirely green. Logs: `build/task4/review-rebuild-tests.log`, `build/task4/review-native-isolated.log`, `build/task4/review-baseline-native.log`; final identity and reviewer cleanup: `build/task4/review.md`. Review verdict: **READY for Task 4 state handoff**, with native movement acceptance deferred and broader native-test instability retained as a limitation.
+
+## Native movement source — 2026-10-07
+
+Task 5 source implementation only; the user explicitly deferred tests. No XCTest or native UI interaction was run. Task 6 drop destinations and saved-drop routing are absent, so this does not establish native movement acceptance.
+
+- Source: `feat/task-movement`, HEAD `8d90c1c60042a7088ba5f2b37ecf06161faa658e`, with Task 5 changes in `TaskDragSource.swift`, `TaskWindowView.swift`, `TaskWindowController.swift`, `DailyNotesState.swift` and app project membership. Existing Task 4 changes were present at the start and were retained; HEAD advanced to this Task 4 commit during the session without this task issuing a commit.
+- Final source SHA-256: `TaskDragSource.swift` = `d9f562e0512abc3578ee784b3f2270a09f5fcbb327887dc9736ee6dc1d19b4aa`; `TaskWindowView.swift` = `6424f8ceba88754d96a7f7fd27614a70f9cc4290e04ecefd57a02d4d800c8bd5`.
+- Build: Xcode 27.0 (27A266a), shared MenuPocket scheme, Debug, macOS 14 deployment target. `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -derivedDataPath /private/tmp/menupocket-task5-build CODE_SIGNING_ALLOWED=NO build` passed for the final source. Log: `/private/tmp/menupocket-task5-build-final.log`. This compile-only unsigned app was never launched.
+- Initial sandboxed build failed with Swift macro-plugin malformed responses, including Observation/Preview macros. The authorized build outside the sandbox passed; logs are `/private/tmp/menupocket-task5-build.log` and `/private/tmp/menupocket-task5-build-unrestricted.log`. No source repair was needed for that environmental failure.
+- Static: project plist validation and `git diff --check` passed. Installed SDK headers expose the native source-end and source-operation callbacks and the drag-session source API for the supported deployment target. References: [NSDraggingSource](https://developer.apple.com/documentation/appkit/nsdraggingsource), [native session creation](https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)). This is compilation/API evidence, not a macOS 14 runtime observation.
+- Cleanup: the exact temporary `/private/tmp/menupocket-task5-build/Build/Products/Debug/MenuPocket.app` was unregistered, moved through `FileManager.trashItem` to `/Users/nstn/.Trash/MenuPocket.app 10-46-02-749.app`, and that Trash path was unregistered. Original bundle path is absent; process and LaunchServices checks found no app at the original temporary path. Cleanup log: `/private/tmp/menupocket-task5-cleanup.log`. No production app/data/defaults or system registrations were changed.
+- Not tested: handle start, preview/cursor, Escape/outside/rejected/successful drag endings, cleared observable session state in the running interface, checkbox/text selection/copy/ellipsis coexistence, oldest supported macOS runtime. These are pending native feasibility/acceptance checks; do not infer them from the build.
+
+## Movement destinations — Task 6 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `792e2645306c52c21c881717c2f63e380c5791e7` plus the Task 6 changes in `TaskDragSource.swift`, `TaskGrouping.swift`, `TaskWindowView.swift`, new `TaskDropTarget.swift`, project membership, and state/grouping tests. Partial destination changes existed at task start and were retained/finished. No persistence schema or repository change.
+
+Shared-scheme Debug verification on macOS 26.6.2 (25G83), Xcode 27.0 (27A266a): **74/74 passed**, zero failures/skips, selecting `TaskGroupingTests`, `TaskMovementTests`, and `DailyNotesStateTests`. Command:
+
+```sh
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug \
+  -destination 'platform=macOS' -derivedDataPath /private/tmp/menupocket-task6 \
+  -resultBundlePath build/task6/Tests-final.xcresult \
+  -only-testing:MenuPocketTests/TaskGroupingTests \
+  -only-testing:MenuPocketTests/TaskMovementTests \
+  -only-testing:MenuPocketTests/DailyNotesStateTests test
+```
+
+New callback tests exercise both row halves, one-shot dispatch despite duplicate callbacks, external/self/no-op rejection, a guard changing between hover/drop, header placement into a collapsed empty category, and failed-write preservation of saved rows/drafts/collapse/error plus feedback cleanup. The grouping test checks transient empty categories/General, creation order and unchanged counts/normal presentation. These use isolated repositories/defaults and fake dragging info; they do not simulate the native drag loop.
+
+The first sandboxed run failed on Xcode Observation macro service access; a permitted rerun found test-fixture protocol conformance errors, which were corrected before the successful final run. Evidence: ignored `build/task6/tests*.log`, `Tests*.xcresult`, `test-summary.json`, fixture source/build commands/logs, crash report and artifact hashes.
+
+Independent reviewer `/root/review_task6` did not author or modify this patch. Fresh focused verification passed **9/9** (three callback tests plus grouping), project plist and whitespace checks passed, no demonstrated source defect. Verdict **BLOCKED** for unresolved native acceptance. Reviewed code identity: tracked diff SHA-256 `c9a503e0b68b59d3549421e3822804e45899243d234a03f36ecda08ef89f075d`; untracked `TaskDropTarget.swift` SHA-256 `2496c73a3ec672d137d2c12063e1fdffef3a698d6008c66b9bcaf53a686b49ed`. Reviewer logs/results: `/private/tmp/menupocket-task6-review-permitted.log` and `/private/tmp/menupocket-task6-review/Logs/Test/Test-MenuPocket-2026.10.07_11-15-54--0400.xcresult`. Later documentation edits do not change that code snapshot.
+
+Cleanup completed after failed/successful sessions: author's exact Debug host and native fixture were unregistered, moved with `FileManager.trashItem`, and Trash paths unregistered; reviewer did the same for their host. Original paths are absent. Final author's process/LaunchServices checks expose neither original host nor fixture; Spotlight has no fixture. `/Applications/MenuPocket.app` executable hash is identical before/after. Cleanup/identity records are under `build/task6/`. No production data/defaults, login/hotkey registrations, Git publication, full suite, Release build, oldest-supported-OS acceptance or later-card scrolling/menu acceptance was performed.
+
+
+## Movement scrolling and reveal — Task 7 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD/base `ee29e716339a8654319c4790bceb05c6d9ce59c6`, plus changes to `DailyNotesState.swift`, `TaskDragSource.swift`, `TaskWindowController.swift`, `TaskWindowView.swift` and `DailyNotesStateTests.swift`. Final code/test diff SHA-256: `69960471bf43d5feba42a34b168fa96090256536ba1e459253f7337f307112ad`. Documentation changes follow verification; no schema/repository change.
+
+Shared `MenuPocket` scheme Debug build and focused tests on macOS 26.6.2/Xcode 27.0: **69/69 passed**, zero failures, selecting `DailyNotesStateTests` and `TaskGroupingTests`. Command: `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/DerivedData -only-testing:MenuPocketTests/DailyNotesStateTests -only-testing:MenuPocketTests/TaskGroupingTests -resultBundlePath build/task7/Tests-verified.xcresult test`. Logs and results are retained under ignored `build/task7/`.
+
+New checks observe bounded clip scrolling, source unmount survival, cancellation preventing further scrolling and reservation lasting until native end; edge/center/outside geometry; saved reveal supersession and cancellation by newer Add/deletion while preserving drafts. Existing callback failure coverage additionally verifies absence of a failed-save reveal. These are isolated hosted/state checks, not real drag-loop proof.
+
+Initial sandbox build failed on compiler macro access; permitted rerun passed 69/69. A later timer-lifetime refinement failed Swift 6 region isolation, then was corrected and the final suite passed 69/69. Failed outputs remain retained, and partial bundles were cleaned between sessions.
+
+Fresh independent reviewer `/root/task7_review` did not author or modify production code. Final independent `test-without-building` checks passed **6/6**, zero failures/skips (`build/task7/review-tests-verified.log`, `ReviewTests-verified.xcresult`). Reviewer verified the final diff identity and whitespace; no remaining actionable source defect. A source-group focus fallback/reveal risk identified during review was corrected before final verification. Verdict **BLOCKED** for required native observations and the Task 6 prerequisite. No full suite, Release, remote CI, macOS 14 runtime or production-data acceptance is claimed.
+
+Every temporary Debug host and native fixture, including failed-build bundles, was unregistered/trash-moved and Trash paths unregistered. Original paths are absent; exact fixture processes exited. Main `/Applications/MenuPocket.app` executable SHA-256 remains `2f230e6c4b43243e55f56fc0b2e166664daa20e63bf60c4b55b101d707582f9f`. Cleanup logs: `build/task7/failed-cleanup.txt`, `cleanup-first.txt`, `cleanup-compile.txt`, `cleanup-final.txt`. The initial failed host's Trash path was also unregistered during final cleanup. No production storage/defaults, login-item or hotkey services were changed.
+
+## Native movement source verification — Task 5 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `0502d41f1612e4ba19bddaed70b16be868c51864`, plus six new drag-source lifecycle tests in `DailyNotesStateTests.swift`. No production source change.
+
+Shared `MenuPocket` scheme Debug on macOS 26.6.2, Xcode 27.0: **69/69 passed**, zero failures/skips, selecting `DailyNotesStateTests`. Command: `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/task5/DerivedData -resultBundlePath build/task5/Tests.xcresult -only-testing:MenuPocketTests/DailyNotesStateTests test`. Log: ignored `build/task5/tests.log`.
+
+New checks: one reserved token per eligible Today task, with foreign source-end ignored; begin refused behind inline edit, deletion confirmation, category manager, termination and unavailable read; payload validation accepts only the exact live source with one private item/token and rejects another handle, external source, unmatched token, generic text, extra representation, bulk items, a mid-drag guard and a cancelled token; invalidation on source-group change and day rollover; one-shot consume, with cancel/close/termination clearing feedback while the native reservation lasts until source end; handle start requires enabled state and a ≥4 pt drag, is reset by mouse-up/unmount, and never takes keyboard focus. Hosted tests cannot create a real `NSDraggingSession`; native lifecycle evidence is in [Task 5 acceptance](DESKTOP_TASK_ACCEPTANCE.md#native-movement-source--task-5-2026-10-07).
+
+Cleanup: the `build-for-testing` host and the final test host at `build/task5/DerivedData/Build/Products/Debug/MenuPocket.app` were unregistered, moved with `FileManager.trashItem`, and their Trash paths unregistered (`build/task5/cleanup-build-for-testing.txt`, `build/task5/cleanup-final.txt`). `/Applications/MenuPocket.app` executable SHA-256 is unchanged (`2f230e6c4b43243e55f56fc0b2e166664daa20e63bf60c4b55b101d707582f9f`).
+
+## Row-menu movement — Task 8 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `ecd9cbc` (row-menu Move Up/Down/To, minimal-scroll reveal repair, three new menu tests). Shared `MenuPocket` scheme Debug on macOS 26.6.2, Xcode 27.0: **86/86 passed**, zero failures/skips (72 `DailyNotesStateTests`, 6 `TaskGroupingTests`, 8 `TaskMovementTests`). Command: `xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug -destination 'platform=macOS' -derivedDataPath build/task8/DerivedData -resultBundlePath build/task8/Tests.xcresult -only-testing:MenuPocketTests/DailyNotesStateTests -only-testing:MenuPocketTests/TaskGroupingTests -only-testing:MenuPocketTests/TaskMovementTests test`. Log: ignored `build/task8/tests.log`.
+
+New checks cover menu destinations in catalog order with the current group checked and unavailable, boundary-disabled Move Up/Down within a group, saved up/down/Move To results that preserve completion, progress and expansion, guards (inline edit, deletion confirmation) and unknown tasks, and request equality with drop routing for the same placement. The run also re-verifies the Task 5–7 drag/drop/reveal tests after the shared reveal change. Native evidence: [Task 8 acceptance](DESKTOP_TASK_ACCEPTANCE.md#row-menu-movement--task-8-2026-10-07).
+
+Cleanup: the test host was unregistered, moved with `FileManager.trashItem`, and its Trash path unregistered (`build/task8/cleanup-tests.txt`); the build-for-testing host was cleaned earlier (`build/task8/cleanup-build-for-testing.txt`). This session never wrote to `/Applications/MenuPocket.app`. Its executable hash was `2f230e6c…` through the 17:18 fixture cleanup; it was replaced at 17:27 outside this session (now `716fe6cc…`), before this test run.
+
+## Integrated movement regression and scale probe — Task 9 (2026-10-07)
+
+Source: `feat/task-movement`, HEAD `400ef7577773bebb711a6569831faeb75cc39d51`, plus two new tests in `DailyNotesStateTests.swift` (file SHA-256 `5874d666159806669ca8bad6c25c92dee7646bba91d911e09ae0c7d575fb09b0`). No production source change. macOS 26.6.2 (`25G83`), Xcode 27.0, shared `MenuPocket` scheme, `platform=macOS`.
+
+| Check | Result | Evidence and limit |
+| --- | --- | --- |
+| Full shared-scheme Debug suite | Pass | **274/274**, zero failures/skips, finished 2026-10-07 23:15:09 local. Includes all 35 `AppConfigurationTests`; the three native configuration failures seen during Task 4 did not reproduce in this run. Log: ignored `build/task9/tests.log`; result bundle `build/task9/Tests.xcresult`. |
+| Integrated SQLite movement | Pass | `testIntegratedSQLiteMovementSurvivesReopenAndLaterDailyWrites`: row-menu Move Up, drop-shaped completed task into a collapsed group, Move To General, General → empty category, then an equivalent no-op. Exact order/groups, unchanged text/day/created/completed fields, unchanged progress, preserved new-task draft and last-used category, and destination-only expansion survive refresh and a fresh state/repository reopen with shared isolated defaults. After the moves it also covers Today Add (remembered category) and Quick Add-path append, category-only Edit keeping its daily rank (unlike the explicit Move To append), completion, delete, and category removal merging into General in saved order. A third reopen matches. The other-day row and the Later row are unchanged, and `moveLaterToToday` stays unsupported. |
+| 1,000-task scale probe | Pass (correctness); latency recorded | `testScaleProbeMovesAndReadsOneThousandTasksAcrossCategories`: 1,000 tasks across 10 categories + General (one third completed), 20 state-level saved moves (10 worst-case same-group last→first, 10 cross-category). Each move keeps every other task's relative order with no loss or duplication. Progress is unchanged, and a fresh reopen matches. Hosted Debug (unoptimized) timings: move median **15.6 ms**, min 14.5 ms, max 16.6 ms; state read 7.6 ms; grouping 3.2 ms; one row's menu moves 1.2 ms; fresh reopen read 8.7 ms; seeding 1,000 individual Add transactions 4.0 s (about 4 ms per add). Timing is logged, not gated. |
+| Debug and Release builds | Pass | `build` for both configurations succeeded (`build/task9/build-Debug.log`, `build-Release.log`). Debug `build` executable SHA-256 `5567dfe4bd494c830953667a43365b26601f36a5fbfff969147d887df587eec2` (arm64; hash not retained in a file). The later `test` action rebuilt it in the same path as the test host, `76c7858c1b8267d90ce85c57eb580c4b0045ca8fe16dbb797c69a72c59998dd8`; that is the artifact that was trashed. Release `da4c3ecfef137a5bbcb19ec1b38d14199bdc5ce9a8241429da27e80fe49e7af4` (x86_64 + arm64). Strict deep `codesign --verify` passed for both. |
+
+The scale result supports keeping dense O(n) per-day rank rewriting. A worst-case 1,000-task move costs about one 60 Hz frame in unoptimized Debug, so no fractional ranking is needed. Whether this produces a visible stall in the native interface is a Task 10 observation; these tests do not establish it. Native drag, VoiceOver, macOS 14, minimum window, production-data upgrade and remote CI were not exercised.
+
+Commands:
+
+```bash
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Debug \
+  -destination 'platform=macOS' -derivedDataPath build/task9/DerivedData \
+  -resultBundlePath build/task9/Tests.xcresult test
+
+xcodebuild -project MenuPocket.xcodeproj -scheme MenuPocket -configuration Release \
+  -destination 'platform=macOS' -derivedDataPath build/task9/DerivedData build
+```
+
+Cleanup: the Debug test host/app and the Release app under `build/task9/DerivedData/Build/Products/` were confirmed not running. They were unregistered, moved with `FileManager.trashItem`, and their Trash paths were unregistered. No `.app` remains under `build/task9`, and neither LaunchServices nor Spotlight lists either path (`build/task9/cleanup.txt`). `/Applications/MenuPocket.app` executable SHA-256 is unchanged (`716fe6cc…`). Task 10 must build and identify its own artifact from this source.
+
+## Merge with main — 2026-10-07
+
+Source: merge commit `bc98c8a` of `origin/main` `90d32b8` (Later, History, Today/Later tabs, menu bar glance) into `feat/task-movement` `60e8e76`. Merge repairs: Later-to-Today transfer allocates a schema v4 daily rank, `DailyNotesIssue.moveToToday` separates the Later transfer error from Today `.move`, movement is limited to Today rows on the Today list, and the movement files have fresh project object IDs. Two main test fixtures were updated for schema v4. macOS 26.6.2, Xcode 27.0, shared `MenuPocket` scheme.
+
+| Check | Result | Evidence and limit |
+| --- | --- | --- |
+| First full Debug suite | Fail (fixtures) | 401/403. `TaskHistoryIntegrationTests.testMultiYearHistoryReadsStayBoundedAndExact` seeded raw v3-style rows without `display_order` (unique index collision). `testIntegratedChangedDataReopenPreservesBothTablesAndScopedPreferences` read the last `notes` column as `category_id`. Both fixtures were corrected; no product change. Log: ignored `build/merge/tests.log`. |
+| Final full Debug suite | Pass | **403/403**, zero failures (`build/merge/tests-final.log`, `build/merge/Tests.xcresult`). Includes the Task 9 integration test, now with a real Later-to-Today transfer after reordering, and the 1,000-task probe (move median 22.4 ms, max 63.2 ms, read 8.7 ms in hosted Debug on this run). |
+| Debug test build and Release build | Pass | `build/merge/build-for-testing.log`, `build/merge/build-Release.log`. Debug test host SHA-256 `16db8ddd…`, Release `0fcaa1f8…`. |
+
+Not tested: native drag/menu movement alongside the Today/Later tabs and History, and Xcode 16.4 (CI). These belong to Task 10 and the PR's CI run. Cleanup: both apps were unregistered, moved with `FileManager.trashItem`, and their Trash paths unregistered. No `.app` remains under `build/merge`, and `/Applications/MenuPocket.app` is unchanged (`716fe6cc…`; `build/merge/cleanup.txt`).

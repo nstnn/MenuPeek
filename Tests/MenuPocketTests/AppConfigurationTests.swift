@@ -2108,6 +2108,17 @@ private final class TaskWindowReadFixture: NoteRepository {
     var removeAttempts = 0
     var onRemove: (() -> Void)?
 
+    func moveTask(_ request: TaskMoveRequest) throws -> TaskMoveOutcome {
+        let outcome = TaskMovePlanner.plan(request, dayKey: request.expectedDayKey,
+                                           notes: try notes(for: request.expectedDayKey),
+                                           categories: try categories())
+        if case let .changed(ordered) = outcome {
+            saved.removeAll { $0.dayKey == request.expectedDayKey }
+            saved.append(contentsOf: ordered)
+        }
+        return outcome
+    }
+
     func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
         _ = try GregorianDay(key: dayKey)
         let catalog = try categories()

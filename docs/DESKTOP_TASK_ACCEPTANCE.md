@@ -461,3 +461,102 @@ Isolated native fixture for the read-only menu bar glance (docs REQ-016). Source
 | Saved data | Pass. After the user's session, `few`, `empty`, `alldone`, and `unavailable` matched their post-TASK-005 snapshots, and `normal` matched its fresh seed, which was reset after Claude's run (11 Today tasks with 3 done; 3 unfinished Later tasks). Opening and browsing the glance wrote nothing. |
 
 Not tested: VoiceOver (12), the native tooltip (14), Themes with macOS in Light (11), a physical Control-click (3), dismissal with another app frontmost, a production-identity app, and quiet login startup. The fixture was quit, unregistered from LaunchServices, moved to Trash with `FileManager.trashItem` (2026-10-07T21:16Z), and its Trash path unregistered. The user's `/Applications/MenuPocket.app` (executable SHA-256 `2f230e6c…82f9f`, unchanged) and its data were not touched. Evidence: ignored `build/glance-task005/` (`MANUAL_CHECKS.md`, `artifact-identity.txt`, scenario snapshots `final-*.txt` and `task006-*.txt`).
+
+## Movement destinations — Task 6 initial native attempt (2026-10-07)
+
+**Native acceptance: BLOCKED.** Isolated fixture used current production `TaskWindowController`/`TaskWindowView`, SQLite `/private/tmp/menupocket-task6-native/notes.sqlite`, defaults suite `local.menupocket.task6-presentation`, and injected October 7 Toronto clock. It did not initialize the production app delegate or login/hotkey services. Final executable SHA-256 `cd76a7fe70ac64de701f2cf5066135b5e7c5ffbf9e86555ab620dd6487615f86`; observed PID 22436 at the fixture's exact temporary executable path. Current interface was Dark, initial 800 × 560 pt content size; four tasks: Work (two), Home (one, collapsed), General (one), plus an empty custom category.
+
+The first disposable fixture crashed in its own startup force unwrap because its defaults-suite name matched its bundle identity. A separate presentation-suite name corrected startup; the repaired fixture opened the production Today interface. This crash did not exercise Task 6 drop routing. Crash/build evidence is retained under ignored `build/task6/`.
+
+Computer-use handle drag exposed the transient Empty category and group footer targets. The attempted Work-first → Work-second drop saved nothing; subsequent click/Escape did not clear transient presentation. The automation/native-loop versus implementation cause remains unresolved. This establishes only startup and temporary destination rendering. Actual successful row/header/empty/collapsed drops, insertion/highlight correctness and native cancellation are **Not tested/Blocked**, not passes. Callback tests are separate evidence in [Task 6 regression](DESKTOP_TASK_REGRESSION.md#movement-destinations--task-6-2026-10-07). Independent review remains BLOCKED on these gaps. Resolve native-session behavior before closing Task 6 acceptance; Task 7 edge scrolling/reveal and Task 8 keyboard actions remain separate work.
+
+The fixture process was stopped by its exact path, its bundle unregistered and moved to Trash with `FileManager.trashItem`, and the Trash path unregistered. Original path is gone, final process/LaunchServices/Spotlight checks expose no original temporary fixture; the main app hash is unchanged. No real saved tasks or preferences were changed.
+
+
+## Movement scrolling and reveal — Task 7 (2026-10-07)
+
+**Native acceptance: BLOCKED.** The isolated fixture uses production state/controller/view, SQLite `/private/tmp/menupocket-task7-native/notes.sqlite`, defaults suite `local.menupocket.task7-presentation`, injected October 7 Toronto clock, and no production delegate/login/hotkey initialization. It contained 60 Work tasks, a collapsed Home task, General task and empty category, in the initial Dark 800 × 560 pt window.
+
+Initial fixture executable SHA-256: `a37070b2f662d3968c78693a0682aad708ade3ef9089b771b7aad3eebf5361ac`, observed exact-path PID 34935. A handle drag exposed transient destination feedback; the first Escape removed its footer. A second attempt toward the bottom edge exposed the footer but did not establish sustained viewport scrolling or a saved native drop; later Escape/close automation timed out. SQLite order remained unchanged at that point. This fixture was stopped and cleaned before final rebuilding.
+
+Final executable SHA-256: `9e94882b6e1e661a3223ac9baf845dc2b55e4bca725bb53b04173a4075676379`, observed exact-path PID 38381. A fixture-only native menu/shortcut calls `DailyNotesState.moveTask` to move Work task 1 to Home; SQLite confirmed destination UUID `7D2B2987-829A-4271-AC3E-4C1EDF32D153`, daily rank 60. However native menu tracking then returned stale accessibility IDs and unavailable window screenshots, so the saved command does **not** establish visible offscreen/collapsed destination reveal, successful dragging, or Task 8 production menu acceptance. No screenshot files are claimed; initial screenshots were inspected inline.
+
+| Scenario | Result |
+| --- | --- |
+| Isolated long-list interface startup | Pass |
+| First handle drag feedback / Escape clears temporary footer | Observed on initial artifact; final-artifact drag retest not established |
+| Sustained edge scrolling, above/below viewport and cancellation while scrolling | Blocked |
+| Successful saved native drop | Blocked |
+| Fixture-only common saved command changes isolated SQLite assignment/order | Pass; narrower than native dragging or visible reveal |
+| Visible collapsed/offscreen row reveal, focus/ring and failed/interrupted jump behavior | Blocked |
+| Integrated close/reopen, rollover, removed destination and unavailable-read recovery | Not tested in the real interface; hosted checks are separate |
+| Oldest supported OS, minimum window, full changed-data relaunch | Not tested; later acceptance cards retain these checks |
+
+Final [automated/review evidence](DESKTOP_TASK_REGRESSION.md#movement-scrolling-and-reveal--task-7-2026-10-07) is 69/69 author tests and 6/6 independent checks. Both fixture processes and all created temporary hosts were stopped/unregistered/trash-moved; original paths gone and main app hash unchanged. No real user task data or preferences were modified. Resolve native drag/drop/scroll/reveal observations before closing Tasks 6/7 acceptance.
+
+## Native movement source — Task 5 (2026-10-07)
+
+**Native source acceptance: Pass on macOS 26.6.2 (user-operated).** The isolated fixture `/private/tmp/menupocket-task5-native/DragSourceFixture.app` (executable SHA-256 `c74879fd7e522a1d40af1fd065c2abfaed2ba4b34aff8f9b42c1c480b63ae4c5`, PID 91645, source ignored `build/task5/DragSourceFixture.swift`, built from HEAD `0502d41`) used production `TaskWindowController`/`TaskWindowView`, SQLite in that folder, defaults suite `local.menupocket.task5-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. A fixture-only status panel showed the live `active` payload and `isDragging` reservation. Data: Work (one open, one completed), Home, empty category, and one long General task.
+
+| Scenario | Result |
+| --- | --- |
+| Open-hand cursor on the handle; drag shows a task-shaped preview; session becomes active/reserved | Pass |
+| Escape mid-drag: preview returns, session clears (`active: none`, `reserved: false`), transient empty groups disappear | Pass |
+| Release outside the window: same clearing, no task change | Pass |
+| Completed task preview shows checked box and secondary text | Pass |
+| Checkbox, text selection/⌘C and ⋯ menu do not start a drag | Pass |
+| Click on the handle without movement does not start a drag | Pass |
+| Handle disabled and no drag while another task is in inline edit | Pass |
+| Oldest supported OS (macOS 14) runtime | Not tested (no environment) |
+
+The user performed and reported these observations; Claude did not operate the interface. The fixture process was stopped, unregistered, moved to Trash with `FileManager.trashItem`, and the Trash path unregistered (`build/task5/cleanup-final.txt`); no real tasks or preferences were changed. Saved native drops, insertion feedback and edge scrolling remain Task 6/7 acceptance work.
+
+## Movement destinations, scrolling and reveal — Tasks 6/7 native acceptance (2026-10-07)
+
+**Native acceptance: Pass on macOS 26.6.2.** The isolated fixture `/private/tmp/menupocket-task67-native/MovementFixture.app` (executable SHA-256 `d04f841fd94d758fd91c43937b291d0bc83b0055aa149c695e84fb41437878b3`, source ignored `build/task67/MovementFixture.swift`, built from HEAD `14cf694`) used production `TaskWindowController`/`TaskWindowView`, SQLite `/private/tmp/menupocket-task67-native/notes.sqlite`, defaults suite `local.menupocket.task67-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. Seed: Work W01–W60 (W02 completed), collapsed Home (H1), an empty category, General (G1), in the initial 800 × 560 pt Dark window. A fixture-only status panel showed the live session, the hovered request, and the order read back from SQLite.
+
+Steps 1–4 were operated by Claude through Computer Use; steps 5–15 were performed and reported by the user. The SQLite state was checked against each report.
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| 1 | Escape during hover clears line, transient groups and session; nothing saved | Pass (Claude) |
+| 2 | Row lower half: W05 after W01; saved `W01 W05 W02 …` | Pass (Claude) |
+| 3 | Row upper half: W06 before W01; saved `W06 W01 W05 …` | Pass (Claude) |
+| 4 | Equivalent placement (W03 after W02): no line, `hover: none`, no write | Pass (Claude) |
+| 5 | Category → General header (end of group) | Pass (user) |
+| 6 | General → category row | Pass (user) |
+| 7 | Transient Empty category accepts a drop | Pass (user) |
+| 8 | Collapsed Home header accepts without expanding on hover; expands after save | Pass (user) |
+| 9 | Completed task keeps completion; overall progress unchanged | Pass (user) |
+| 10 | Bottom-edge scrolling, bounded and stops away from the edge | Pass (user; also observed by Claude) |
+| 11 | Top-edge scrolling and drop | Pass (user) |
+| 12 | Escape while edge-scrolling stops scrolling | Pass (user, physical mouse) |
+| 13 | Offscreen collapsed destination expands and reveals the moved row | Pass (user) |
+| 14 | No unexpected keyboard focus ring after pointer drops | Pass (user) |
+| 15 | ⌘Q, confirmed exit, relaunch without reseeding: order/groups match | Pass (user) |
+
+Final SQLite after the user session (written 16:34): Work 56 tasks (`W01 W05 W03 W04 W07 …`), Home `H1 W59`, Empty `W60`, General `W02 W06 G1`; 62 tasks, W02 is still the only completed task. Record: ignored `build/task67/final-saved-order.txt`.
+
+Automation-only observations, not reproduced by the user's physical-mouse pass: when one Computer Use drag spanned two tool calls, the synthetic mouse-up did not reach AppKit's drag loop. The preview froze, `isDragging` stayed true, and the fixture spun at ~100% CPU in `NSCoreDragManager _dragUntilMouseUp` with continuous SwiftUI re-rendering (`build/task67/stuck-sample.txt`). Synthetic Escape during edge scrolling also let scrolling continue for about four rows during the cancel slide-back. During normal drags CPU was 33–87% while scrolling and ~0.5% idle (`build/task67/cpu-log.txt`). Drop targets request periodic dragging updates and re-assign `hoveredRequest` on every update, which re-renders observing rows even when the value is unchanged. This is a possible efficiency improvement, not an acceptance failure.
+
+Not tested: oldest supported OS (macOS 14), the 600 × 400 pt minimum window, a failed-write drop in the real interface, and the 1,000-task scale probe (TASK-009/010). The fixture was killed twice after stuck automation drags; saved data was intact both times. It was finally moved to Trash with `FileManager.trashItem` and unregistered (`build/task67/cleanup-final.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.
+
+## Row-menu movement — Task 8 (2026-10-07)
+
+**Native acceptance: Pass on macOS 26.6.2 (user-operated).** The isolated fixture `/private/tmp/menupocket-task8-native/MovementFixture.app` (source ignored `build/task8/MovementFixture.swift`, HEAD `ee47259` plus the uncommitted Task 8 change) used production `TaskWindowController`/`TaskWindowView`, SQLite in that folder, defaults suite `local.menupocket.task8-presentation`, an injected 2026-10-07 Toronto clock, and no app delegate or login/hotkey services. Seed: Work W01–W12 (W02 completed), collapsed Home (H1), a category with a 68-character name, and General (G1).
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| 1 | Tab + Space opens Edit / Move Up / Move Down / Move To ▸ / Delete… | Pass |
+| 2–3 | Move Up/Down by keyboard; focus stays on the row's actions | Pass |
+| 4 | Boundary items disabled (top, bottom, single-task group) | Pass |
+| 5 | Move To: current group checked/disabled, long label acceptable; collapsed Home expands and reveals | Pass |
+| 6 | General → Work → General | **Fail, then Pass after repair** (below) |
+| 7 | Completed task keeps completion; progress unchanged | Pass |
+| 8 | Moves unavailable during inline edit | Pass |
+| 9 | Edit, Delete… and checkbox Space still work | Pass |
+| 10 | ⌘Q and relaunch keep the saved order | Pass |
+
+Step 6 initial failure (fixture executable `ceff298f…`, 811 × 430 pt window): moving G1 back into a re-created, last General group left the list area blank until the user scrolled. Claude reproduced the setup in a separate debug fixture. One capture right after the move was blank, but the persistent blank was not reproduced, so the root cause is unconfirmed. Repair: the saved-move reveal now scrolls minimally (`scrollTo` without `.top`/`.center` anchors), so it never targets an offset past the end of the content. This also applies to drag reveal. On the repaired fixture (`65c9a5b7…`), the user reported step 6 and steps 7–10 Pass. Final SQLite (17:17): Work `W01 W02 W03 W04 W06 … W12`, Home `H1 W05`, General `G1`; 14 tasks, W02 the only completed task (`build/task8/final-saved-order.txt`).
+
+Claude used background Computer Use only on the separate debug fixture (`/private/tmp/menupocket-task8-debug`, now trashed) and took read-only screenshots of the user's fixture. Not tested: VoiceOver spoken output, macOS 14, and the 600 × 400 pt minimum. Every fixture was stopped, unregistered and moved to Trash, with Trash paths unregistered (`build/task8/cleanup-*.txt`); `/Applications/MenuPocket.app` executable hash is unchanged. No real tasks or preferences were modified.

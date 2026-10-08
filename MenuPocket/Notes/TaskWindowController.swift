@@ -30,6 +30,7 @@ final class TaskWindowPresentation {
     @discardableResult
     func showHistory(state: DailyNotesState, entry: HistoryEntry = .calendar) -> Bool {
         guard canBrowse(state: state) else { return false }
+        cancelMovement()
         historyEntry = entry
         route = .history
         refreshBrowser(state: state)
@@ -165,6 +166,30 @@ final class TaskWindowPresentation {
         case notRemoved
     }
 
+    struct MovementReveal: Equatable {
+        let id = UUID()
+        let taskID: UUID
+        let dayKey: String
+        let group: TaskGroupID
+    }
+
+    let dragSession = TaskDragSession()
+    private(set) var movementReveal: MovementReveal?
+
+    func requestMovementReveal(_ request: TaskMoveRequest) {
+        movementReveal = MovementReveal(taskID: request.taskID, dayKey: request.expectedDayKey,
+                                       group: request.destinationGroup)
+    }
+
+    func consumeMovementReveal(_ request: MovementReveal) {
+        if movementReveal == request { movementReveal = nil }
+    }
+
+    func cancelMovement() {
+        dragSession.cancel()
+        movementReveal = nil
+    }
+
     private(set) var selectedDestination: TaskListDestination = .today
     private(set) var deletionTarget: TaskActionTarget?
     private(set) var newTaskRequest: NewTaskRequest?
@@ -186,6 +211,7 @@ final class TaskWindowPresentation {
         // Selecting either list leaves History, which only lives under Today.
         guard showToday(state: state) else { return false }
         if destination != selectedDestination {
+            cancelMovement()
             selectedDestination = destination
             newTaskRequest = nil
         }
@@ -253,10 +279,58 @@ final class TaskWindowPresentation {
         consumeNewTaskRequest(in: destination)
     }
 
+    /// Shared eligibility for drag start, drop, and row-menu movement. Only the
+    /// visible Today list moves tasks; Later and History never do.
+    func canMoveTask(state: DailyNotesState) -> Bool {
+        isShowingList && selectedDestination == .today && state.canMoveTasks &&
+            !hasGuardedInteraction(state: state)
+    }
+
+    /// Row-menu alternatives to dragging. They form the same identity-based
+    /// requests as drops; nil requests are shown disabled.
+    struct MenuMoves: Equatable {
+        struct Destination: Equatable {
+            let title: String
+            let group: TaskGroupID
+            let isCurrent: Bool
+            let request: TaskMoveRequest?
+        }
+
+        let destinations: [Destination]
+        let moveUp: TaskMoveRequest?
+        let moveDown: TaskMoveRequest?
+    }
+
+    /// Move to appends to a group; Move Up/Down stay within the current group.
+    func menuMoves(for id: UUID, state: DailyNotesState) -> MenuMoves? {
+        guard let dayKey = state.todayKey,
+              let note = state.notes.first(where: { $0.id == id && $0.dayKey == dayKey }) else { return nil }
+        let source = TaskGroupID(categoryID: note.categoryID)
+        let enabled = canMoveTask(state: state)
+        func request(_ group: TaskGroupID, _ placement: TaskMovePlacement) -> TaskMoveRequest? {
+            guard enabled else { return nil }
+            return TaskMoveRequest(taskID: id, expectedDayKey: dayKey, expectedSourceGroup: source,
+                                   destinationGroup: group, placement: placement)
+        }
+        let groups = state.categories.map { (title: $0.name, group: TaskGroupID.category($0.id)) } +
+            [(title: "General", group: TaskGroupID.general)]
+        let siblings = state.notes.filter { TaskGroupID(categoryID: $0.categoryID) == source }
+        guard let index = siblings.firstIndex(where: { $0.id == id }) else { return nil }
+        return MenuMoves(
+            destinations: groups.map { group in
+                let isCurrent = group.group == source
+                return MenuMoves.Destination(title: group.title, group: group.group, isCurrent: isCurrent,
+                                             request: isCurrent ? nil : request(group.group, .endOfGroup))
+            },
+            moveUp: index > 0 ? request(source, .before(siblings[index - 1].id)) : nil,
+            moveDown: index + 1 < siblings.count ? request(source, .after(siblings[index + 1].id)) : nil)
+    }
+
     @discardableResult
     func requestNewTask(state: DailyNotesState) -> Bool {
         guard canAddTask(state: state), showToday(state: state),
               showComposer(in: selectedDestination, state: state) else { return false }
+        cancelMovement()
         newTaskRequest = NewTaskRequest(id: UUID(), destination: selectedDestination)
         return true
     }
@@ -292,6 +366,7 @@ final class TaskWindowPresentation {
         guard isShowingList, !hasGuardedInteraction(state: state) else { return false }
         state.refreshIfDayChanged()
         guard target.destination == selectedDestination, isValid(target, state: state) else { return false }
+        cancelMovement()
         deletionTarget = target
         return true
     }
@@ -359,6 +434,7 @@ final class TaskWindowPresentation {
     }
 
     func windowWillClose() {
+        cancelMovement()
         cancelDeletion()
         dismissCategoryManager()
         newTaskRequest = nil
@@ -377,6 +453,7 @@ final class TaskWindowPresentation {
         guard canManageCategories(state: state) else { return false }
         // A reopened manager starts without the last session's messages.
         state.clearCategoryIssues()
+        cancelMovement()
         isManagingCategories = true
         return true
     }
@@ -438,7 +515,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
 
     init(state: DailyNotesState, onSettings: @escaping () -> Void) {
         self.state = state
-        let presentation = TaskWindowPresentation()
+        let presentation = state.taskWindowPresentation
         self.presentation = presentation
         let hostingController = NSHostingController(
             rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings)

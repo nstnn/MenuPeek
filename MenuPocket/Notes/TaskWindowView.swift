@@ -38,7 +38,7 @@ struct TaskWindowView: View {
                 })
             }
         }
-        return state.groups.map { group in
+        return movementGroups.map { group in
             Group(id: group.id, name: group.name, notes: group.notes.map {
                 Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID)
             })
@@ -74,6 +74,8 @@ struct TaskWindowView: View {
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
+    /// A menu-moved row whose actions regain focus once its reveal finishes.
+    @State private var menuMoveFocusID: UUID?
     @State private var moveNoticeID = UUID()
     @State private var isMoveNoticeVisible = false
     @FocusState private var focusedControl: FocusControl?
@@ -86,7 +88,12 @@ struct TaskWindowView: View {
         editingID.map(FocusControl.edit) ?? .draft
     }
 
+    // Split so older Swift type checkers can check each piece in reasonable time.
     var body: some View {
+        observingMovement(taskWindow)
+    }
+
+    private var taskWindow: some View {
         GeometryReader { geometry in
             let horizontalPadding: CGFloat = geometry.size.width < 700 ? 24 : 32
             VStack(alignment: .leading, spacing: 0) {
@@ -114,100 +121,7 @@ struct TaskWindowView: View {
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity)
                 }
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            recoveryNotice
-                            if isAvailable {
-                                if rows.isEmpty {
-                                    emptyState
-                                } else {
-                                    LazyVStack(alignment: .leading, spacing: 24) {
-                                        ForEach(groups) { group in
-                                            groupSurface(group)
-                                                .id(group.id)
-                                        }
-                                    }
-                                    .scrollTargetLayout()
-                                }
-                                if !isLater, state.yesterdayIncompleteCount > 0 {
-                                    Button {
-                                        openHistory(.yesterday)
-                                    } label: {
-                                        Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                            .font(.callout.weight(.semibold))
-                                            .foregroundStyle(.red)
-                                    }
-                                    .focusable()
-                                    .keyboardFocusAppearance()
-                                    .focused($focusedControl, equals: .yesterday)
-                                    .onKeyPress(keys: [.space, .return]) { _ in
-                                        openHistory(.yesterday)
-                                        return .handled
-                                    }
-                                    .disabled(!presentation.canBrowse(state: state))
-                                    .help("View yesterday's unfinished tasks")
-                                    .accessibilityIdentifier("yesterdayHistoryEntry")
-                                }
-                            } else {
-                                unavailableState
-                            }
-                        }
-                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                        .padding(.horizontal, horizontalPadding)
-                        .padding(.bottom, horizontalPadding)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scrollPosition(id: Binding(
-                        // The retained anchor belongs to Today's groups only.
-                        get: { isLater ? nil : presentation.todayScrollAnchor },
-                        set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
-                    ))
-                    .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
-                    .id(destination)
-                    .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
-                    .contentShape(Rectangle())
-                    .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
-                    .onChange(of: presentation.todayScrollRestoreID) { _, _ in
-                        if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
-                    }
-                    .onChange(of: geometry.size) { _, _ in
-                        guard let id = editingID else { return }
-                        let requestID = focusRequestID
-                        let owner = destination
-                        Task { @MainActor in
-                            await Task.yield()
-                            guard focusRequestID == requestID, destination == owner, editingID == id else { return }
-                            scroll.scrollTo(id, anchor: .center)
-                        }
-                    }
-                    .onChange(of: editingID, initial: true) { old, new in
-                        // Keep the editor or its saved destination visible when
-                        // the Add composer changes the list's available height.
-                        if let id = new ?? old {
-                            if new != nil {
-                                focusRequestID = UUID()
-                                editFocusRequestID = focusRequestID
-                            }
-                            let requestID = editFocusRequestID ?? focusRequestID
-                            Task { @MainActor in
-                                await Task.yield()
-                                guard presentation.route == .today, focusRequestID == requestID else { return }
-                                if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
-                                    // Entry/exit changes the space above the list.
-                                    // Mount the group before targeting its row.
-                                    scroll.scrollTo(group.id, anchor: .top)
-                                    await Task.yield()
-                                }
-                                guard presentation.route == .today, focusRequestID == requestID else { return }
-                                scroll.scrollTo(id, anchor: .center)
-                                if new != nil { focusDraft(requestID: requestID) }
-                                else { restoreRowFocus(id, requestID: requestID) }
-                            }
-                        }
-                    }
-                }
+                taskList(geometry: geometry, horizontalPadding: horizontalPadding)
                 if hasFooterContent {
                     Divider()
                     footer
@@ -287,13 +201,198 @@ struct TaskWindowView: View {
         }
     }
 
+    private func taskList(geometry: GeometryProxy, horizontalPadding: CGFloat) -> some View {
+        ScrollViewReader { scroll in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    recoveryNotice
+                    if isAvailable {
+                        if rows.isEmpty {
+                            emptyState
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 24) {
+                                ForEach(groups) { group in
+                                    groupSurface(group)
+                                        .id(group.id)
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        if !isLater, state.yesterdayIncompleteCount > 0 {
+                            Button {
+                                openHistory(.yesterday)
+                            } label: {
+                                Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
+                                    .font(.callout.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+                            .focusable()
+                            .keyboardFocusAppearance()
+                            .focused($focusedControl, equals: .yesterday)
+                            .onKeyPress(keys: [.space, .return]) { _ in
+                                openHistory(.yesterday)
+                                return .handled
+                            }
+                            .disabled(!presentation.canBrowse(state: state))
+                            .help("View yesterday's unfinished tasks")
+                            .accessibilityIdentifier("yesterdayHistoryEntry")
+                        }
+                    } else {
+                        unavailableState
+                    }
+                }
+                .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.bottom, horizontalPadding)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollPosition(id: Binding(
+                // The retained anchor belongs to Today's groups only.
+                get: { isLater ? nil : presentation.todayScrollAnchor },
+                set: { if presentation.route == .today, !isLater { presentation.todayScrollAnchor = $0 } }
+            ))
+            .accessibilityIdentifier(identifier("todayTaskList", "laterTaskList"))
+            .id(destination)
+            .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+            .onChange(of: presentation.movementReveal) { _, request in
+                guard let request else { return }
+                let ownership = focusRequestID
+                Task { @MainActor in
+                    defer {
+                        presentation.consumeMovementReveal(request)
+                        if menuMoveFocusID == request.taskID {
+                            menuMoveFocusID = nil
+                            if focusRequestID == ownership {
+                                focusedControl = focusAfterLeavingRow(request.taskID,
+                                                                      fallbackGroup: request.group)
+                            }
+                        }
+                    }
+                    await Task.yield()
+                    guard canReveal(request, ownership: ownership) else { return }
+                    // Minimal scrolling: a .top/.center target past the end
+                    // of a re-created last group can leave the lazy list
+                    // blank until the user scrolls.
+                    scroll.scrollTo(request.group)
+                    await Task.yield()
+                    guard canReveal(request, ownership: ownership) else { return }
+                    scroll.scrollTo(request.taskID)
+                    // Pointer movement does not create a keyboard ring. A
+                    // preexisting focused control keeps its row identity.
+                }
+            }
+            .onChange(of: presentation.todayScrollRestoreID) { _, _ in
+                if !isLater, let anchor = presentation.todayScrollAnchor { scroll.scrollTo(anchor, anchor: .top) }
+            }
+            .onChange(of: geometry.size) { _, _ in
+                guard let id = editingID else { return }
+                let requestID = focusRequestID
+                let owner = destination
+                Task { @MainActor in
+                    await Task.yield()
+                    guard focusRequestID == requestID, destination == owner, editingID == id else { return }
+                    scroll.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: editingID, initial: true) { old, new in
+                // Keep the editor or its saved destination visible when
+                // the Add composer changes the list's available height.
+                if let id = new ?? old {
+                    if new != nil {
+                        focusRequestID = UUID()
+                        editFocusRequestID = focusRequestID
+                    }
+                    let requestID = editFocusRequestID ?? focusRequestID
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard presentation.route == .today, focusRequestID == requestID else { return }
+                        if let group = groups.first(where: { $0.notes.contains { $0.id == id } }) {
+                            // Entry/exit changes the space above the list.
+                            // Mount the group before targeting its row.
+                            scroll.scrollTo(group.id, anchor: .top)
+                            await Task.yield()
+                        }
+                        guard presentation.route == .today, focusRequestID == requestID else { return }
+                        scroll.scrollTo(id, anchor: .center)
+                        if new != nil { focusDraft(requestID: requestID) }
+                        else { restoreRowFocus(id, requestID: requestID) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clears drag sessions and pending reveals when their context changes.
+    private func observingMovement(_ content: some View) -> some View {
+        content
+            .onChange(of: presentation.dragSession.active) { _, payload in
+                if payload != nil {
+                    focusRequestID = UUID()
+                    if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+                }
+            }
+            .onDisappear { interruptMovement() }
+            .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
+                if !eligible { interruptMovement() }
+            }
+            .onChange(of: state.todayKey) { _, _ in interruptMovement() }
+            .onChange(of: state.notes) { _, notes in
+                if let payload = presentation.dragSession.active,
+                   !notes.contains(where: {
+                       $0.id == payload.taskID && $0.dayKey == payload.dayKey &&
+                       TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup
+                   }) {
+                    presentation.cancelMovement()
+                }
+            }
+            .onChange(of: groups.map(\.id)) { _, ids in
+                if !isLater, case let .group(id) = focusedControl, !ids.contains(id) {
+                    focusedControl = state.availableProgress == nil ? .retry : .add
+                }
+            }
+            .onChange(of: state.categories) { _, _ in
+                if presentation.dragSession.active != nil { interruptMovement() }
+                if let request = presentation.movementReveal,
+                   !state.groups.contains(where: { $0.id == request.group }) {
+                    interruptMovement()
+                }
+            }
+            .onChange(of: focusedControl) { old, new in
+                // Hierarchy removal can clear focus or invoke the fallback above;
+                // neither is a newer user navigation action.
+                guard new != nil else { return }
+                if case let .group(id) = old, !groups.contains(where: { $0.id == id }) { return }
+                if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+            }
+    }
+
+    private func canReveal(_ request: TaskWindowPresentation.MovementReveal, ownership: UUID) -> Bool {
+        presentation.movementReveal == request && focusRequestID == ownership &&
+            presentation.canMoveTask(state: state) && state.todayKey == request.dayKey &&
+            !state.categoryPreferences.isCollapsed(request.group) &&
+            state.notes.contains { $0.id == request.taskID && TaskGroupID(categoryID: $0.categoryID) == request.group }
+    }
+
+    private func interruptMovement() {
+        let hadMovement = presentation.dragSession.active != nil || presentation.movementReveal != nil
+        presentation.cancelMovement()
+        // Supersede only delayed movement work; switching to Later or History
+        // keeps that route's own focus request.
+        if hadMovement { focusRequestID = UUID() }
+        if !isLater, state.availableProgress == nil, focusedControl != nil { focusedControl = .retry }
+    }
+
     private var writeError: String? {
         switch issue {
         case .add: "Could not save task. Try again."
         case .complete: "Could not update task. Try again."
         case .edit: "Could not save edit. Try again."
         case .delete: "Could not delete task. Try again."
-        case .move: "Could not move task to Today. Try again."
+        case .move: "Could not move task. Try again."
+        case .moveToToday: "Could not move task to Today. Try again."
         default: nil
         }
     }
@@ -435,7 +534,7 @@ struct TaskWindowView: View {
         editingID != nil && issue == .edit ? nil : writeError
     }
 
-    private var hasMoveNotice: Bool { isLater && isMoveNoticeVisible && issue != .move }
+    private var hasMoveNotice: Bool { isLater && isMoveNoticeVisible && issue != .moveToToday }
 
     private var hasTopInteractionContent: Bool {
         presentation.deletionTarget == nil && (hasComposer || hasMoveNotice || topWriteError != nil)
@@ -543,17 +642,45 @@ struct TaskWindowView: View {
         }
     }
 
+    private var hasValidDrag: Bool {
+        guard let payload = presentation.dragSession.active else { return false }
+        return presentation.canMoveTask(state: state) && state.todayKey == payload.dayKey &&
+            state.notes.contains { $0.id == payload.taskID && TaskGroupID(categoryID: $0.categoryID) == payload.sourceGroup }
+    }
+
+    private var movementGroups: [TaskGroup] {
+        TaskGroup.groups(categories: state.categories, notes: state.notes, includeEmpty: hasValidDrag)
+    }
+
+    @ViewBuilder
+    private func dropTarget(_ group: TaskGroupID, anchor: UUID? = nil) -> some View {
+        if !isLater {
+            TaskDropTarget(state: state, session: presentation.dragSession, group: group, anchor: anchor)
+                .accessibilityHidden(true)
+        }
+    }
+
     /// The count covers every task in the group, including rows hidden by collapse.
     private func groupSurface(_ group: Group) -> some View {
         let collapsed = state.categoryPreferences.isCollapsed(group.id, in: destination)
         return VStack(alignment: .leading, spacing: 0) {
             groupHeader(group, collapsed: collapsed)
+                .overlay { dropTarget(group.id) }
             // Remove collapsed rows from keyboard and accessibility traversal.
             if !collapsed {
                 ForEach(group.notes) { note in
                     taskRow(note)
+                        .overlay { dropTarget(group.id, anchor: note.id) }
                 }
                 .padding(.leading, Self.groupRowIndent)
+                if hasValidDrag {
+                    Text(group.notes.isEmpty ? "Drop task here" : "Move to end of group")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                        .padding(.leading, Self.groupRowIndent)
+                        .overlay { dropTarget(group.id) }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -609,6 +736,7 @@ struct TaskWindowView: View {
     }
 
     private func toggleGroup(_ group: Group) {
+        interruptMovement()
         let collapse = !state.categoryPreferences.isCollapsed(group.id, in: destination)
         state.categoryPreferences.setCollapsed(collapse, for: group.id, in: destination)
         // Its rows leave the view, so keep keyboard focus on the header.
@@ -647,6 +775,11 @@ struct TaskWindowView: View {
 
     private func savedTaskRow(_ note: Row) -> some View {
         HStack(alignment: .top, spacing: 12) {
+            if !isLater {
+                TaskDragHandle(taskID: note.id, text: note.text, state: state, session: presentation.dragSession,
+                               enabled: presentation.canMoveTask(state: state) && !presentation.dragSession.isDragging)
+                    .frame(width: 16, height: 20)
+            }
             Toggle(isOn: Binding(
                 get: { rows.first(where: { $0.id == note.id })?.isCompleted ?? note.isCompleted },
                 set: { setCompleted(id: note.id, completed: $0) }
@@ -671,13 +804,17 @@ struct TaskWindowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             TaskActionsMenu(onOpen: { focusedControl = .actions(note.id) },
                             onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) },
-                            onMove: isLater && !note.isCompleted ? { moveToToday(note.id) } : nil)
+                            onMoveToToday: isLater && !note.isCompleted ? { moveToToday(note.id) } : nil,
+                            moves: { isLater ? nil : presentation.menuMoves(for: note.id, state: state) },
+                            onMove: moveFromMenu)
             .focused($focusedControl, equals: .actions(note.id))
             .overlay { focusOutline(focusedControl == .actions(note.id)) }
             .disabled(editingID != nil)
             .help("Task actions")
             .accessibilityLabel("Actions for task: \(note.text)")
-            .accessibilityHint(isLater && !note.isCompleted ? "Opens Move to Today, Edit and Delete actions" : "Opens Edit and Delete actions")
+            .accessibilityHint(isLater ? (note.isCompleted ? "Opens Edit and Delete actions"
+                                                           : "Opens Move to Today, Edit and Delete actions")
+                                       : "Opens Edit, Move, and Delete actions")
             .accessibilityIdentifier("\(isLater ? "laterTaskActions" : "taskActions")-\(note.id)")
         }
         .font(.system(size: 14))
@@ -834,6 +971,20 @@ struct TaskWindowView: View {
         presentation.requestDeletion(actionTarget(id), state: state)
     }
 
+    /// Runs after native menu tracking ends. Uses the same saved command as drops;
+    /// only a committed move reveals the row before its actions regain focus.
+    private func moveFromMenu(_ request: TaskMoveRequest) {
+        guard canUseRowActions else { return }
+        rowActionOrigin = (request.taskID, request.expectedSourceGroup)
+        focusRequestID = UUID()
+        menuMoveFocusID = request.taskID
+        guard case .changed = state.moveTask(request) else {
+            menuMoveFocusID = nil
+            restoreRowFocus(request.taskID)
+            return
+        }
+    }
+
     private func confirmDeletion() {
         _ = presentation.confirmDeletion(state: state)
     }
@@ -866,6 +1017,7 @@ struct TaskWindowView: View {
         // including an edit-exit observer that has not run yet.
         let requestID = requestID ?? UUID()
         focusRequestID = requestID
+        presentation.cancelMovement()
         Task { @MainActor in
             await Task.yield()
             guard presentation.route == .today, focusRequestID == requestID else { return }
@@ -926,6 +1078,7 @@ struct TaskWindowView: View {
     }
 
     private func clearFocus() {
+        interruptMovement()
         focusedControl = nil
         // Clear AppKit's first responder as well as SwiftUI's focus state.
         NSApp.keyWindow?.makeFirstResponder(nil)
@@ -964,7 +1117,11 @@ private struct TaskActionsMenu: View {
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
-    var onMove: (() -> Void)? = nil
+    var onMoveToToday: (() -> Void)? = nil
+    /// Read when the menu opens, so entries reflect the current saved order.
+    /// Nil omits the Today movement items.
+    var moves: () -> TaskWindowPresentation.MenuMoves? = { nil }
+    var onMove: (TaskMoveRequest) -> Void = { _ in }
     @State private var anchor = TaskMenuAnchor.Reference()
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
@@ -1012,13 +1169,29 @@ private struct TaskActionsMenu: View {
         let actions = Actions()
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if onMove != nil {
-            let move = menu.addItem(withTitle: "Move to Today", action: #selector(Actions.move), keyEquivalent: "")
+        if onMoveToToday != nil {
+            let move = menu.addItem(withTitle: "Move to Today", action: #selector(Actions.moveToToday), keyEquivalent: "")
             move.target = actions
             menu.addItem(.separator())
         }
         let edit = menu.addItem(withTitle: "Edit", action: #selector(Actions.edit), keyEquivalent: "")
         edit.target = actions
+        if let moves = moves() {
+            menu.addItem(.separator())
+            menu.addItem(actions.item("Move Up", moves.moveUp))
+            menu.addItem(actions.item("Move Down", moves.moveDown))
+            let moveTo = NSMenuItem(title: "Move To", action: nil, keyEquivalent: "")
+            let destinations = NSMenu(title: "Move To")
+            destinations.autoenablesItems = false
+            for destination in moves.destinations {
+                let item = actions.item(destination.title, destination.request)
+                item.state = destination.isCurrent ? .on : .off
+                destinations.addItem(item)
+            }
+            moveTo.submenu = destinations
+            menu.addItem(moveTo)
+            menu.addItem(.separator())
+        }
         let delete = menu.addItem(withTitle: "Delete…", action: #selector(Actions.delete), keyEquivalent: "")
         delete.target = actions
         withExtendedLifetime(actions) {
@@ -1027,19 +1200,34 @@ private struct TaskActionsMenu: View {
         // Finish native menu tracking before changing the SwiftUI hierarchy.
         // Otherwise AppKit can restore the old responder after draft/Cancel focus.
         switch actions.selection {
-        case .move: DispatchQueue.main.async { onMove?() }
+        case .moveToToday: DispatchQueue.main.async { onMoveToToday?() }
         case .edit: DispatchQueue.main.async { onEdit() }
         case .delete: DispatchQueue.main.async { onDelete() }
+        case let .move(request): DispatchQueue.main.async { onMove(request) }
         case nil: break
         }
     }
 
     @MainActor private final class Actions: NSObject {
-        enum Selection { case edit, delete, move }
+        enum Selection { case edit, delete, moveToToday, move(TaskMoveRequest) }
         var selection: Selection?
-        @objc func move() { selection = .move }
+        private var requests: [TaskMoveRequest] = []
+        @objc func moveToToday() { selection = .moveToToday }
         @objc func edit() { selection = .edit }
         @objc func delete() { selection = .delete }
+        @objc func move(_ sender: NSMenuItem) { selection = .move(requests[sender.tag]) }
+
+        /// A nil request is an unavailable boundary or guarded state.
+        func item(_ title: String, _ request: TaskMoveRequest?) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: #selector(move(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = request != nil
+            if let request {
+                item.tag = requests.count
+                requests.append(request)
+            }
+            return item
+        }
     }
 }
 

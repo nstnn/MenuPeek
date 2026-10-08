@@ -11,7 +11,10 @@ enum DailyNotesIssue: Equatable {
     case complete
     case edit
     case delete
+    /// Reordering or reassigning a Today task.
     case move
+    /// Transferring a Later task to Today.
+    case moveToToday
 
     var message: String {
         switch self {
@@ -20,7 +23,8 @@ enum DailyNotesIssue: Equatable {
         case .complete: "Could not update note. Try again."
         case .edit: "Could not save edit. Try again."
         case .delete: "Could not delete note. Try again."
-        case .move: "Could not move task to Today. Try again."
+        case .move: "Could not move task. Try again."
+        case .moveToToday: "Could not move task to Today. Try again."
         }
     }
 }
@@ -150,6 +154,13 @@ final class DailyNotesState {
     /// Last-used category and collapsed groups; never a source of saved categories.
     let categoryPreferences: TaskCategoryPreferences
 
+    /// Shared with the retained window so saves revalidate the same modal guards.
+    let taskWindowPresentation = TaskWindowPresentation()
+
+    var canMoveTasks: Bool {
+        !isTerminating && hasLoadedToday && todayKey == day.keys().today && editingNoteID == nil
+    }
+
     @ObservationIgnored private let repositoryFactory: () throws -> any NoteRepository
     @ObservationIgnored private var repository: (any NoteRepository)?
     @ObservationIgnored private let day: NoteDay
@@ -208,6 +219,7 @@ final class DailyNotesState {
 
     func stopForTermination() {
         isTerminating = true
+        taskWindowPresentation.cancelMovement()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
         repository = nil
@@ -559,7 +571,7 @@ final class DailyNotesState {
             laterRefreshNotice = "Moved task to Today."
             return true
         } catch {
-            recordLaterError(error, fallback: .move)
+            recordLaterError(error, fallback: .moveToToday)
             return false
         }
     }
@@ -621,6 +633,54 @@ final class DailyNotesState {
             return .added
         } catch {
             return .writeFailed
+        }
+    }
+
+    /// A non-nil outcome is the common saved-move contract. Only `.changed`
+    /// authorizes a caller to reveal the destination; nil is blocked or failed.
+    @discardableResult
+    func moveTask(_ request: TaskMoveRequest) -> TaskMoveOutcome? {
+        taskWindowPresentation.cancelMovement()
+        guard !isTerminating else {
+            taskIssue = .move
+            return nil
+        }
+        let key = day.keys().today
+        // Refresh a rollover for normal recovery, but never retarget its payload.
+        if todayKey != key { refresh() }
+        guard request.expectedDayKey == key else {
+            taskIssue = .move
+            return .rejected(.dayChanged)
+        }
+        guard taskWindowPresentation.canMoveTask(state: self), let repository else {
+            taskIssue = .move
+            return nil
+        }
+        // Validate the displayed snapshot, then let storage revalidate its fresh
+        // transactional snapshot. Never publish this planner's proposal.
+        if case let .rejected(reason) = TaskMovePlanner.plan(
+            request, dayKey: key, notes: notes, categories: categories
+        ) {
+            taskIssue = .move
+            return .rejected(reason)
+        }
+        do {
+            let outcome = try repository.moveTask(request)
+            switch outcome {
+            case let .changed(saved):
+                notes = saved
+                categoryPreferences.setCollapsed(false, for: request.destinationGroup)
+                taskWindowPresentation.requestMovementReveal(request)
+                taskIssue = nil
+            case .unchanged:
+                if taskIssue == .move { taskIssue = nil }
+            case .rejected:
+                taskIssue = .move
+            }
+            return outcome
+        } catch {
+            taskIssue = .move
+            return nil
         }
     }
 

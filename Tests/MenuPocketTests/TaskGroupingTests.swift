@@ -94,6 +94,20 @@ final class TaskGroupingTests: XCTestCase {
         }
     }
 
+    func testDragDestinationsIncludeEmptyGroupsWithoutChangingCountsOrNormalPresentation() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 2)
+        let empty = try TaskCategory(name: "Empty", creationOrder: 0)
+        let saved = [note("Saved", work, completed: true)]
+        let normal = TaskGroup.groups(categories: [work, empty], notes: saved)
+        let dragging = TaskGroup.groups(categories: [work, empty], notes: saved, includeEmpty: true)
+        XCTAssertEqual(dragging.map(\.id), [.category(empty.id), .category(work.id), .general])
+        XCTAssertEqual(dragging.map(\.progress), [NoteProgress(completed: 0, total: 0),
+                                                NoteProgress(completed: 1, total: 1),
+                                                NoteProgress(completed: 0, total: 0)])
+        XCTAssertEqual(dragging.flatMap(\.notes), saved)
+        XCTAssertEqual(TaskGroup.groups(categories: [work, empty], notes: saved), normal)
+    }
+
     func testLaterGroupsFollowCategoryCreationOrderAndKeepSavedOrderWithGeneralLast() throws {
         let school = try TaskCategory(name: "School", creationOrder: 0)
         let work = try TaskCategory(name: "Work", creationOrder: 2)
