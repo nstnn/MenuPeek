@@ -35,7 +35,7 @@ struct TaskHistoryCalendarView: View {
                     GridRow {
                         ForEach(grid.weekdaySymbols, id: \.self) { symbol in
                             Text(symbol)
-                                .font(.caption.weight(.semibold))
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                         }
@@ -88,12 +88,12 @@ struct TaskHistoryCalendarView: View {
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 2)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 48)
             .contentShape(Rectangle())
-            .background(cell.isSelected ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(cell.isSelected ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 if cell.isSelected {
-                    RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 1.5)
                 }
             }
         }

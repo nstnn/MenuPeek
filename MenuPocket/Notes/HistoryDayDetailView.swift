@@ -69,7 +69,7 @@ struct HistoryDayDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 320)
+                .frame(maxWidth: 320, alignment: .leading)
                 .focusable()
                 .keyboardFocusAppearance()
                 .historyFocusScroll()
@@ -107,22 +107,38 @@ struct HistoryDayDetailView: View {
     @ViewBuilder
     private var heading: some View {
         if let day = history.selectedDay {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(day.label("EEEE, MMMM d, yyyy"))
-                    .font(.title3.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("historyDayTitle")
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(day.label("EEEE, MMMM d"))
+                            .font(.title3.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityLabel(day.label("EEEE, MMMM d, yyyy"))
+                            .accessibilityIdentifier("historyDayTitle")
+                        Text(day.label("yyyy"))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Label("View only", systemImage: "lock")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .padding(.top, 4)
+                        .accessibilityIdentifier("historyReadOnly")
+                }
                 if let progress = history.progress {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         ZStack(alignment: .leading) {
                             Capsule().fill(.quaternary)
                             Capsule().fill(Color.accentColor)
-                                .frame(width: 120 * Double(progress.completed) / Double(max(progress.total, 1)))
+                                .frame(width: 100 * Double(progress.completed) / Double(max(progress.total, 1)))
                         }
-                        .frame(width: 120, height: 4)
+                        .frame(width: 100, height: 4)
                         .accessibilityHidden(true)
-                        Text("\(progress.completed)/\(progress.total) complete")
+                        Text("\(progress.completed) of \(progress.total) complete")
                             .font(.system(size: 12).monospacedDigit())
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("\(progress.completed) of \(progress.total) tasks complete")
@@ -159,7 +175,7 @@ struct HistoryDayDetailView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize()
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -170,13 +186,13 @@ struct HistoryDayDetailView: View {
             .accessibilityIdentifier("historyGroup-\(group.id.storageKey)")
             if !collapsed {
                 ForEach(detail.visibleNotes) { note in
+                    Divider().accessibilityHidden(true)
                     row(note)
                 }
-                .padding(.leading, 22)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
         .background {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -184,23 +200,38 @@ struct HistoryDayDetailView: View {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
                 }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 1)
+                }
         }
     }
 
     /// A status image, not a checkbox: historical tasks have no actions.
     private func row(_ note: Note) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: note.isCompleted ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(note.isCompleted ? Color.accentColor : Color.secondary)
-                .accessibilityHidden(true)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            if note.isCompleted {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+            } else {
+                Circle().fill(Color.secondary)
+                    .frame(width: 5, height: 5)
+                    .accessibilityHidden(true)
+            }
             Text(note.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Text(note.isCompleted ? "Completed" : "Unfinished")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
         .font(.system(size: 14))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(note.isCompleted ? "Completed" : "Not completed"): \(note.text)")
         .accessibilityIdentifier("historyTaskRow-\(note.id)")

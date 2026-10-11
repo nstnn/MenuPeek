@@ -90,62 +90,91 @@ struct TaskBrowserView: View {
         }
     }
 
-    private var isUnfinishedRoute: Bool {
-        presentation.route == .unfinished || presentation.route == .unfinishedDay
+    private var backButton: some View {
+        Button(action: goBack) {
+            Label(backTitle, systemImage: "chevron.left")
+        }
+        .focusable()
+        .keyboardFocusAppearance()
+        .focused($backFocused)
+        .onKeyPress(keys: [.space, .return]) { _ in
+            goBack()
+            return .handled
+        }
+        .accessibilityIdentifier("taskBrowserBack")
+    }
+
+    private var unfinishedEntry: some View {
+        Button {
+            presentation.showUnfinished(state: state)
+        } label: {
+            Label("Unfinished from previous days", systemImage: "chevron.right")
+                .labelStyle(TrailingIconLabelStyle())
+        }
+        .focusable()
+        .keyboardFocusAppearance()
+        .focused($unfinishedEntryFocused)
+        .onKeyPress(keys: [.space, .return]) { _ in
+            presentation.showUnfinished(state: state)
+            return .handled
+        }
+        .accessibilityIdentifier("unfinishedHistoryEntry")
+    }
+
+    @ViewBuilder
+    private func browserHeader(isWide: Bool) -> some View {
+        if presentation.route == .history {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    backButton.buttonStyle(.plain)
+                    Divider().frame(height: 20).accessibilityHidden(true)
+                    Text("History")
+                        .font(.system(size: 20, weight: .semibold))
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("taskBrowserHeading")
+                    Spacer(minLength: 12)
+                    if isWide, presentation.browserIssue == nil {
+                        unfinishedEntry.buttonStyle(.plain)
+                    }
+                }
+                .frame(minHeight: 30)
+                if !isWide, presentation.browserIssue == nil {
+                    unfinishedEntry.buttonStyle(.plain)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(spacing: 16) {
+                    backButton
+                    Spacer()
+                    // Unfinished is nested; Today stays one action away.
+                    Button("Go to Today") { presentation.showToday(state: state) }
+                        .historyKeyAction { presentation.showToday(state: state) }
+                        .accessibilityIdentifier("taskBrowserToday")
+                }
+                Text("Unfinished")
+                    .font(.system(size: 24, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("taskBrowserHeading")
+            }
+        }
     }
 
     private var browserContent: some View {
         GeometryReader { geometry in
             let isWide = presentation.route == .history && geometry.size.width >= 760
+            let contentWidth = min(max(geometry.size.width - 48, 0), 920)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        HStack(spacing: 16) {
-                            Button {
-                                goBack()
-                            } label: {
-                                Label(backTitle, systemImage: "chevron.left")
-                            }
-                            .focusable()
-                            .keyboardFocusAppearance()
-                            .focused($backFocused)
-                            .onKeyPress(keys: [.space, .return]) { _ in
-                                goBack()
-                                return .handled
-                            }
-                            .accessibilityIdentifier("taskBrowserBack")
-                            Spacer()
-                            if isUnfinishedRoute {
-                                // Unfinished is nested; Today stays one action away.
-                                Button("Go to Today") { presentation.showToday(state: state) }
-                                    .historyKeyAction { presentation.showToday(state: state) }
-                                    .accessibilityIdentifier("taskBrowserToday")
-                            }
-                        }
-                        Text(isUnfinishedRoute ? "Unfinished" : "History")
-                            .font(.system(size: 24, weight: .semibold))
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("taskBrowserHeading")
+                        browserHeader(isWide: isWide)
                         if let issue = presentation.browserIssue {
                             Text(issue).foregroundStyle(.secondary)
                             Button("Retry") { presentation.refreshBrowser(state: state) }
                                 .keyboardFocusAppearance()
                         } else if presentation.route == .history, let history = presentation.historyState {
-                            Button {
-                                presentation.showUnfinished(state: state)
-                            } label: {
-                                Label("Unfinished from previous days", systemImage: "chevron.right")
-                                    .labelStyle(TrailingIconLabelStyle())
-                            }
-                            .focusable()
-                            .keyboardFocusAppearance()
-                            .focused($unfinishedEntryFocused)
-                            .onKeyPress(keys: [.space, .return]) { _ in
-                                presentation.showUnfinished(state: state)
-                                return .handled
-                            }
-                            .accessibilityIdentifier("unfinishedHistoryEntry")
-                            TaskHistoryView(history: history, isWide: isWide)
+                            TaskHistoryView(history: history, isWide: isWide,
+                                            calendarWidth: min(380, contentWidth * 0.43))
                         } else if presentation.route == .unfinished, let unfinished = presentation.unfinishedState {
                             UnfinishedTasksView(unfinished: unfinished, focusedDay: $unfinishedDayFocus) { day in
                                 presentation.showUnfinishedDay(day, state: state)
