@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MenuPocket database schema</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #bf4520;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1280px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--color-muted);
+      max-width: 72ch;
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 1280px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Database schema · MenuPocket</p>
+    <h1>notes.sqlite, schema v4</h1>
+    <p class="subtitle">Application Support/MenuPocket/notes.sqlite inside the sandbox. PRAGMA user_version = 4, foreign keys enforced, newer schemas rejected without rewriting. Preferences live in UserDefaults, not here.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="database-schema-title database-schema-desc">
+        <title id="database-schema-title">MenuPocket database schema v4</title>
+        <desc id="database-schema-desc">Database schema diagram of notes.sqlite showing the notes, categories and later_tasks tables, with both task tables referencing categories.id through ON DELETE SET NULL foreign keys.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<!-- FK connectors (drawn before tables) -->
+<path d="M344,312 H488" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M936,312 H792" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="362" y="292" width="108" height="12" rx="2" fill="#f5f5f5"/><text x="416" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ON DELETE SET NULL</text>
+<rect x="810" y="292" width="108" height="12" rx="2" fill="#f5f5f5"/><text x="864" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ON DELETE SET NULL</text>
+<!-- callout leaders -->
+<path d="M640,420 V400" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="1" stroke-dasharray="4,3"/><circle cx="640" cy="400" r="2" fill="#2d3142"/>
+<path d="M1088,348 V328" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="1" stroke-dasharray="4,3"/><circle cx="1088" cy="328" r="2" fill="#2d3142"/>
+<!-- tables -->
+<rect x="40" y="152" width="304" height="272" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="40" y="152" width="304" height="28" rx="6" fill="rgba(45,49,66,0.04)"/>
+<rect x="40" y="172" width="304" height="8" fill="rgba(45,49,66,0.04)"/>
+<line x1="40" y1="180" x2="344" y2="180" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+<text x="52" y="170" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">notes</text>
+<rect x="292" y="160" width="40" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/>
+<text x="312" y="169" fill="#2d3142" opacity="0.8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+<rect x="41" y="180" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="52" y="196" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">id</text>
+<rect x="208" y="186" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="218" y="195" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PK</text>
+<text x="332" y="196" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text · uuid</text>
+<text x="52" y="220" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">text</text>
+<text x="332" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text</text>
+<rect x="41" y="228" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="52" y="244" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">day_key</text>
+<text x="332" y="244" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text</text>
+<text x="52" y="268" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">created_at</text>
+<text x="332" y="268" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">real</text>
+<rect x="41" y="276" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="52" y="292" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">completed_at</text>
+<rect x="208" y="282" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="222" y="291" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">NULL</text>
+<text x="332" y="292" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">real</text>
+<text x="52" y="316" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">category_id</text>
+<rect x="208" y="306" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="218" y="315" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">FK</text>
+<rect x="232" y="306" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="246" y="315" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">NULL</text>
+<text x="332" y="316" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text · uuid</text>
+<rect x="41" y="324" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="52" y="340" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">display_order</text>
+<text x="332" y="340" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">integer</text>
+<line x1="40" y1="348" x2="344" y2="348" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+<text x="52" y="364" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">INDEXES</text>
+<text x="52" y="382" fill="#2d3142" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">notes_day_display_order_idx</text>
+<text x="52" y="396" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">(day_key, display_order) · one rank per day</text>
+<text x="52" y="414" fill="#2d3142" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">notes_day_key_idx</text>
+<text x="332" y="414" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">(day_key)</text>
+<rect x="312" y="373" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="322" y="382" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">UQ</text>
+<rect x="488" y="272" width="304" height="124" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="488" y="272" width="304" height="28" rx="6" fill="rgba(45,49,66,0.04)"/>
+<rect x="488" y="292" width="304" height="8" fill="rgba(45,49,66,0.04)"/>
+<line x1="488" y1="300" x2="792" y2="300" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+<text x="500" y="290" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">categories</text>
+<rect x="740" y="280" width="40" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/>
+<text x="760" y="289" fill="#2d3142" opacity="0.8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+<rect x="489" y="300" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="500" y="316" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">id</text>
+<rect x="656" y="306" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="666" y="315" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PK</text>
+<text x="780" y="316" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text · uuid</text>
+<text x="500" y="340" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">name</text>
+<text x="780" y="340" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text</text>
+<rect x="489" y="348" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="500" y="364" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">name_key</text>
+<rect x="656" y="354" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="666" y="363" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">UQ</text>
+<text x="780" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text</text>
+<text x="500" y="388" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">creation_order</text>
+<rect x="656" y="378" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="666" y="387" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">UQ</text>
+<text x="780" y="388" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">integer</text>
+<rect x="936" y="176" width="304" height="148" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="936" y="176" width="304" height="28" rx="6" fill="rgba(45,49,66,0.04)"/>
+<rect x="936" y="196" width="304" height="8" fill="rgba(45,49,66,0.04)"/>
+<line x1="936" y1="204" x2="1240" y2="204" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+<text x="948" y="194" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">later_tasks</text>
+<rect x="1188" y="184" width="40" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/>
+<text x="1208" y="193" fill="#2d3142" opacity="0.8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+<rect x="937" y="204" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="948" y="220" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">id</text>
+<rect x="1104" y="210" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1114" y="219" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PK</text>
+<text x="1228" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text · uuid</text>
+<text x="948" y="244" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">text</text>
+<text x="1228" y="244" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text</text>
+<rect x="937" y="252" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="948" y="268" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">created_at</text>
+<text x="1228" y="268" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">real</text>
+<text x="948" y="292" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">completed_at</text>
+<rect x="1104" y="282" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1118" y="291" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">NULL</text>
+<text x="1228" y="292" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">real</text>
+<rect x="937" y="300" width="302" height="24" fill="rgba(45,49,66,0.02)"/>
+<text x="948" y="316" fill="#2d3142" font-size="12" font-family="'Geist', system-ui, sans-serif">category_id</text>
+<rect x="1104" y="306" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1114" y="315" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">FK</text>
+<rect x="1128" y="306" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1142" y="315" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">NULL</text>
+<text x="1228" y="316" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">text · uuid</text>
+<!-- callouts -->
+<text x="640" y="440" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="middle">General has no row: a NULL category_id means General,</text>
+<text x="640" y="460" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="middle">so removing a category keeps all of its tasks.</text>
+<text x="1088" y="368" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="middle">No display_order here:</text>
+<text x="1088" y="388" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="middle">Later keeps insertion order.</text>
+<!-- legend -->
+<line x1="40" y1="612" x2="1240" y2="612" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/>
+<text x="40" y="628" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="641" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="50" y="650" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PK</text>
+<text x="68" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Primary key</text>
+<rect x="156" y="641" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="166" y="650" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">FK</text>
+<text x="184" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Foreign key</text>
+<rect x="272" y="641" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="282" y="650" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">UQ</text>
+<text x="300" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Unique</text>
+<rect x="364" y="641" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="378" y="650" fill="#2d3142" opacity="0.75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">NULL</text>
+<text x="400" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Nullable (every other column is NOT NULL)</text>
+<path d="M636,647 H664" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<text x="672" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Points to the referenced column</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

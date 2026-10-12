@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MenuPocket entry points</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #bf4520;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--color-muted);
+      max-width: 72ch;
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · entry points</p>
+    <h1>How each route opens the app</h1>
+    <p class="subtitle">AppDelegate routes every entry. Most routes land in the same retained task window; the hotkey opens a small panel that writes straight to Today, and a login launch opens nothing.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="entry-points-title entry-points-desc">
+        <title id="entry-points-title">MenuPocket entry points</title>
+        <desc id="entry-points-desc">Flowchart showing how app launch, Dock or Show Tasks, a menu bar click and the Quick Add hotkey lead to the task window, the Quick Add panel, or no window at login.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<!-- arrows -->
+<path d="M140,96 V144" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M820,96 V144" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M140,240 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M228,192 H336 Q344,192 344,200 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M360,96 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M600,96 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M732,192 H632 Q624,192 624,200 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M820,240 V320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<!-- labels -->
+<rect x="148" y="274" width="28" height="12" rx="2" fill="#f5f5f5"/><text x="162" y="283" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+<rect x="272" y="172" width="20" height="12" rx="2" fill="#f5f5f5"/><text x="282" y="181" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+<rect x="368" y="146" width="88" height="12" rx="2" fill="#f5f5f5"/><text x="412" y="155" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">KEEPS LAST TAB</text>
+<rect x="512" y="146" width="80" height="12" rx="2" fill="#f5f5f5"/><text x="552" y="155" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SELECTS TODAY</text>
+<rect x="670" y="172" width="20" height="12" rx="2" fill="#f5f5f5"/><text x="680" y="181" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+<rect x="828" y="274" width="28" height="12" rx="2" fill="#f5f5f5"/><text x="842" y="283" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+<!-- triggers -->
+<rect x="52" y="48" width="176" height="48" rx="20" fill="#f5f5f5"/>
+<rect x="52" y="48" width="176" height="48" rx="20" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="140" y="69.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">App launch</text>
+<text x="140" y="83.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">manual or at login</text>
+<rect x="272" y="48" width="176" height="48" rx="20" fill="#f5f5f5"/>
+<rect x="272" y="48" width="176" height="48" rx="20" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="360" y="69.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Dock or Show Tasks</text>
+<text x="360" y="83.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Dock icon · app menu</text>
+<rect x="512" y="48" width="176" height="48" rx="20" fill="#f5f5f5"/>
+<rect x="512" y="48" width="176" height="48" rx="20" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="600" y="69.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Menu bar click</text>
+<text x="600" y="83.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">left click on the count</text>
+<rect x="732" y="48" width="176" height="48" rx="20" fill="#f5f5f5"/>
+<rect x="732" y="48" width="176" height="48" rx="20" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="820" y="69.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Quick Add hotkey</text>
+<text x="820" y="83.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Control-Option-N</text>
+<!-- decisions -->
+<polygon points="140,144 228,192 140,240 52,192" fill="#f5f5f5"/>
+<polygon points="140,144 228,192 140,240 52,192" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="140" y="188" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Launched</text>
+<text x="140" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">at login?</text>
+<polygon points="820,144 908,192 820,240 732,192" fill="#f5f5f5"/>
+<polygon points="820,144 908,192 820,240 732,192" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="820" y="188" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Today data</text>
+<text x="820" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">readable?</text>
+<!-- outcomes -->
+<rect x="52" y="320" width="176" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="52" y="320" width="176" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.3)" stroke-width="1"/>
+<rect x="60" y="326" width="52" height="12" rx="2" fill="none" stroke="rgba(90,101,128,0.4)" stroke-width="0.8"/><text x="86" y="335" fill="#5a6580" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">AT LOGIN</text>
+<text x="140" y="358.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">No window</text>
+<text x="140" y="372.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">menu bar count only</text>
+<rect x="320" y="320" width="320" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="320" y="320" width="320" height="80" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="328" y="326" width="40" height="12" rx="2" fill="none" stroke="rgba(191,69,32,0.4)" stroke-width="0.8"/><text x="348" y="335" fill="#bf4520" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WINDOW</text>
+<text x="480" y="359.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Task window</text>
+<text x="480" y="373.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">one retained window · TaskWindowController</text>
+<text x="480" y="387.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">refreshes data, leaves History</text>
+<rect x="732" y="320" width="176" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="732" y="320" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="740" y="326" width="36" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="758" y="335" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PANEL</text>
+<text x="820" y="358.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Quick Add panel</text>
+<text x="820" y="372.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">saves to Today · General</text>
+<!-- callouts -->
+<text x="52" y="440" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="start">Right- or Control-click on the count opens</text>
+<text x="52" y="460" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="start">the read-only glance menu instead.</text>
+<text x="908" y="440" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="end">Unreadable data gets one refresh first;</text>
+<text x="908" y="460" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', 'Noto Serif', serif" text-anchor="end">a second press closes an open panel.</text>
+<!-- legend -->
+<line x1="40" y1="520" x2="920" y2="520" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/>
+<text x="40" y="536" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="549" width="22" height="12" rx="6" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="70" y="558" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Trigger</text>
+<polygon points="146,547 154,555 146,563 138,555" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="162" y="558" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Decision</text>
+<rect x="234" y="549" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="258" y="558" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Surface</text>
+<rect x="326" y="549" width="16" height="12" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="350" y="558" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Where most routes land</text>
+<rect x="494" y="549" width="16" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.3)" stroke-width="1"/>
+<text x="518" y="558" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Nothing opens</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

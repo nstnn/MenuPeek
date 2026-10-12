@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MenuPocket write path</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #bf4520;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1280px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--color-muted);
+      max-width: 72ch;
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 1280px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · write path</p>
+    <h1>What happens when you add a task</h1>
+    <p class="subtitle">Rows, counts and History change only after the SQLite transaction commits. A failed write leaves saved data and the draft as they were. Complete, edit, delete and move follow the same shape.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="write-path-title write-path-desc">
+        <title id="write-path-title">Adding a task: the write path</title>
+        <desc id="write-path-desc">Sequence diagram showing a new task travelling from the task window or Quick Add through DailyNotesState to SQLiteNoteRepository, being published and observed by the menu bar only after commit, and leaving the draft intact when the write throws.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<!-- lifelines -->
+<line x1="160" y1="96" x2="160" y2="628" stroke="rgba(45,49,66,0.2)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="480" y1="96" x2="480" y2="628" stroke="rgba(45,49,66,0.2)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="800" y1="96" x2="800" y2="628" stroke="rgba(45,49,66,0.2)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="1120" y1="96" x2="1120" y2="628" stroke="rgba(45,49,66,0.2)" stroke-width="1" stroke-dasharray="3,3"/>
+<!-- alt fragment -->
+<rect x="48" y="304" width="1144" height="308" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+<rect x="48" y="304" width="40" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+<text x="68" y="316" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">ALT</text>
+<text x="60" y="336" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.04em">[commit ok]</text>
+<line x1="56" y1="516" x2="1184" y2="516" stroke="rgba(45,49,66,0.2)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="60" y="540" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.04em">[storage throws]</text>
+<!-- activation bars -->
+<rect x="476" y="140" width="8" height="460" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+<rect x="796" y="228" width="8" height="132" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+<rect x="796" y="552" width="8" height="20" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+<!-- messages -->
+<path d="M160,144 H476" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="288" y="124" width="60" height="12" rx="2" fill="#f5f5f5"/><text x="318" y="133" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SAVE TASK</text>
+<path d="M484,172 H512 Q520,172 520,180 V188 Q520,196 512,196 H484" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="528" y="178" width="88" height="12" rx="2" fill="#f5f5f5"/><text x="572" y="187" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">TRIM · DAY KEY</text>
+<path d="M484,232 H796" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="606" y="212" width="68" height="12" rx="2" fill="#f5f5f5"/><text x="640" y="221" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">INSERT NOTE</text>
+<path d="M804,260 H832 Q840,260 840,268 V276 Q840,284 832,284 H804" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="848" y="266" width="88" height="12" rx="2" fill="#f5f5f5"/><text x="892" y="275" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">BEGIN → COMMIT</text>
+<path d="M796,356 H484" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="622" y="336" width="36" height="12" rx="2" fill="#f5f5f5"/><text x="640" y="345" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SAVED</text>
+<path d="M484,376 H512 Q520,376 520,384 V392 Q520,400 512,400 H484" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="528" y="382" width="64" height="12" rx="2" fill="#f5f5f5"/><text x="560" y="391" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">APPEND ROW</text>
+<path d="M484,412 H512 Q520,412 520,420 V428 Q520,436 512,436 H484" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="528" y="418" width="88" height="12" rx="2" fill="#f5f5f5"/><text x="572" y="427" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">HISTORY REV +1</text>
+<path d="M476,464 H160" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<rect x="300" y="444" width="36" height="12" rx="2" fill="#f5f5f5"/><text x="318" y="453" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ADDED</text>
+<path d="M484,492 H1120" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+<rect x="920" y="472" width="80" height="12" rx="2" fill="#f5f5f5"/><text x="960" y="481" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">COUNT CHANGES</text>
+<path d="M796,564 H484" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="606" y="544" width="68" height="12" rx="2" fill="#f5f5f5"/><text x="640" y="553" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ROLLED BACK</text>
+<path d="M476,592 H160" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="280" y="572" width="76" height="12" rx="2" fill="#f5f5f5"/><text x="318" y="581" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">WRITE FAILED</text>
+<!-- actors -->
+<rect x="56" y="40" width="208" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="56" y="40" width="208" height="56" rx="6" fill="rgba(79,93,117,0.1)" stroke="#5a6580" stroke-width="1"/>
+<text x="160" y="65.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Task window or Quick Add</text>
+<text x="160" y="79.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">addDraft() · add(text:)</text>
+<rect x="376" y="40" width="208" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="376" y="40" width="208" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="480" y="65.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">DailyNotesState</text>
+<text x="480" y="79.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">add(text:categoryID:)</text>
+<rect x="696" y="40" width="208" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="696" y="40" width="208" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="800" y="65.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">SQLiteNoteRepository</text>
+<text x="800" y="79.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">add(_:) → notes.sqlite</text>
+<rect x="1016" y="40" width="208" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="1016" y="40" width="208" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="1120" y="65.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Menu bar count</text>
+<text x="1120" y="79.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">observes availableProgress</text>
+<!-- legend -->
+<line x1="40" y1="648" x2="1240" y2="648" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/>
+<text x="40" y="664" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="677" width="16" height="12" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="64" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Focal actor</text>
+<rect x="158" y="674" width="4" height="16" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+<text x="176" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Activation</text>
+<path d="M260,683 H288" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="296" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Call</text>
+<path d="M348,683 H376" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<text x="384" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Return</text>
+<path d="M448,683 H476" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+<text x="484" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Async observation</text>
+<path d="M604,683 H632" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+<text x="640" y="686" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Success the user sees</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
