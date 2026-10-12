@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MenuPocket architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #bf4520;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1280px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--color-muted);
+      max-width: 72ch;
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 1280px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · MenuPocket</p>
+    <h1>One saved-data authority</h1>
+    <p class="subtitle">Every surface reads and writes tasks through DailyNotesState, which holds the only repository connection. Settings is the exception: it saves preferences through AppModel.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+        <title id="architecture-title">MenuPocket architecture</title>
+        <desc id="architecture-desc">Architecture diagram showing AppDelegate owning the task window, menu bar count, Quick Add panel and Settings; the first three use DailyNotesState, the only path to SQLiteNoteRepository and notes.sqlite, while preferences go to UserDefaults.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<!-- zones -->
+<rect x="272" y="92" width="288" height="464" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/><rect x="280" y="96" width="68" height="12" rx="2" fill="#f5f5f5"/><text x="314" y="105" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">UI SURFACES</text>
+<rect x="1000" y="264" width="240" height="288" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/><rect x="1008" y="268" width="100" height="12" rx="2" fill="#f5f5f5"/><text x="1058" y="277" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">SANDBOXED STORAGE</text>
+<!-- arrows: AppDelegate owns the four surfaces -->
+<path d="M216,300 H228 Q236,300 236,292 V168 Q236,160 244,160 H296" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M216,320 H244 Q252,320 252,312 V280 Q252,272 260,272 H296" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M216,340 H244 Q252,340 252,348 V376 Q252,384 260,384 H296" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M216,360 H228 Q236,360 236,368 V488 Q236,496 244,496 H296" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<!-- arrows: data path -->
+<path d="M536,160 H648" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M536,272 H648" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<path d="M536,384 H648" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M888,188 H1000" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M1120,224 V296" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M848,416 V456 Q848,464 856,464 H1016" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M536,496 H1016" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<!-- labels -->
+<rect x="554" y="140" width="76" height="12" rx="2" fill="#f5f5f5"/><text x="592" y="149" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">READ · WRITE</text>
+<rect x="566" y="252" width="52" height="12" rx="2" fill="#f5f5f5"/><text x="592" y="261" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">OBSERVES</text>
+<rect x="554" y="364" width="76" height="12" rx="2" fill="#f5f5f5"/><text x="592" y="373" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ADD TO TODAY</text>
+<rect x="900" y="168" width="88" height="12" rx="2" fill="#f5f5f5"/><text x="944" y="177" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ONE CONNECTION</text>
+<rect x="1128" y="238" width="76" height="12" rx="2" fill="#f5f5f5"/><text x="1166" y="247" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">TRANSACTIONS</text>
+<rect x="910" y="444" width="52" height="12" rx="2" fill="#f5f5f5"/><text x="936" y="453" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">UI PREFS</text>
+<rect x="670" y="476" width="68" height="12" rx="2" fill="#f5f5f5"/><text x="704" y="485" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PREFERENCES</text>
+<!-- nodes -->
+<rect x="40" y="276" width="176" height="104" rx="6" fill="#f5f5f5"/>
+<rect x="40" y="276" width="176" height="104" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="48" y="282" width="28" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="62" y="291" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">APP</text>
+<text x="128" y="327.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">AppDelegate</text>
+<text x="128" y="341.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">creates · routes · quits</text>
+<text x="128" y="355.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">owns DailyNotesState</text>
+<rect x="296" y="124" width="240" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="296" y="124" width="240" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="304" y="130" width="40" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="324" y="139" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WINDOW</text>
+<text x="416" y="159.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Task window</text>
+<text x="416" y="173.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">TaskWindowController</text>
+<text x="416" y="187.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Today · Later · History</text>
+<rect x="296" y="236" width="240" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="296" y="236" width="240" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="304" y="242" width="52" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="330" y="251" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MENU BAR</text>
+<text x="416" y="271.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Menu bar count</text>
+<text x="416" y="285.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">TaskStatusItemController</text>
+<text x="416" y="299.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Today N/M · glance menu</text>
+<rect x="296" y="348" width="240" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="296" y="348" width="240" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="304" y="354" width="36" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="322" y="363" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PANEL</text>
+<text x="416" y="383.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Quick Add panel</text>
+<text x="416" y="397.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">QuickAddPanelController</text>
+<text x="416" y="411.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Control-Option-N, any app</text>
+<rect x="296" y="460" width="240" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="296" y="460" width="240" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="304" y="466" width="40" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="324" y="475" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WINDOW</text>
+<text x="416" y="495.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Settings</text>
+<text x="416" y="509.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">SettingsWindowController</text>
+<text x="416" y="523.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">AppModel · login item</text>
+<rect x="648" y="128" width="240" height="288" rx="6" fill="#f5f5f5"/>
+<rect x="648" y="128" width="240" height="288" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.2"/>
+<rect x="656" y="134" width="36" height="12" rx="2" fill="none" stroke="rgba(191,69,32,0.4)" stroke-width="0.8"/><text x="674" y="143" fill="#bf4520" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+<text x="768" y="172" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">DailyNotesState</text>
+<text x="768" y="188" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">@Observable · @MainActor</text>
+<line x1="664" y1="204" x2="872" y2="204" stroke="rgba(191,69,32,0.25)" stroke-width="0.8"/>
+<circle cx="672" cy="228" r="1.6" fill="#bf4520"/>
+<text x="682" y="232" fill="#4f5d75" font-size="11" font-family="'Geist', system-ui, sans-serif">Today + Later task snapshots</text>
+<circle cx="672" cy="256" r="1.6" fill="#bf4520"/>
+<text x="682" y="260" fill="#4f5d75" font-size="11" font-family="'Geist', system-ui, sans-serif">category catalog + drafts</text>
+<circle cx="672" cy="284" r="1.6" fill="#bf4520"/>
+<text x="682" y="288" fill="#4f5d75" font-size="11" font-family="'Geist', system-ui, sans-serif">scoped errors · recovery text</text>
+<circle cx="672" cy="312" r="1.6" fill="#bf4520"/>
+<text x="682" y="316" fill="#4f5d75" font-size="11" font-family="'Geist', system-ui, sans-serif">day, clock and wake observers</text>
+<circle cx="672" cy="340" r="1.6" fill="#bf4520"/>
+<text x="682" y="344" fill="#4f5d75" font-size="11" font-family="'Geist', system-ui, sans-serif">historyRevision for History</text>
+<text x="768" y="398" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">views never open storage</text>
+<rect x="1000" y="152" width="240" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1000" y="152" width="240" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="1008" y="158" width="32" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.4)" stroke-width="0.8"/><text x="1024" y="167" fill="#2d3142" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REPO</text>
+<text x="1120" y="194.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">SQLiteNoteRepository</text>
+<text x="1120" y="208.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">implements NoteRepository</text>
+<rect x="1016" y="296" width="208" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="1016" y="296" width="208" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="1024" y="302" width="40" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.4)" stroke-width="0.8"/><text x="1044" y="311" fill="#4f5d75" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SQLITE</text>
+<text x="1120" y="335.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">notes.sqlite</text>
+<text x="1120" y="349.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">schema v4 · 3 tables</text>
+<text x="1120" y="363.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Application Support</text>
+<rect x="1016" y="448" width="208" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="1016" y="448" width="208" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="1024" y="454" width="52" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.4)" stroke-width="0.8"/><text x="1050" y="463" fill="#4f5d75" opacity="0.8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DEFAULTS</text>
+<text x="1120" y="487.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">UserDefaults</text>
+<text x="1120" y="501.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">preferences · theme</text>
+<text x="1120" y="515.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">collapsed groups · onboarding</text>
+<!-- legend -->
+<line x1="40" y1="612" x2="1240" y2="612" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/>
+<text x="40" y="628" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="641" width="16" height="12" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="64" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Single source of truth</text>
+<rect x="208" y="641" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="232" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Component</text>
+<rect x="312" y="641" width="16" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="336" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Local storage</text>
+<path d="M436,647 H464" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="472" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Owns or calls</text>
+<path d="M572,647 H600" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<text x="608" y="650" fill="#4f5d75" font-size="9" font-family="'Geist', system-ui, sans-serif">Observes, read-only</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
