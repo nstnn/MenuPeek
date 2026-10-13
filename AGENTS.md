@@ -23,4 +23,10 @@ MenuPocket is a native macOS desktop and menu bar app built with SwiftUI and App
 - Use English implementation plans as the sole source of truth for execution, verification, handoff, and future plan updates. Do not consult, reference, validate, or maintain initial-reading copies during subsequent work.
 - After every build/test/UI verification session, including failed runs, stop and remove the temporary app bundles you created for testing before reporting completion. This includes Debug test hosts and renamed fixtures. Preserve the user's main app and saved data; follow [test artifact cleanup](docs/WORKFLOW.md#test-artifact-cleanup).
 
+## Verification
+
+- After changing behavior a MenuPocket user can observe, follow [`.agents/skills/verify-menupocket/SKILL.md`](.agents/skills/verify-menupocket/SKILL.md) for the affected features and include its evidence. That covers what the task window, Settings, Quick Add panel, menu bar count, or glance shows or does, and what it saves to SQLite or preferences.
+- No evidence means the change is not done. If verification can't run, for example with no macOS GUI session, missing Accessibility permission, or a declined launch, report the change as unverified and say why.
+- When you add or change a feature, update `.agents/skills/verify-menupocket/features/` in the same change.
+
 Update the relevant document when its guidance changes. Change this entry point only when project-wide rules, project identity, or the document map changes.
