@@ -3892,6 +3892,12 @@ private final class FakeNoteRepository: NoteRepository {
         return outcome
     }
 
+    func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        let outcome = CategoryMovePlanner.plan(request, categories: try categories())
+        if case let .changed(ordered) = outcome { savedCategories = ordered }
+        return outcome
+    }
+
     func categories() throws -> [TaskCategory] {
         readAttempts += 1
         onCategoryRead?()

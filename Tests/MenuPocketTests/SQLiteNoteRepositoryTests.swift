@@ -1381,6 +1381,236 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
+    func testCategoryMovesReopenAndPreserveSchemaTaskRowsAndCategoryFields() throws {
+        let saved = try { () throws -> [TaskCategory] in
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let work = try store.createCategory(name: "Work")
+            let empty = try store.createCategory(name: "Empty")
+            let personal = try store.createCategory(name: "Personal")
+            let learning = try store.createCategory(name: "Learning")
+            let day = "2026-10-13"
+            for row in [note("Work ' 📝", day: day, createdAt: 10, categoryID: work.id),
+                        note("Done", day: day, createdAt: 20,
+                             completedAt: Date(timeIntervalSince1970: 25), categoryID: personal.id),
+                        note("General", day: day, createdAt: 30),
+                        note("Older", day: "2026-10-12", createdAt: 40, categoryID: work.id)] {
+                try store.add(row)
+            }
+            try store.addLater(later("Later", createdAt: 50, categoryID: learning.id))
+            try store.addLater(later("Done later", createdAt: 60,
+                                     completedAt: Date(timeIntervalSince1970: 65), categoryID: work.id))
+            try executeRaw("UPDATE notes SET display_order = display_order + 50")
+            // Any task UPDATE fails, even one that would restore the same values.
+            for table in ["notes", "later_tasks"] {
+                try executeRaw("CREATE TRIGGER protect_\(table) BEFORE UPDATE ON \(table) BEGIN SELECT RAISE(ABORT, 'task update'); END")
+            }
+            let tasks = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let laterTasks = try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid")
+            let fields = try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid")
+            let schema = try schemaSnapshot()
+            let version = try rawRows("PRAGMA user_version")
+            var catalog = try store.categories()
+            func move(_ source: UUID, _ placement: CategoryMovePlacement, ids: [UUID]) throws {
+                let outcome = try store.moveCategory(CategoryMoveRequest(categoryID: source,
+                    expectedOrderIDs: catalog.map(\.id), placement: placement))
+                guard case let .changed(result) = outcome else { return XCTFail("Expected saved reorder") }
+                XCTAssertEqual(result.map(\.id), ids)
+                XCTAssertEqual(result.map(\.creationOrder), [0, 1, 2, 3])
+                XCTAssertEqual(try store.categories(), result)
+                XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).categories(), result)
+                XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), tasks)
+                XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterTasks)
+                XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"), fields)
+                XCTAssertEqual(try schemaSnapshot(), schema)
+                XCTAssertEqual(try rawRows("PRAGMA user_version"), version)
+                catalog = result
+            }
+            // UUID anchors place a visible source around the unused category.
+            try move(personal.id, .before(work.id), ids: [personal.id, work.id, empty.id, learning.id])
+            try move(work.id, .after(learning.id), ids: [personal.id, empty.id, learning.id, work.id])
+            try move(empty.id, .before(personal.id), ids: [empty.id, personal.id, learning.id, work.id])
+            XCTAssertEqual(try store.incompleteCount(for: day), 2)
+            return catalog
+        }()
+        // The original repository connection has now closed completely.
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).categories(), saved)
+        XCTAssertEqual(try rawRows("PRAGMA integrity_check"), [["ok"]])
+    }
+
+    func testCategoryNoOpAndRejectionsNeverUpdateAndKeepLegacyRanks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try store.createCategory(name: "A")
+        let b = try store.createCategory(name: "B")
+        let c = try store.createCategory(name: "C")
+        try executeRaw("UPDATE categories SET creation_order = -10 WHERE id = '\(a.id.uuidString)'")
+        try executeRaw("UPDATE categories SET creation_order = 50 WHERE id = '\(b.id.uuidString)'")
+        try executeRaw("UPDATE categories SET creation_order = \(Int64.max) WHERE id = '\(c.id.uuidString)'")
+        let before = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        try executeRaw("CREATE TRIGGER reject_category_update BEFORE UPDATE ON categories BEGIN SELECT RAISE(ABORT, 'unexpected update'); END")
+        func request(_ source: UUID? = nil, ids: [UUID]? = nil,
+                     placement: CategoryMovePlacement? = nil) -> CategoryMoveRequest {
+            CategoryMoveRequest(categoryID: source ?? a.id, expectedOrderIDs: ids ?? [a.id, b.id, c.id],
+                                placement: placement ?? .before(b.id))
+        }
+        XCTAssertEqual(try store.moveCategory(request()), .unchanged)
+        XCTAssertEqual(try store.moveCategory(request(c.id, placement: .after(b.id))), .unchanged)
+        XCTAssertEqual(try store.moveCategory(request(ids: [a.id, a.id, c.id])), .rejected(.invalidExpectedOrder))
+        XCTAssertEqual(try store.moveCategory(request(ids: [c.id, b.id, a.id])), .rejected(.catalogChanged))
+        XCTAssertEqual(try store.moveCategory(request(ids: [a.id, c.id])), .rejected(.catalogChanged))
+        XCTAssertEqual(try store.moveCategory(request(UUID())), .rejected(.categoryNotFound))
+        XCTAssertEqual(try store.moveCategory(request(placement: .after(a.id))), .rejected(.invalidAnchor))
+        XCTAssertEqual(try store.moveCategory(request(placement: .before(UUID()))), .rejected(.invalidAnchor))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+        _ = try SQLiteNoteRepository(databaseURL: databaseURL).categories()
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+    }
+
+    func testCategoryMoveRejectsStaleCatalogFromAnotherConnection() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try store.createCategory(name: "A")
+        let b = try store.createCategory(name: "B")
+        let other = try SQLiteNoteRepository(databaseURL: databaseURL)
+        _ = try other.moveCategory(CategoryMoveRequest(categoryID: b.id,
+            expectedOrderIDs: [a.id, b.id], placement: .before(a.id)))
+        let before = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        try executeRaw("CREATE TRIGGER reject_stale_update BEFORE UPDATE ON categories BEGIN SELECT RAISE(ABORT, 'stale update'); END")
+        XCTAssertEqual(try store.moveCategory(CategoryMoveRequest(categoryID: b.id,
+            expectedOrderIDs: [a.id, b.id], placement: .before(a.id))), .rejected(.catalogChanged))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+    }
+
+    func testCategoryMoveStagesAroundNegativeSparseAndExtremeRanks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let ranks: [Int64] = [.min, .min + 1, -2, -1, 100, .max - 1, .max]
+        var original: [TaskCategory] = []
+        for index in ranks.indices {
+            let category = try store.createCategory(name: "Category \(index)")
+            original.append(category)
+        }
+        // Seed after all creates, since max-rank append must remain checked.
+        for (category, rank) in zip(original, ranks) {
+            try executeRaw("UPDATE categories SET creation_order = \(rank) WHERE id = '\(category.id.uuidString)'")
+        }
+        let before = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        XCTAssertEqual(try store.categories().map(\.creationOrder), ranks)
+        XCTAssertThrowsError(try store.createCategory(name: "Overflow")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .orderExhausted)
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+        let last = try XCTUnwrap(original.last)
+        guard case let .changed(saved) = try store.moveCategory(CategoryMoveRequest(categoryID: last.id,
+            expectedOrderIDs: original.map(\.id), placement: .before(original[0].id))) else {
+            return XCTFail("Expected legacy reorder")
+        }
+        XCTAssertEqual(saved.map(\.id), [last.id] + original.dropLast().map(\.id))
+        XCTAssertEqual(saved.map(\.creationOrder), Array(0..<Int64(ranks.count)))
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).categories(), saved)
+        XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"),
+                       before.map { Array($0.dropLast()) })
+    }
+
+    func testCategoryStagingRangeChecksFinalRanksOverflowAndExhaustion() throws {
+        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [Int64.min, Int64.min + 2], count: 3), Int64.min + 3)
+        // A large arithmetic model exercises positive fallback without allocating
+        // billions of categories. Final 0..<count ranks must also be excluded.
+        let count = Int64.max / 2
+        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [Int64.min, Int64.min / 2 - 1, -2], count: count), count)
+        for count in [Int64(0), -1, .max] {
+            XCTAssertThrowsError(try SQLiteNoteRepository.categoryStagingStart(avoiding: [.min, -2], count: count)) {
+                XCTAssertEqual($0 as? TaskCategoryRepositoryError, .orderExhausted)
+            }
+        }
+    }
+
+    func testCategoryMoveFailuresRollBackBothRankPassesAndAllowRetry() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try store.createCategory(name: "A")
+        let b = try store.createCategory(name: "B")
+        try store.add(note("Today", day: "2026-10-13", createdAt: 10, categoryID: a.id))
+        try store.addLater(later("Later", createdAt: 20, categoryID: b.id))
+        let before = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        let tasks = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterTasks = try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid")
+        let request = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .before(a.id))
+        for condition in ["NEW.creation_order = \(Int64.min + 1)",
+                          "OLD.creation_order < 0 AND NEW.creation_order = 1"] {
+            try executeRaw("CREATE TRIGGER reject_category_move AFTER UPDATE ON categories WHEN \(condition) BEGIN SELECT RAISE(FAIL, 'rank write failed'); END")
+            XCTAssertThrowsError(try store.moveCategory(request))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), tasks)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterTasks)
+            XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).categories(), [a, b])
+            try executeRaw("DROP TRIGGER reject_category_move")
+        }
+        try executeRaw("CREATE TRIGGER ignore_category_move BEFORE UPDATE ON categories WHEN NEW.creation_order = \(Int64.min + 1) BEGIN SELECT RAISE(IGNORE); END")
+        XCTAssertThrowsError(try store.moveCategory(request)) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(a.id))
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+        try executeRaw("DROP TRIGGER ignore_category_move")
+        guard case let .changed(saved) = try store.moveCategory(request) else { return XCTFail("Retry failed") }
+        XCTAssertEqual(saved.map(\.id), [b.id, a.id])
+    }
+
+    func testCategoryMoveCommitFailureRollsBackAndAllowsRetry() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try store.createCategory(name: "A")
+        let b = try store.createCategory(name: "B")
+        try store.add(note("Today", day: "2026-10-13", createdAt: 10, categoryID: a.id))
+        try store.addLater(later("Later", createdAt: 20, categoryID: b.id))
+        let before = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        let tasks = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterTasks = try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid")
+        var reader: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &reader), SQLITE_OK)
+        let connection = try XCTUnwrap(reader)
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(sqlite3_exec(connection, "BEGIN; SELECT * FROM categories", nil, nil, nil), SQLITE_OK)
+        let request = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .before(a.id))
+        XCTAssertThrowsError(try store.moveCategory(request)) { error in
+            guard case let SQLiteNoteStoreError.databaseError(operation, code, _) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(operation, "COMMIT")
+            XCTAssertEqual(code, SQLITE_BUSY)
+        }
+        XCTAssertEqual(sqlite3_exec(connection, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), before)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), tasks)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterTasks)
+        XCTAssertEqual(try store.categories(), [a, b])
+        guard case let .changed(saved) = try store.moveCategory(request) else { return XCTFail("Retry failed") }
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).categories(), saved)
+        XCTAssertEqual(saved.map(\.id), [b.id, a.id])
+    }
+
+    func testCategoryCRUDKeepsSavedOrderAfterReorder() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try store.createCategory(name: "A")
+        let b = try store.createCategory(name: "B")
+        let c = try store.createCategory(name: "C")
+        _ = try store.moveCategory(CategoryMoveRequest(categoryID: c.id,
+            expectedOrderIDs: [a.id, b.id, c.id], placement: .before(a.id)))
+        let appended = try store.createCategory(name: "Appended")
+        XCTAssertEqual(appended.creationOrder, 3)
+        let renamed = try store.renameCategory(id: a.id, name: "Renamed")
+        XCTAssertEqual(renamed.creationOrder, 1)
+        XCTAssertThrowsError(try store.createCategory(name: "renamed")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .duplicateName)
+        }
+        XCTAssertThrowsError(try store.renameCategory(id: b.id, name: "RENAMED")) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .duplicateName)
+        }
+        try store.removeCategory(id: b.id)
+        let catalog = try SQLiteNoteRepository(databaseURL: databaseURL).categories()
+        XCTAssertEqual(catalog.map(\.id), [c.id, a.id, appended.id])
+        XCTAssertEqual(catalog.map(\.creationOrder), [0, 1, 3])
+        XCTAssertEqual(catalog[1], renamed)
+        XCTAssertThrowsError(try store.removeCategory(id: b.id)) {
+            XCTAssertEqual($0 as? TaskCategoryRepositoryError, .notFound(b.id))
+        }
+    }
+
     func testSavedMovesReopenWithExactOrderAndPreserveOtherData() throws {
         let store = try SQLiteNoteRepository(databaseURL: databaseURL)
         let work = try store.createCategory(name: "Work")

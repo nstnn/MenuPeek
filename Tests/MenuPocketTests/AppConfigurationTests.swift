@@ -2145,6 +2145,12 @@ private final class TaskWindowReadFixture: NoteRepository {
         }
     }
 
+    func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        let outcome = CategoryMovePlanner.plan(request, categories: try categories())
+        if case let .changed(ordered) = outcome { savedCategories = ordered }
+        return outcome
+    }
+
     func categories() throws -> [TaskCategory] {
         if failRead { throw CocoaError(.fileReadUnknown) }
         return savedCategories
