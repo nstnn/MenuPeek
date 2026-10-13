@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 
 enum CategoryReorderContext: Equatable, Sendable {
@@ -6,8 +6,7 @@ enum CategoryReorderContext: Equatable, Sendable {
     case manager
 }
 
-/// Transient authorization only. Native sources added by TASK-006 must retain
-/// this owner and release the reservation solely from their source-end callback.
+/// Transient authorization. Only the native source-end callback releases ownership.
 @MainActor
 @Observable
 final class CategoryDragSession {
@@ -22,22 +21,48 @@ final class CategoryDragSession {
         }
     }
 
+    static let pasteboardType = NSPasteboard.PasteboardType("local.menupocket.category-move")
     private(set) var active: Payload?
     private(set) var isDragging = false
     var hoveredRequest: CategoryMoveRequest?
     @ObservationIgnored private var nativeToken: UUID?
+    @ObservationIgnored private var nativeSource: CategoryDragSourceView?
     @ObservationIgnored private var consumed: Payload?
 
-    func begin(categoryID: UUID, context: CategoryReorderContext, state: DailyNotesState) -> Payload? {
+    func canBegin(categoryID: UUID, context: CategoryReorderContext, state: DailyNotesState) -> Bool {
+        nativeToken == nil &&
+            state.taskWindowPresentation.canReorderCategories(in: context, state: state) &&
+            state.categories.contains { $0.id == categoryID } &&
+            isVisible(categoryID, in: context, state: state)
+    }
+
+    func begin(categoryID: UUID, context: CategoryReorderContext, state: DailyNotesState,
+               source: CategoryDragSourceView? = nil) -> Payload? {
         guard nativeToken == nil,
               state.taskWindowPresentation.canReorderCategories(in: context, state: state),
               state.categories.contains(where: { $0.id == categoryID }),
               isVisible(categoryID, in: context, state: state) else { return nil }
         let payload = Payload(token: UUID(), categoryID: categoryID, context: context, catalog: state.categories)
+        nativeSource = source
         nativeToken = payload.token
         isDragging = true
         active = payload
         return payload
+    }
+
+    /// A copied/external token is insufficient: the native source identity must match.
+    func validatedPayload(source: AnyObject?, pasteboard: NSPasteboard, state: DailyNotesState) -> Payload? {
+        validate(state: state)
+        guard let payload = active, nativeToken == payload.token,
+              let nativeSource, source === nativeSource,
+              let items = pasteboard.pasteboardItems, items.count == 1,
+              items[0].types == [Self.pasteboardType],
+              items[0].string(forType: Self.pasteboardType) == payload.token.uuidString else { return nil }
+        return payload
+    }
+
+    func validatedPayload(for info: any NSDraggingInfo, state: DailyNotesState) -> Payload? {
+        validatedPayload(source: info.draggingSource as AnyObject?, pasteboard: info.draggingPasteboard, state: state)
     }
 
     func validate(state: DailyNotesState) {
@@ -77,6 +102,7 @@ final class CategoryDragSession {
         guard nativeToken == token else { return }
         cancel()
         nativeToken = nil
+        nativeSource = nil
         isDragging = false
     }
 
