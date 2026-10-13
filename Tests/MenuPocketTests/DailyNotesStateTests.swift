@@ -210,6 +210,125 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(presentation.canReorderCategories(in: .list(.later), state: state))
     }
 
+    func testManagerEmptyCategoryDropFailureRetryAndGuardsPreserveTaskState() throws {
+        let used = try TaskCategory(name: "Used", creationOrder: 8)
+        let empty = try TaskCategory(name: "Empty", creationOrder: 40)
+        let task = categorized("Done", used, createdAt: 1, completedAt: Date(timeIntervalSince1970: 2))
+        let later = laterTask("Later", createdAt: 3, categoryID: used.id)
+        for scenario in ["changed", "failed", "rename", "removal", "dismiss", "unavailable"] {
+            let store = FakeNoteRepository(notes: [task], categories: [used, empty], laterTasks: [later])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            defer { state.stopForTermination() }
+            let presentation = state.taskWindowPresentation
+            presentation.setWindowVisible(true, state: state)
+            XCTAssertTrue(presentation.showCategoryManager(state: state))
+            state.draft = "Today draft"; state.laterDraft = "Later draft"
+            state.draftCategoryID = used.id; state.laterDraftCategoryID = used.id
+            state.categoryPreferences.setCollapsed(true, for: .category(used.id))
+            let session = presentation.categoryDragSession
+            let source = CategoryDragSourceView(frame: .zero)
+            let payload = try XCTUnwrap(session.begin(categoryID: empty.id, context: .manager, state: state, source: source))
+            let target = CategoryDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 50))
+            let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = target
+            defer { window.close(); session.ended(token: payload.token) }
+            target.state = state; target.session = session; target.context = .manager
+            target.group = .general; target.firstCustomID = used.id
+            let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                            point: target.convert(NSPoint(x: 20, y: 40), to: nil),
+                                            type: CategoryDragSession.pasteboardType)
+            defer { info.draggingPasteboard.releaseGlobally() }
+            XCTAssertEqual(target.draggingEntered(info), .move)
+            switch scenario {
+            case "failed": store.failCategoryCommand = .reorder
+            case "rename": presentation.setManagerRenaming(used.id)
+            case "removal": XCTAssertTrue(presentation.requestCategoryRemoval(id: used.id, state: state))
+            case "dismiss": presentation.dismissCategoryManager()
+            case "unavailable": store.failSnapshotRead = .categories; state.refresh()
+            default: break
+            }
+            let revisionBeforeDrop = state.historyRevision
+            XCTAssertEqual(target.performDragOperation(info), scenario == "changed", scenario)
+            XCTAssertEqual(store.categoryMoveAttempts, scenario == "changed" || scenario == "failed" ? 1 : 0, scenario)
+            XCTAssertEqual(store.savedCategories.map(\.id), scenario == "changed" ? [empty.id, used.id] : [used.id, empty.id])
+            XCTAssertEqual(state.historyRevision, revisionBeforeDrop + (scenario == "changed" ? 1 : 0))
+            XCTAssertEqual(store.saved, [task]); XCTAssertEqual(store.savedLaterTasks, [later])
+            XCTAssertEqual(state.draft, "Today draft"); XCTAssertEqual(state.laterDraft, "Later draft")
+            XCTAssertEqual(state.draftCategoryID, used.id); XCTAssertEqual(state.laterDraftCategoryID, used.id)
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(used.id)))
+            XCTAssertNil(session.hoveredRequest); XCTAssertFalse(session.isScrolling)
+            XCTAssertTrue(session.isDragging)
+            session.ended(token: payload.token)
+            if scenario == "failed" {
+                XCTAssertEqual(state.categoryReorderIssue, .reorder)
+                store.failCategoryCommand = nil
+                let retry = try XCTUnwrap(session.begin(categoryID: empty.id, context: .manager, state: state))
+                XCTAssertTrue(session.consume(retry, state: state))
+                guard case .changed? = state.moveCategory(retry.request(.before(used.id)), in: .manager) else {
+                    return XCTFail("Failed drop must permit a fresh attempt")
+                }
+                XCTAssertNil(state.categoryReorderIssue)
+                XCTAssertEqual(presentation.categoryMovementReveal?.context, .manager)
+                session.ended(token: retry.token)
+            }
+        }
+    }
+
+    func testManagerHoldCountFailureAndPostReadGuardStartNoNativeSession() throws {
+        let used = try TaskCategory(name: "Used", creationOrder: 0)
+        let done = categorized("Done", used, createdAt: 1, completedAt: Date(timeIntervalSince1970: 2))
+        let older = Note(id: UUID(), text: "Older", dayKey: "2026-09-26", createdAt: Date(timeIntervalSince1970: 3),
+                         completedAt: nil, categoryID: used.id)
+        let store = FakeNoteRepository(notes: [done, older], categories: [used],
+                                       laterTasks: [laterTask("Later", createdAt: 4, categoryID: used.id)])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        defer { state.stopForTermination() }
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        presentation.showCategoryManager(state: state)
+        let source = CategoryDragSourceView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        source.categoryID = used.id; source.catalog = state.categories; source.state = state
+        source.context = .manager; source.session = presentation.categoryDragSession; source.enabled = true
+        source.count = { state.categoryUsageCount(id: used.id) }
+        defer { source.cancelCandidate() }
+        func event(_ type: NSEvent.EventType, x: CGFloat) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 10),
+                                             modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                             context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        source.mouseDown(with: try event(.leftMouseDown, x: 10))
+        source.armCandidate()
+        XCTAssertEqual(store.categoryUsageReadAttempts, 0, "Rendering/arming does not query every row")
+        store.failCategoryCommand = .usage
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
+        XCTAssertEqual(store.categoryUsageReadAttempts, 1)
+        XCTAssertEqual(source.phase, .cancelled)
+        XCTAssertEqual(state.categoryIssue, .usage)
+        XCTAssertFalse(presentation.categoryDragSession.isDragging)
+        store.failCategoryCommand = nil
+        var previewCount: Int?
+        source.count = {
+            previewCount = state.categoryUsageCount(id: used.id)
+            presentation.setManagerRenaming(used.id)
+            return previewCount
+        }
+        source.mouseDown(with: try event(.leftMouseDown, x: 10))
+        source.armCandidate()
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
+        XCTAssertEqual(previewCount, 3, "Completed, older-day and Later tasks count")
+        XCTAssertEqual(store.categoryUsageReadAttempts, 2)
+        XCTAssertNil(state.categoryIssue)
+        XCTAssertEqual(source.phase, .cancelled, "Eligibility is revalidated after reading usage")
+        XCTAssertFalse(presentation.categoryDragSession.isDragging)
+        presentation.setManagerRenaming(nil)
+        XCTAssertTrue(presentation.categoryDragSession.canBegin(categoryID: used.id, context: .manager, state: state))
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+        XCTAssertEqual(store.savedCategories, [used])
+    }
+
     func testCategoryHoldSourceClickArmEarlyMovementAndInvalidation() throws {
         let category = try TaskCategory(name: "Work", creationOrder: 0)
         let task = categorized("Task", category, createdAt: 1)
@@ -4396,6 +4515,7 @@ private final class FakeNoteRepository: NoteRepository {
     var laterWriteAttempts = 0
     var moveAttempts = 0
     var categoryMoveAttempts = 0
+    var categoryUsageReadAttempts = 0
     var onCategoryMove: (() -> Void)?
     var onMove: (() -> Void)?
 
@@ -4491,6 +4611,7 @@ private final class FakeNoteRepository: NoteRepository {
     }
 
     func categoryUsageCount(id: UUID) throws -> Int {
+        categoryUsageReadAttempts += 1
         if failCategoryCommand == .usage { throw FakeFailure.failed }
         _ = try requireCategory(id)
         return saved.count { $0.categoryID == id } + savedLaterTasks.count { $0.categoryID == id }

@@ -10,6 +10,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 - `cat-picker` lists every saved category in the composer and edit pop-ups.
 - `cat-collapse` collapses or expands a group; the state survives relaunch.
 - `cat-move-to` moves a Today task to another category from its row menu (Move To).
+- `cat-manager-reorder` saves the shared custom-category order with a mouse hold/drop, including unused categories; General stays first.
 
 ## How to get to it (user POV)
 
@@ -44,7 +45,7 @@ Preconditions:
 
 ## Category hold sources (TASK-006)
 
-Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories source/target mounting remains TASK-008. Today/Later accept category drops through TASK-007; source start alone saves nothing.
+Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-sheet guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
 
 On an isolated fixture, use actual pointer input with the window active:
 
@@ -69,3 +70,17 @@ Using an identified isolated fixture, take before/after snapshots for these phys
 5. Verify task checkbox, text selection, Actions, composer and existing task pointer drag coexist. Quit/relaunch the same fixture without reseeding and compare saved category order, task rows and scoped defaults.
 
 `mpax` cannot generate category drags. Callback tests prove routing/authorization/storage dispatch, not native negotiation or physical scrolling. Record each physical case as observed Pass/Fail or Not tested; broader final acceptance remains TASK-010. Clean fixtures and Debug hosts even when access fails.
+
+## Manage categories mouse reorder (TASK-008)
+
+The custom row's label and its vertical background padding accept the same 300 ms hold and 4 pt movement. Rename/Remove buttons and name fields retain ordinary input. General has no source; its lower half offers before the first custom UUID. Every custom row, including unused categories, offers before/after placement. Targets use the manager's scroll view for edge scrolling; a committed changed move reveals its row without changing field focus or drafts. No keyboard reorder actions are added.
+
+On an isolated basic fixture:
+
+1. Open Manage categories, create `Unused`, then type `Pending category` into `newCategoryName` without creating it. Hold Unused's label/padding and drop before Work. Check General remains first, the new-name draft remains, and `categories.creation_order` stores Unused/Work/Errands. Task rows and preferences must match the pre-drop snapshot.
+2. Hold Work to inspect its preview count: all saved days and Later assignments count, including completed tasks (4 with the unchanged basic seed). Do not count only visible Today rows. Cancel without saving.
+3. Rename/Remove remain clickable, rename text stays editable, and rename/removal confirmation blocks holds and drops. Cancel each action, then try a fresh hold. Done/dismissal cancels authorization; normal task/category drags resume after native source-end.
+4. With many fictional categories, observe sheet edge scrolling and committed row reveal. Long names must leave Rename/Remove available. Escape/outside/equivalent drop preserves rank and typed drafts. Focused hosted checks exercise usage-read failure and failed save/retry; physical failure/retry needs a fixture that injects those errors.
+5. Close/reopen the manager and quit/relaunch the same fixture without reseeding. Check saved order, picker order and unchanged task rows/defaults. Take snapshots and clean every fixture.
+
+Accessibility button/field checks establish ordinary controls only. Physical holds, target negotiation, scrolling/reveal, and preservation of the sheet draft through an actual native drop need observed pointer evidence; mark them Not tested when unavailable. Final physical acceptance remains TASK-010.

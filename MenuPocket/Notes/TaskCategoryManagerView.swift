@@ -54,7 +54,10 @@ struct TaskCategoryManagerView: View {
         .onChange(of: presentation.categoryRemovalTarget?.id) { old, new in
             if let old, new == nil { restoreFocusAfterRemoval(old) }
         }
-        .onDisappear { presentation.setManagerRenaming(nil) }
+        .onDisappear {
+            presentation.cancelCategoryMovement()
+            presentation.setManagerRenaming(nil)
+        }
     }
 
     private var manager: some View {
@@ -106,8 +109,10 @@ struct TaskCategoryManagerView: View {
                         switch option {
                         case .general:
                             generalRow
+                                .overlay { categoryTarget(.general, categories: categories) }
                         case let .custom(category):
                             categoryRow(category)
+                                .overlay { categoryTarget(.category(category.id), categories: categories) }
                                 .id(category.id)
                         }
                     }
@@ -126,6 +131,15 @@ struct TaskCategoryManagerView: View {
             .accessibilityIdentifier("categoryList")
             .onChange(of: createdID) { _, id in
                 if let id { proxy.scrollTo(id) }
+            }
+            .onChange(of: presentation.categoryMovementReveal) { _, request in
+                guard let request, request.context == .manager else { return }
+                Task { @MainActor in
+                    defer { presentation.consumeCategoryMovementReveal(request) }
+                    await Task.yield()
+                    guard presentation.isCategoryMovementRevealValid(request, state: state) else { return }
+                    proxy.scrollTo(request.categoryID)
+                }
             }
             .onChange(of: focus) { _, field in
                 // Confirmation replaces the list. Bring its restored row focus
@@ -147,6 +161,14 @@ struct TaskCategoryManagerView: View {
                 Text(category.name)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+                    .overlay {
+                        CategoryDragSource(name: category.name, categoryID: category.id, context: .manager,
+                                           state: state, session: presentation.categoryDragSession,
+                                           enabled: presentation.canReorderCategories(in: .manager, state: state),
+                                           count: { state.categoryUsageCount(id: category.id) })
+                            .accessibilityHidden(true)
+                    }
                 Button("Rename") { beginRename(category) }
                     .modifier(keyboard(.rename(category.id)) { beginRename(category) })
                     .fixedSize()
@@ -158,12 +180,18 @@ struct TaskCategoryManagerView: View {
                     .accessibilityLabel("Remove \(category.name)")
                     .accessibilityIdentifier("removeCategory-\(category.id)")
             }
-            .padding(.vertical, 8)
             // One rename at a time, so an unsaved name is never silently replaced.
             .disabled(renamingID != nil)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("categoryRow-\(category.id)")
         }
+    }
+
+    private func categoryTarget(_ group: TaskGroupID, categories: [TaskCategory]) -> some View {
+        CategoryDropTarget(state: state, session: presentation.categoryDragSession,
+                           context: .manager, group: group,
+                           firstCustomID: categories.first?.id)
+            .accessibilityHidden(true)
     }
 
     private func renameRow(_ category: TaskCategory) -> some View {
