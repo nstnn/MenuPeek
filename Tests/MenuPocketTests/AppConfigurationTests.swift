@@ -938,6 +938,27 @@ final class AppConfigurationTests: XCTestCase {
 
 
     @MainActor
+    func testCategoryManagerAccessibilitySupportsLegacyAttributesAndPress() {
+        let rename = LegacyManagerAccessibilityElement(identifier: "rename", children: [])
+        let root = LegacyManagerAccessibilityElement(identifier: "manager", children: [rename])
+        XCTAssertTrue(CategoryManagerAccessibility.find("rename", in: root) === rename)
+        XCTAssertNil(CategoryManagerAccessibility.find("missing", in: root))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
+        XCTAssertEqual(rename.pressCount, 1)
+    }
+
+    @MainActor
+    func testCategoryManagerAccessibilitySupportsModernOnlyAndUnsupportedNodes() {
+        let rename = ModernManagerAccessibilityElement(identifier: "rename", children: [])
+        let root = ModernManagerAccessibilityElement(identifier: "manager", children: [NSObject(), rename])
+        XCTAssertTrue(CategoryManagerAccessibility.find("rename", in: root) === rename)
+        XCTAssertNil(CategoryManagerAccessibility.find("missing", in: root))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
+        XCTAssertEqual(rename.pressCount, 1)
+        XCTAssertFalse(CategoryManagerAccessibility.press(NSObject()))
+    }
+
+    @MainActor
     func testCategoryManagerReordersPreserveNativeNameDraftAndRenameGuard() async throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }
@@ -953,24 +974,6 @@ final class AppConfigurationTests: XCTestCase {
         let sheet = try XCTUnwrap(window.attachedSheet)
         let editor = try await focusedEditor(in: sheet)
         editor.insertText("Pending category", replacementRange: NSRange(location: 0, length: 0))
-        // SwiftUI's synthetic AX nodes need not declare NSAccessibilityProtocol.
-        func find(_ identifier: String, in node: NSObject, depth: Int = 0) -> NSObject? {
-            let idSelector = NSSelectorFromString("accessibilityIdentifier")
-            if node.responds(to: idSelector),
-               node.perform(idSelector)?.takeUnretainedValue() as? String == identifier { return node }
-            guard depth < 32 else { return nil }
-            let childrenSelector = NSSelectorFromString("accessibilityChildren")
-            var children: [NSObject] = []
-            if node.responds(to: childrenSelector) {
-                children = node.perform(childrenSelector)?.takeUnretainedValue() as? [NSObject] ?? []
-            }
-            if let window = node as? NSWindow, let content = window.contentView { children.append(content) }
-            if let view = node as? NSView { children.append(contentsOf: view.subviews) }
-            for child in children {
-                if let found = find(identifier, in: child, depth: depth + 1) { return found }
-            }
-            return nil
-        }
         func assertDraft() async {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(30))
@@ -988,19 +991,15 @@ final class AppConfigurationTests: XCTestCase {
         fixture.repository.failCategoryMove = true
         let back = CategoryMoveRequest(categoryID: a.id, expectedOrderIDs: [b.id, a.id], placement: .before(b.id))
         XCTAssertNil(fixture.state.moveCategory(back, in: .manager))
-        await waitUntil { find("categoryReorderError", in: sheet) != nil }
+        await waitUntil { CategoryManagerAccessibility.find("categoryReorderError", in: sheet) != nil }
         await assertDraft()
         fixture.repository.failCategoryMove = false
         guard case .changed? = fixture.state.moveCategory(back, in: .manager) else { return XCTFail("Expected retry") }
         await assertDraft()
         XCTAssertNil(fixture.state.categoryReorderIssue)
         // Activate the real Rename button, then cancel from its native field.
-        let rename = try XCTUnwrap(find("renameCategory-\(a.id)", in: sheet))
-        let pressSelector = NSSelectorFromString("accessibilityPerformPress")
-        XCTAssertTrue(rename.responds(to: pressSelector))
-        let press = unsafeBitCast(try XCTUnwrap(rename.method(for: pressSelector)),
-                                 to: (@convention(c) (AnyObject, Selector) -> Bool).self)
-        XCTAssertTrue(press(rename, pressSelector))
+        let rename = try XCTUnwrap(CategoryManagerAccessibility.find("renameCategory-\(a.id)", in: sheet))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
         await waitUntil { presentation.managerRenamingID == a.id }
         XCTAssertFalse(presentation.canReorderCategories(in: .manager, state: fixture.state))
         let renameEditor = try await focusedEditor(in: sheet)
@@ -1008,7 +1007,7 @@ final class AppConfigurationTests: XCTestCase {
         renameEditor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         await waitUntil { presentation.managerRenamingID == nil }
         XCTAssertTrue(presentation.canReorderCategories(in: .manager, state: fixture.state))
-        XCTAssertNotNil(find("newCategoryName", in: sheet))
+        XCTAssertNotNil(CategoryManagerAccessibility.find("newCategoryName", in: sheet))
     }
 
     @MainActor
@@ -2165,6 +2164,97 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, title)
     }
 
+}
+
+/// SwiftUI AX nodes on older macOS versions can implement the attribute/action
+/// API without exposing the newer protocol accessors. Keep both routes in the
+/// hosted test driver; this does not change application behavior.
+@MainActor
+private enum CategoryManagerAccessibility {
+    static func find(_ identifier: String, in root: NSObject) -> NSObject? {
+        var visited = Set<ObjectIdentifier>()
+        func visit(_ node: NSObject) -> NSObject? {
+            guard visited.insert(ObjectIdentifier(node)).inserted else { return nil }
+            let idSelector = NSSelectorFromString("accessibilityIdentifier")
+            let modernID = node.responds(to: idSelector)
+                ? node.perform(idSelector)?.takeUnretainedValue() as? String : nil
+            let supportsAttributes = node.responds(to: NSSelectorFromString("accessibilityAttributeValue:"))
+            let legacyID = supportsAttributes ? node.accessibilityAttributeValue(.identifier) as? String : nil
+            if modernID == identifier || legacyID == identifier {
+                return node
+            }
+            let childrenSelector = NSSelectorFromString("accessibilityChildren")
+            var children = node.responds(to: childrenSelector)
+                ? node.perform(childrenSelector)?.takeUnretainedValue() as? [NSObject] ?? [] : []
+            if supportsAttributes {
+                children.append(contentsOf: node.accessibilityAttributeValue(.children) as? [NSObject] ?? [])
+            }
+            if let window = node as? NSWindow, let content = window.contentView { children.append(content) }
+            if let view = node as? NSView { children.append(contentsOf: view.subviews) }
+            for child in children {
+                if let found = visit(child) { return found }
+            }
+            return nil
+        }
+        return visit(root)
+    }
+
+    static func press(_ node: NSObject) -> Bool {
+        let selector = NSSelectorFromString("accessibilityPerformPress")
+        if node.responds(to: selector), let implementation = node.method(for: selector) {
+            let action = unsafeBitCast(implementation, to: (@convention(c) (AnyObject, Selector) -> Bool).self)
+            return action(node, selector)
+        }
+        guard node.responds(to: NSSelectorFromString("accessibilityActionNames")),
+              node.responds(to: NSSelectorFromString("accessibilityPerformAction:")),
+              node.accessibilityActionNames().contains(.press) else { return false }
+        node.accessibilityPerformAction(.press)
+        return true
+    }
+}
+
+@MainActor
+private final class ModernManagerAccessibilityElement: NSObject {
+    let identifier: String
+    let children: [NSObject]
+    private(set) var pressCount = 0
+
+    init(identifier: String, children: [NSObject]) {
+        self.identifier = identifier
+        self.children = children
+    }
+
+    @objc func accessibilityIdentifier() -> String { identifier }
+    @objc func accessibilityChildren() -> [NSObject] { children }
+    @objc func accessibilityPerformPress() -> Bool {
+        pressCount += 1
+        return true
+    }
+}
+
+@MainActor
+private final class LegacyManagerAccessibilityElement: NSObject {
+    let identifier: String
+    let children: [NSObject]
+    private(set) var pressCount = 0
+
+    init(identifier: String, children: [NSObject]) {
+        self.identifier = identifier
+        self.children = children
+    }
+
+    override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+        switch attribute {
+        case .identifier: identifier
+        case .children: children
+        default: nil
+        }
+    }
+
+    override func accessibilityActionNames() -> [NSAccessibility.Action] { [.press] }
+    override func accessibilityPerformAction(_ action: NSAccessibility.Action) {
+        if action == .press { pressCount += 1 }
+    }
 }
 
 private final class TaskWindowReadFixture: NoteRepository {
