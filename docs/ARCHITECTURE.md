@@ -251,3 +251,11 @@ After a committed move, the existing `ScrollViewReader` handles `movementReveal`
 ### Scope in the Today/Later window
 
 Handles, drop targets, and Move Up/Down/To exist only on Today rows while the Today list is shown. Later rows have no handle, and their menu keeps Move to Today, whose failure uses `DailyNotesIssue.moveToToday`. History and the menu bar glance read the saved order and offer no movement. A committed move advances `historyRevision` after save (see [History read facade and invalidation](#history-read-facade-and-invalidation)).
+
+## Category reorder planning
+
+`TaskCategory.creationOrder` and SQLite `categories.creation_order` retain their legacy names but represent the mutable saved category rank, not creation chronology. Unique sparse and negative legacy ranks remain valid; reads do not compact them. New categories still append after the maximum saved rank.
+
+The pure [`CategoryMovePlanner`](../MenuPocket/Notes/CategoryMovement.swift) takes the complete custom catalog, sorts it by saved rank, and validates `CategoryMoveRequest(categoryID:expectedOrderIDs:placement:)` against that full UUID sequence, including unused categories. Placement is before/after a custom UUID; General has no row or UUID source/anchor. Duplicate catalog IDs/ranks or expected IDs, stale catalog order, missing source, and missing/self anchors reject explicitly. A changed proposal preserves category IDs, names, name keys, and every other category's relative order, assigning compact nonnegative ranks. Equivalent UUID order returns `.unchanged` before renumbering, preserving even sparse/extreme ranks. A single-category catalog has no distinct anchor and therefore rejects a reorder attempt without changes.
+
+This is the domain foundation only: no repository write, state publication, or category drag UI is connected yet. Storage must revalidate on a fresh transaction snapshot and return a changed saved catalog only after COMMIT; UI eligibility is a separate responsibility. The planner has no tasks, preferences, collapse state, or visible-group filtering as inputs.

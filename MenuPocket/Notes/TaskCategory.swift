@@ -6,12 +6,23 @@ struct TaskCategory: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     let nameKey: String
+    /// Mutable saved rank, not creation chronology. The legacy property and
+    /// SQLite `creation_order` column retain their names; gaps/negative ranks
+    /// in compatible stores are valid until an explicit changed reorder.
     let creationOrder: Int64
 
     init(id: UUID = UUID(), name: String, creationOrder: Int64) throws {
         self.id = id
         self.name = try TaskCategoryName.validate(name)
         self.nameKey = TaskCategoryName.key(for: self.name)
+        self.creationOrder = creationOrder
+    }
+
+    /// Copy validated category fields exactly, replacing only the saved rank.
+    init(_ category: TaskCategory, creationOrder: Int64) {
+        id = category.id
+        name = category.name
+        nameKey = category.nameKey
         self.creationOrder = creationOrder
     }
 }
