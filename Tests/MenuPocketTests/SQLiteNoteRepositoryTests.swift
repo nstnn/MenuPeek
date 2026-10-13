@@ -1510,11 +1510,11 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
     }
 
     func testCategoryStagingRangeChecksFinalRanksOverflowAndExhaustion() throws {
-        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [.min, .min + 2], count: 3), .min + 3)
+        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [Int64.min, Int64.min + 2], count: 3), Int64.min + 3)
         // A large arithmetic model exercises positive fallback without allocating
         // billions of categories. Final 0..<count ranks must also be excluded.
         let count = Int64.max / 2
-        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [.min, .min / 2 - 1, -2], count: count), count)
+        XCTAssertEqual(try SQLiteNoteRepository.categoryStagingStart(avoiding: [Int64.min, Int64.min / 2 - 1, -2], count: count), count)
         for count in [Int64(0), -1, .max] {
             XCTAssertThrowsError(try SQLiteNoteRepository.categoryStagingStart(avoiding: [.min, -2], count: count)) {
                 XCTAssertEqual($0 as? TaskCategoryRepositoryError, .orderExhausted)
