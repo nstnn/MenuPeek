@@ -6,7 +6,7 @@ import Foundation
 // Quick Add panel against isolated storage:
 //   --data DIR             fixture.sqlite, day-offset, and the fail-open flag live here
 //   --defaults-suite NAME  every preference, category choice, and onboarding marker
-//   --seed empty|basic     only applied when fixture.sqlite does not exist yet
+//   --seed empty|basic|category-reordering (only on a new database)
 //   --now ISO8601          optional fixed instant (default: the real clock)
 //   --tz IDENTIFIER        optional time zone (default: the Mac's)
 // System boundaries are faked: login items always report disabled, and the
@@ -89,6 +89,25 @@ private func seedBasic(_ repository: SQLiteNoteRepository, day: NoteDay) throws 
     try repository.addLater(LaterTask(id: UUID(), text: "Read the SQLite docs", createdAt: now, completedAt: nil))
 }
 
+private func seedCategoryReordering(_ repository: SQLiteNoteRepository, day: NoteDay) throws {
+    try seedBasic(repository, day: day)
+    _ = try repository.createCategory(name: "Unused")
+    let learning = try repository.createCategory(name: "Learning and personal development with a long category name")
+    let now = day.now()
+    for index in 1...24 {
+        try repository.add(Note(id: UUID(), text: "Practice exercise \(index)", dayKey: day.keys().today,
+                                createdAt: now, completedAt: index == 1 ? now : nil, categoryID: learning.id))
+    }
+    let errands = try repository.categories().first { $0.name == "Errands" }!
+    for category in [errands, learning] {
+        try repository.addLater(LaterTask(id: UUID(), text: "Future practice: \(category.name)",
+                                         createdAt: now, completedAt: nil, categoryID: category.id))
+        try repository.add(Note(id: UUID(), text: "Previous practice: \(category.name)",
+                                dayKey: day.keys().yesterday, createdAt: now,
+                                completedAt: nil, categoryID: category.id))
+    }
+}
+
 @main struct FixtureMain {
     @MainActor static func main() throws {
         let options = Options(arguments: CommandLine.arguments)
@@ -119,6 +138,7 @@ private func seedBasic(_ repository: SQLiteNoteRepository, day: NoteDay) throws 
             // Opening runs the production migrations on a new or older store.
             let repository = try SQLiteNoteRepository(databaseURL: database)
             if isNew, options.seed == "basic" { try seedBasic(repository, day: day) }
+            if isNew, options.seed == "category-reordering" { try seedCategoryReordering(repository, day: day) }
         }
         log("database \(database.path) new=\(isNew) seed=\(isNew ? options.seed : "kept") today=\(day.keys().today)")
 

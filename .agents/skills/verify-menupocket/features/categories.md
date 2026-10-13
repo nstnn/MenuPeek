@@ -24,6 +24,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 Preconditions:
 
 - A fresh run launched with `--seed basic`, with categories `Work` and `Errands`.
+- For final category native acceptance, use `--seed category-reordering` instead: the basic data plus `Unused`, a long-name Learning group with 24 Today tasks (one completed), Later tasks in Errands/Learning, and yesterday tasks in those two categories. This gives three populated custom groups, an empty manager row and a tall scroll case. Seed only a new database; relaunch the same run without reseeding. Work's manager preview remains 4; Learning's is 26, including completed tasks.
 - `$F snapshot <run> before` has been taken.
 
 - **Open manager.** Run `$F ax <run> press id=manageCategories` and `$F ax <run> wait id=categoryList`. A sheet headed `Manage categories` shows `id=generalCategory`, rows `id^=categoryRow-`, a focused `id=newCategoryName`, a disabled `id=createCategory`, and `id=doneManagingCategories`. Behind the sheet, `addTask` and the group headers are `[disabled]`.
