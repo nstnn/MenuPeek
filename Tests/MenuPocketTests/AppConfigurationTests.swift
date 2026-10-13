@@ -2232,7 +2232,6 @@ private final class ModernManagerAccessibilityElement: NSObject {
     }
 }
 
-@MainActor
 private final class LegacyManagerAccessibilityElement: NSObject {
     let identifier: String
     let children: [NSObject]
