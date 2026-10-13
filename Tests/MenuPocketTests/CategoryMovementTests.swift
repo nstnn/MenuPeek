@@ -16,6 +16,34 @@ final class CategoryMovementTests: XCTestCase {
         }
     }
 
+    func testDropRoutingUsesVisibleUUIDAnchorsAndFullCatalog() throws {
+        let saved = try categories
+        let payload = CategoryDragSession.Payload(token: UUID(), categoryID: personalID,
+                                                  context: .list(.today), catalog: saved)
+        func route(_ group: TaskGroupID, upper: Bool, context: CategoryReorderContext = .list(.today),
+                   catalog: [TaskCategory]? = nil) -> CategoryMoveRequest? {
+            CategoryDropRouting.request(payload: payload, context: context, group: group,
+                                        firstCustomID: workID, upperHalf: upper, categories: catalog ?? saved)
+        }
+        let first = try XCTUnwrap(route(.category(workID), upper: true))
+        XCTAssertEqual(first.expectedOrderIDs, saved.map(\.id))
+        XCTAssertEqual(first.placement, .before(workID))
+        XCTAssertEqual(route(.general, upper: false), first)
+        XCTAssertNil(route(.general, upper: true))
+        XCTAssertEqual(route(.category(learningID), upper: false)?.placement, .after(learningID))
+        XCTAssertNil(route(.category(personalID), upper: true), "Source cannot anchor itself")
+        XCTAssertNil(route(.category(UUID()), upper: false))
+        XCTAssertNil(route(.category(workID), upper: true, context: .list(.later)))
+        XCTAssertNil(route(.category(workID), upper: true, context: .manager))
+        XCTAssertNil(route(.category(workID), upper: true, catalog: Array(saved.reversed())))
+        guard case let .changed(result) = CategoryMovePlanner.plan(first, categories: saved) else {
+            return XCTFail("Expected changed move")
+        }
+        XCTAssertEqual(result.map(\.id), [personalID, workID, emptyID, learningID])
+        let equivalent = try XCTUnwrap(route(.category(emptyID), upper: false))
+        XCTAssertEqual(CategoryMovePlanner.plan(equivalent, categories: saved), .unchanged)
+    }
+
     func testBeforeAfterAndFirstLastPlacementsPreserveCategoryFields() throws {
         let saved = try categories
         let cases: [(UUID, CategoryMovePlacement, [UUID])] = [

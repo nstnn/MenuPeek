@@ -146,3 +146,141 @@ final class TaskDropTargetView: NSView {
         }
     }
 }
+
+/// Anchors come from visible groups; the payload always retains the full catalog.
+enum CategoryDropRouting {
+    static func request(payload: CategoryDragSession.Payload, context: CategoryReorderContext,
+                        group: TaskGroupID, firstCustomID: UUID?, upperHalf: Bool,
+                        categories: [TaskCategory]) -> CategoryMoveRequest? {
+        guard payload.context == context, payload.catalog == categories else { return nil }
+        let placement: CategoryMovePlacement
+        switch group {
+        case .general:
+            guard !upperHalf, let firstCustomID else { return nil }
+            placement = .before(firstCustomID)
+        case let .category(id):
+            placement = upperHalf ? .before(id) : .after(id)
+        }
+        let request = payload.request(placement)
+        // Equivalent positions stay valid native destinations, but never write.
+        if case .rejected = CategoryMovePlanner.plan(request, categories: categories) { return nil }
+        return request
+    }
+}
+
+struct CategoryDropTarget: NSViewRepresentable {
+    let state: DailyNotesState
+    let session: CategoryDragSession
+    let context: CategoryReorderContext
+    let group: TaskGroupID
+    let firstCustomID: UUID?
+    var bottomInset: CGFloat = 0
+
+    func makeNSView(context: Context) -> CategoryDropTargetView { CategoryDropTargetView(frame: .zero) }
+    func updateNSView(_ view: CategoryDropTargetView, context: Context) {
+        view.state = state
+        view.session = session
+        view.context = self.context
+        view.group = group
+        view.firstCustomID = firstCustomID
+        view.bottomInset = bottomInset
+        view.needsDisplay = true
+    }
+    static func dismantleNSView(_ view: CategoryDropTargetView, coordinator: ()) {
+        view.clearFeedback()
+        view.unregisterDraggedTypes()
+    }
+}
+
+@MainActor
+final class CategoryDropTargetView: NSView {
+    weak var state: DailyNotesState?
+    var session: CategoryDragSession?
+    var context: CategoryReorderContext = .list(.today)
+    var group: TaskGroupID = .general
+    var firstCustomID: UUID?
+    var bottomInset: CGFloat = 0
+    private var offeredRequest: CategoryMoveRequest?
+    private var boundaryY: CGFloat?
+    private var ownsScrolling = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([CategoryDragSession.pasteboardType])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard session?.active?.context == context else { return nil }
+        return super.hitTest(point)
+    }
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { update(sender) }
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { update(sender) }
+    override func wantsPeriodicDraggingUpdates() -> Bool { true }
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) { clearFeedback() }
+    override func draggingEnded(_ sender: any NSDraggingInfo) { clearFeedback() }
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { update(sender) == .move }
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        defer { session?.cancel(); clearFeedback() }
+        guard let state, let session,
+              let payload = session.validatedPayload(for: sender, state: state),
+              let request = resolvedRequest(sender, payload: payload),
+              session.consume(payload, state: state) else { return false }
+        switch state.moveCategory(request, in: context) {
+        case .changed?, .unchanged?: return true
+        default: return false
+        }
+    }
+    private func resolvedRequest(_ sender: any NSDraggingInfo,
+                                 payload: CategoryDragSession.Payload) -> CategoryMoveRequest? {
+        guard let state, window != nil, sender.draggingSourceOperationMask.contains(.move) else { return nil }
+        let point = convert(sender.draggingLocation, from: nil)
+        guard bounds.contains(point) else { return nil }
+        let upper = point.y < (bounds.height - bottomInset) / 2
+        let request = CategoryDropRouting.request(payload: payload, context: context, group: group,
+                                                  firstCustomID: firstCustomID, upperHalf: upper,
+                                                  categories: state.categories)
+        boundaryY = upper ? 1 : bounds.maxY - bottomInset - 1
+        return request
+    }
+    private func update(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let state, let session,
+              let payload = session.validatedPayload(for: sender, state: state),
+              payload.context == context else {
+            clearFeedback(); return []
+        }
+        // A tall source group may fill the viewport. Its self-anchor is invalid,
+        // but the authorized pointer must still scroll to reach another group.
+        session.startScrolling(in: enclosingScrollView, state: state)
+        ownsScrolling = true
+        guard let request = resolvedRequest(sender, payload: payload) else {
+            clearFeedback(stopScroll: false); return []
+        }
+        offeredRequest = request
+        session.hoveredRequest = request
+        needsDisplay = true
+        return .move
+    }
+    func clearFeedback(stopScroll: Bool = true) {
+        let hasNewOwner = session?.hoveredRequest != nil && session?.hoveredRequest != offeredRequest
+        if !hasNewOwner {
+            session?.hoveredRequest = nil
+            if stopScroll && ownsScrolling { session?.stopScrolling() }
+        }
+        if stopScroll { ownsScrolling = false }
+        offeredRequest = nil
+        boundaryY = nil
+        needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        guard session?.active != nil, let offeredRequest,
+              session?.hoveredRequest == offeredRequest, let boundaryY else { return }
+        NSColor.controlAccentColor.setStroke()
+        let line = NSBezierPath()
+        line.move(to: NSPoint(x: 0, y: boundaryY))
+        line.line(to: NSPoint(x: bounds.maxX, y: boundaryY))
+        line.lineWidth = 2
+        line.stroke()
+    }
+}

@@ -44,7 +44,7 @@ Preconditions:
 
 ## Category hold sources (TASK-006)
 
-Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories source mounting and accepting category drops are later cards; TASK-006 starts transient drags only and saves nothing.
+Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories source/target mounting remains TASK-008. Today/Later accept category drops through TASK-007; source start alone saves nothing.
 
 On an isolated fixture, use actual pointer input with the window active:
 
@@ -55,3 +55,17 @@ On an isolated fixture, use actual pointer input with the window active:
 5. Close/reopen the window, switch destination, or begin editing: candidates lose authorization. A native reservation remains until AppKit source-end; another task/category drag cannot overlap it. After native end, a fresh drag can start.
 
 Take before/after SQLite and defaults snapshots; category ranks and task fields must be identical, and collapse defaults must match after explicitly restoring short-click checks. `mpax press` proves accessibility disclosure only; it cannot establish pointer hold timing or native drag. Hosted lifecycle tests are supporting evidence; unobserved physical gestures remain Not tested for TASK-010. Save the exact source/artifact identity and clean the fixture after every session.
+
+## Category drop routing (TASK-007)
+
+On Today/Later, hold a custom header or its empty outer padding, then drag over the upper/lower half of another visible group. The accent insertion line appears at that group's top/bottom boundary, outside task rows. The gap after General offers before the first visible custom UUID; the upper half of General rejects drops. Gaps after custom groups offer after that UUID. Hidden categories remain in the full saved catalog with UUID anchors; they do not appear as empty targets. General has no category source. Task handles and targets remain separate.
+
+Using an identified isolated fixture, take before/after snapshots for these physical checks:
+
+1. Move Errands before Work on Today; confirm the new visible order and `categories.creation_order`, with General first. Collapse a source first and confirm it stays collapsed after moving.
+2. On Later, use at least two populated custom categories (create a fictional task through the composer if needed). Reorder first/last custom groups and check Today, picker and retained History consume the same saved order.
+3. Hold a tall-group header/background, move near viewport edges, and observe clamped scrolling and insertion feedback recomputed after scrolling. After a changed save only, its small header target is revealed without expanding or taking text focus.
+4. Escape, leave the authorized list, release outside, and drop at an equivalent position: ranks, revision, collapse and drafts stay unchanged. A new hold/drop must work after native source-end. Exercise edit/removal/context guards and an injected failed repository save in focused hosted tests; native failure/retry remains TASK-010 when a UI failure fixture is available.
+5. Verify task checkbox, text selection, Actions, composer and existing task pointer drag coexist. Quit/relaunch the same fixture without reseeding and compare saved category order, task rows and scoped defaults.
+
+`mpax` cannot generate category drags. Callback tests prove routing/authorization/storage dispatch, not native negotiation or physical scrolling. Record each physical case as observed Pass/Fail or Not tested; broader final acceptance remains TASK-010. Clean fixtures and Debug hosts even when access fails.

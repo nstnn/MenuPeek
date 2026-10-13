@@ -217,9 +217,20 @@ struct TaskWindowView: View {
                         } else {
                             // Tall groups must keep stable geometry while scrolling/revealing.
                             // Lazy group layout can spin SwiftUI's update graph on macOS.
-                            VStack(alignment: .leading, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 0) {
                                 ForEach(groups) { group in
                                     groupSurface(group)
+                                        .padding(.bottom, 24)
+                                        .overlay {
+                                            CategoryDropTarget(state: state, session: presentation.categoryDragSession,
+                                                               context: .list(destination), group: group.id,
+                                                               firstCustomID: groups.compactMap { group -> UUID? in
+                                                                   if case let .category(id) = group.id { return id }
+                                                                   return nil
+                                                               }.first,
+                                                               bottomInset: 24)
+                                                .accessibilityHidden(true)
+                                        }
                                         .id(group.id)
                                 }
                             }
@@ -264,6 +275,16 @@ struct TaskWindowView: View {
             .disabled(presentation.deletionTarget != nil || presentation.isManagingCategories)
             .contentShape(Rectangle())
             .gesture(TapGesture().onEnded { clearFocus() }, including: .gesture)
+            .onChange(of: presentation.categoryMovementReveal) { _, request in
+                guard let request, request.context == .list(destination) else { return }
+                Task { @MainActor in
+                    defer { presentation.consumeCategoryMovementReveal(request) }
+                    await Task.yield()
+                    guard presentation.isCategoryMovementRevealValid(request, state: state) else { return }
+                    // The header has its own small target, even for very tall groups.
+                    scroll.scrollTo("categoryHeader-\(request.categoryID)")
+                }
+            }
             .onChange(of: presentation.movementReveal) { _, request in
                 guard let request else { return }
                 let ownership = focusRequestID
@@ -677,6 +698,7 @@ struct TaskWindowView: View {
         let collapsed = state.categoryPreferences.isCollapsed(group.id, in: destination)
         return VStack(alignment: .leading, spacing: 0) {
             groupHeader(group, collapsed: collapsed)
+                .id("categoryHeader-\(group.id.storageKey)")
                 .overlay { dropTarget(group.id) }
             // Remove collapsed rows from keyboard and accessibility traversal.
             if !collapsed {
