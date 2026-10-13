@@ -55,8 +55,8 @@ final class TaskHistoryIntegrationTests: XCTestCase {
                                   placement: .endOfGroup)
         guard case .changed? = daily.moveTask(move) else { return XCTFail("Expected saved category move") }
         XCTAssertTrue(presentation.showHistory(state: daily))
-        XCTAssertEqual(history.detailGroups.map(\.group.name), ["Work", "General"])
-        XCTAssertEqual(history.detailGroups.map { $0.visibleNotes.map(\.id) }, [[a.id], [b.id]])
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "Work"])
+        XCTAssertEqual(history.detailGroups.map { $0.visibleNotes.map(\.id) }, [[b.id], [a.id]])
         XCTAssertEqual(history.progress, daily.availableProgress)
     }
 
@@ -106,9 +106,9 @@ final class TaskHistoryIntegrationTests: XCTestCase {
             try assertEveryCellMatchesDetail(history)
         }
         try history.select(GregorianDay(key: "2026-09-30"))
-        XCTAssertEqual(history.detailGroups.map(\.group.name), ["Work", "General"])
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "Work"])
         XCTAssertEqual(history.detailGroups.map(\.group.progress),
-                       [NoteProgress(completed: 1, total: 2), NoteProgress(completed: 1, total: 1)])
+                       [NoteProgress(completed: 1, total: 1), NoteProgress(completed: 1, total: 2)])
 
         XCTAssertTrue(presentation.showUnfinished(state: daily))
         let unfinished = try XCTUnwrap(presentation.unfinishedState)
@@ -152,7 +152,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         XCTAssertTrue(daily.saveEdit())
         XCTAssertTrue(daily.delete(id: ids[2]))
         XCTAssertEqual(try refreshed()?.countText, "1/2")
-        XCTAssertEqual(history.detailGroups.flatMap(\.visibleNotes).map(\.text), ["Today A", "Today B edited"])
+        XCTAssertEqual(history.detailGroups.flatMap(\.visibleNotes).map(\.text), ["Today B edited", "Today A"])
 
         // Rejected writes do not publish a revision or change counts.
         let revision = daily.historyRevision
@@ -165,7 +165,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         XCTAssertNotNil(daily.renameCategory(id: work.id, name: "Projects"))
         presentation.refreshBrowser(state: daily)
         try history.select(GregorianDay(key: "2026-09-30"))
-        XCTAssertEqual(history.detailGroups.map(\.group.name), ["Projects", "General"])
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "Projects"])
         XCTAssertTrue(daily.removeCategory(id: work.id))
         presentation.refreshBrowser(state: daily)
         XCTAssertEqual(history.detailGroups.map(\.group.name), ["General"])
@@ -308,8 +308,14 @@ final class TaskHistoryIntegrationTests: XCTestCase {
                 XCTAssertEqual(history.progress, day.availability.progress, day.id, file: file, line: line)
                 XCTAssertEqual(history.daySnapshot?.groups.reduce(0) { $0 + $1.progress.total },
                                day.availability.progress?.total, day.id, file: file, line: line)
-                XCTAssertEqual(history.detailGroups.flatMap(\.visibleNotes),
-                               history.daySnapshot?.filteredNotes(filter), day.id, file: file, line: line)
+                let filtered = try XCTUnwrap(history.daySnapshot?.filteredNotes(filter), file: file, line: line)
+                XCTAssertEqual(Set(history.detailGroups.flatMap(\.visibleNotes).map(\.id)),
+                               Set(filtered.map(\.id)), day.id, file: file, line: line)
+                for detail in history.detailGroups {
+                    XCTAssertEqual(detail.visibleNotes,
+                                   filtered.filter { TaskGroupID(categoryID: $0.categoryID) == detail.group.id },
+                                   day.id, file: file, line: line)
+                }
                 XCTAssertEqual(history.monthSummaries, summaries, day.id, file: file, line: line)
             }
             XCTAssertEqual(try monthGrid(history).cells.map(\.id), grid.cells.map(\.id), file: file, line: line)

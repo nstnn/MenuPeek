@@ -297,11 +297,11 @@ final class DailyNotesStateTests: XCTestCase {
         let presentation = state.taskWindowPresentation
 
         let moves = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state))
-        XCTAssertEqual(moves.destinations.map(\.title), ["Work", "Home", "General"])
-        XCTAssertEqual(moves.destinations.map(\.isCurrent), [true, false, false])
-        XCTAssertNil(moves.destinations[0].request, "The current group is marked, not offered")
-        XCTAssertEqual(moves.destinations[1].request?.placement, .endOfGroup)
-        XCTAssertEqual(moves.destinations[2].request?.destinationGroup, .general)
+        XCTAssertEqual(moves.destinations.map(\.title), ["General", "Work", "Home"])
+        XCTAssertEqual(moves.destinations.map(\.isCurrent), [false, true, false])
+        XCTAssertNil(moves.destinations[1].request, "The current group is marked, not offered")
+        XCTAssertEqual(moves.destinations[2].request?.placement, .endOfGroup)
+        XCTAssertEqual(moves.destinations[0].request?.destinationGroup, .general)
         XCTAssertEqual(moves.moveUp?.placement, .before(w1.id))
         XCTAssertEqual(moves.moveDown?.placement, .after(w3.id))
         XCTAssertNil(presentation.menuMoves(for: w1.id, state: state)?.moveUp, "Top of its group")
@@ -309,7 +309,7 @@ final class DailyNotesStateTests: XCTestCase {
         let general = try XCTUnwrap(presentation.menuMoves(for: g1.id, state: state))
         XCTAssertNil(general.moveUp, "Another group's rows are not neighbours")
         XCTAssertNil(general.moveDown)
-        XCTAssertEqual(general.destinations.map(\.isCurrent), [false, false, true])
+        XCTAssertEqual(general.destinations.map(\.isCurrent), [true, false, false])
 
         let progress = state.availableProgress
         XCTAssertEqual(state.moveTask(try XCTUnwrap(moves.moveUp)).map(isChanged), true)
@@ -320,7 +320,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.notes.map(\.id), [w1.id, w2.id, g1.id, w3.id])
 
         state.categoryPreferences.setCollapsed(true, for: .category(home.id))
-        let toHome = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.destinations[1].request)
+        let toHome = try XCTUnwrap(presentation.menuMoves(for: w2.id, state: state)?.destinations[2].request)
         XCTAssertEqual(state.moveTask(toHome).map(isChanged), true)
         let moved = try XCTUnwrap(state.notes.first { $0.id == w2.id })
         XCTAssertEqual(moved.categoryID, home.id)
@@ -329,7 +329,47 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertFalse(state.categoryPreferences.isCollapsed(.category(home.id)))
         XCTAssertEqual(presentation.movementReveal?.taskID, w2.id)
         XCTAssertEqual(presentation.menuMoves(for: w2.id, state: state)?.destinations.map(\.isCurrent),
-                       [false, true, false])
+                       [false, false, true])
+    }
+
+    func testSavedCategoryRankRefreshPreservesDraftChoicesAndMoveToSemantics() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 8)
+        let home = try TaskCategory(name: "Home", creationOrder: 20)
+        let empty = try TaskCategory(name: "Empty", creationOrder: 40)
+        let w1 = categorized("W1", work, createdAt: 1)
+        let g1 = note("G1", day: w1.dayKey, createdAt: 2)
+        let store = FakeNoteRepository(notes: [w1, g1], categories: [work, home, empty])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.draft = "Pending Today"
+        state.draftCategoryID = work.id
+        state.laterDraft = "Pending Later"
+        state.laterDraftCategoryID = home.id
+        state.categoryPreferences.rememberLastUsed(work.id)
+        state.categoryPreferences.rememberLastUsed(home.id, in: .later)
+        state.categoryPreferences.setCollapsed(true, for: .category(work.id))
+        let notes = state.notes
+        let progress = state.availableProgress
+
+        store.savedCategories = [empty, TaskCategory(home, creationOrder: -5), work]
+        state.refresh()
+        let moves = try XCTUnwrap(state.taskWindowPresentation.menuMoves(for: w1.id, state: state))
+        XCTAssertEqual(moves.destinations.map(\.title), ["General", "Home", "Work", "Empty"])
+        XCTAssertEqual(moves.destinations.map(\.isCurrent), [false, false, true, false])
+        XCTAssertEqual(moves.destinations[0].request?.destinationGroup, .general)
+        XCTAssertEqual(moves.destinations[1].request?.destinationGroup, .category(home.id))
+        XCTAssertNil(moves.destinations[2].request)
+        XCTAssertEqual(moves.destinations[3].request?.destinationGroup, .category(empty.id))
+        XCTAssertTrue(moves.destinations.compactMap(\.request).allSatisfy { $0.placement == .endOfGroup })
+        XCTAssertEqual(state.notes, notes)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertEqual(state.draft, "Pending Today")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.laterDraft, "Pending Later")
+        XCTAssertEqual(state.laterDraftCategoryID, home.id)
+        XCTAssertEqual(state.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(state.categoryPreferences.laterLastUsedCategoryID, home.id)
+        XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
     }
 
     func testMenuMovesAreDisabledBehindGuardsAndAbsentForUnknownTasks() throws {
@@ -373,7 +413,7 @@ final class DailyNotesStateTests: XCTestCase {
                                     dayKey: w2.dayKey, notes: state.notes, categories: state.categories)
         }
         XCTAssertEqual(moves.moveUp, drop(.category(work.id), anchor: w1.id, upper: true))
-        XCTAssertEqual(moves.destinations.last?.request, drop(.general, anchor: nil, upper: false))
+        XCTAssertEqual(moves.destinations.first?.request, drop(.general, anchor: nil, upper: false))
     }
 
     func testSavedMovementRevealIsSupersededAndCancelledByNewAction() throws {
@@ -1286,8 +1326,8 @@ final class DailyNotesStateTests: XCTestCase {
             XCTAssertNotNil(state.renameCategory(id: home.id, name: "Household"))
             state.categoryPreferences.setCollapsed(true, for: .category(work.id))
             state.categoryPreferences.setCollapsed(true, for: .general)
-            XCTAssertEqual(state.groups.map(\.name), ["Work", "Household", "General"])
-            XCTAssertEqual(groupTexts(state), [["Fourth"], ["First", "Second"], ["General task"]])
+            XCTAssertEqual(state.groups.map(\.name), ["General", "Work", "Household"])
+            XCTAssertEqual(groupTexts(state), [["General task"], ["Fourth"], ["First", "Second"]])
             assertGroupCounts(state, equal: NoteProgress(completed: 1, total: 4))
             expectedNotes = state.notes
             expectedGroups = state.groups
@@ -1397,10 +1437,10 @@ final class DailyNotesStateTests: XCTestCase {
         state.startup()
         let daily = NoteProgress(completed: 2, total: 4)
 
-        // Home has no tasks today, so only Work and then General appear.
+        // Home has no tasks today, so only General and then Work appear.
         XCTAssertEqual(state.availableCategories, [work, home])
-        XCTAssertEqual(state.groups.map(\.id), [.category(work.id), .general])
-        XCTAssertEqual(groupTexts(state), [["Report", "Reply"], ["Groceries", "Desk"]])
+        XCTAssertEqual(state.groups.map(\.id), [.general, .category(work.id)])
+        XCTAssertEqual(groupTexts(state), [["Groceries", "Desk"], ["Report", "Reply"]])
         assertGroupCounts(state, equal: daily)
 
         // Collapsing changes no group or daily count.
@@ -1413,12 +1453,12 @@ final class DailyNotesStateTests: XCTestCase {
         state.beginEditing(id: reply.id)
         state.editCategoryID = nil
         XCTAssertTrue(state.saveEdit())
-        XCTAssertEqual(groupTexts(state), [["Report"], ["Groceries", "Reply", "Desk"]])
+        XCTAssertEqual(groupTexts(state), [["Groceries", "Reply", "Desk"], ["Report"]])
         assertGroupCounts(state, equal: daily)
 
         XCTAssertNotNil(state.renameCategory(id: work.id, name: "Office"))
-        XCTAssertEqual(state.groups.first?.id, .category(work.id))
-        XCTAssertEqual(state.groups.first?.name, "Office")
+        XCTAssertEqual(state.groups.last?.id, .category(work.id))
+        XCTAssertEqual(state.groups.last?.name, "Office")
         XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id)))
 
         XCTAssertTrue(state.removeCategory(id: work.id))
@@ -1555,7 +1595,7 @@ final class DailyNotesStateTests: XCTestCase {
         store.failWrite = nil
         XCTAssertTrue(state.saveEdit())
         XCTAssertEqual(preferences.collapsedGroupIDs, [.general])
-        XCTAssertEqual(groupTexts(state), [["Rejected"], ["General task, edited"], ["Captured"]])
+        XCTAssertEqual(groupTexts(state), [["Captured"], ["Rejected"], ["General task, edited"]])
 
         // Moving a task back into a collapsed General shows General too.
         state.beginEditing(id: saved.id)
@@ -2650,7 +2690,7 @@ final class DailyNotesStateTests: XCTestCase {
         // Row-menu Move Up within Work.
         let menu = try XCTUnwrap(first.taskWindowPresentation.menuMoves(for: try id("W3", in: first), state: first))
         XCTAssertTrue(isChanged(try XCTUnwrap(first.moveTask(try XCTUnwrap(menu.moveUp)))))
-        XCTAssertEqual(groupTexts(first), [["W1", "W3", "W2"], ["S1"], ["G1"]])
+        XCTAssertEqual(groupTexts(first), [["G1"], ["W1", "W3", "W2"], ["S1"]])
         // Drop-shaped request: completed task after an anchor in the collapsed Study group.
         let w2 = try XCTUnwrap(original[try id("W2", in: first)])
         let s1 = try id("S1", in: first)
@@ -2669,7 +2709,7 @@ final class DailyNotesStateTests: XCTestCase {
                        .unchanged)
 
         let expectedOrder = ["W1", "W3", "S1", "W2", "G1"]
-        let expectedGroups = [["W3"], ["S1", "W2"], ["G1"], ["W1"]]
+        let expectedGroups = [["W1"], ["W3"], ["S1", "W2"], ["G1"]]
         XCTAssertEqual(first.notes.map(\.text), expectedOrder)
         XCTAssertEqual(groupTexts(first), expectedGroups)
         for moved in first.notes {
@@ -2705,18 +2745,18 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(second.addDraft())
         XCTAssertEqual(second.add(text: "Quick"), .added)
         XCTAssertEqual(second.categoryPreferences.lastUsedCategoryID, work.id)
-        XCTAssertEqual(groupTexts(second), [["W3", "W4"], ["S1", "W2"], ["G1"], ["W1", "Quick"]])
+        XCTAssertEqual(groupTexts(second), [["W1", "Quick"], ["W3", "W4"], ["S1", "W2"], ["G1"]])
         // Category-only Edit keeps S1's daily rank, unlike an explicit Move To (append).
         second.beginEditing(id: try id("S1", in: second))
         second.editCategoryID = work.id
         XCTAssertTrue(second.saveEdit())
-        XCTAssertEqual(groupTexts(second), [["W3", "S1", "W4"], ["W2"], ["G1"], ["W1", "Quick"]])
+        XCTAssertEqual(groupTexts(second), [["W1", "Quick"], ["W3", "S1", "W4"], ["W2"], ["G1"]])
         XCTAssertTrue(second.setCompleted(id: try id("W3", in: second), completed: true))
         XCTAssertTrue(second.delete(id: try id("W1", in: second)))
         XCTAssertEqual(second.notes.map(\.text), ["W3", "S1", "W2", "G1", "W4", "Quick"])
         // Removal merges Work into General in saved daily order.
         XCTAssertTrue(second.removeCategory(id: work.id))
-        XCTAssertEqual(groupTexts(second), [["W2"], ["G1"], ["W3", "S1", "W4", "Quick"]])
+        XCTAssertEqual(groupTexts(second), [["W3", "S1", "W4", "Quick"], ["W2"], ["G1"]])
         XCTAssertEqual(second.availableProgress, NoteProgress(completed: 2, total: 6))
         assertGroupCounts(second, equal: NoteProgress(completed: 2, total: 6))
 

@@ -117,9 +117,9 @@ final class MenuBarGlanceTests: XCTestCase {
         let windowOrder = groups.flatMap(\.notes).filter { !$0.isCompleted }
         guard case let .tasks(rows, overflowCount) = glance.body else { return XCTFail("Expected rows") }
         XCTAssertEqual(rows.map(\.id), Array(windowOrder.prefix(5).map(\.id)))
-        XCTAssertEqual(rows.map(\.title), ["Reply to Minh", "Review PR 48", "Buy oat milk",
-                                           "Call the bank", "Standup"])
-        XCTAssertEqual(rows.map(\.categoryName), ["Work", "Work", "Home", "Home", "General"])
+        XCTAssertEqual(rows.map(\.title), ["Standup", "Water plants", "Reply to Minh",
+                                           "Review PR 48", "Buy oat milk"])
+        XCTAssertEqual(rows.map(\.categoryName), ["General", "General", "Work", "Work", "Home"])
         XCTAssertEqual(overflowCount, 1)
     }
 
@@ -162,7 +162,7 @@ final class MenuBarGlanceTests: XCTestCase {
         let glance = glance(notes: [note("Hidden in Work", work), note("Hidden in General", nil)],
                             categories: [work])
 
-        XCTAssertEqual(rows(glance).map(\.title), ["Hidden in Work", "Hidden in General"])
+        XCTAssertEqual(rows(glance).map(\.title), ["Hidden in General", "Hidden in Work"])
     }
 
     func testLongAndMultilineTextIsOneTruncatedLineWithTheFullTextAsTooltip() {

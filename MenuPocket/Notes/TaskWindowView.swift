@@ -862,14 +862,13 @@ struct TaskWindowView: View {
     }
 
     /// Binds the visible draft's selection in state; nil is General, listed
-    /// last as in Today. With keyboard focus, Up and Down step the selection.
+    /// first as in Today. With keyboard focus, Up and Down step the selection.
     /// Return does nothing here, so choosing a category never saves the draft.
     private func categoryPicker(editing: Bool) -> some View {
         Picker("Category", selection: categoryBinding(editing: editing)) {
-            ForEach(state.categories) { category in
-                Text(category.name).tag(UUID?.some(category.id))
+            ForEach(TaskCategoryOption.ordered(categories: state.categories)) { option in
+                Text(option.name).tag(option.categoryID)
             }
-            Text(TaskCategoryName.general).tag(UUID?.none)
         }
         .focusable()
         .keyboardFocusAppearance()
@@ -887,7 +886,7 @@ struct TaskWindowView: View {
     }
 
     private func stepCategory(by offset: Int, editing: Bool) {
-        let options = state.categories.map { UUID?.some($0.id) } + [nil]
+        let options = TaskCategoryOption.ordered(categories: state.categories).map(\.categoryID)
         let current = categoryBinding(editing: editing).wrappedValue
         guard state.availableCategories != nil, let index = options.firstIndex(of: current) else { return }
         let next = options[min(max(index + offset, 0), options.count - 1)]
