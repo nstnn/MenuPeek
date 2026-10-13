@@ -103,7 +103,7 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - origin.x, point.y - origin.y) >= Self.movementDistance else { return }
         guard phase == .armed else { cancelCandidate(); return }
-        guard isEligible, let total = count?(), let categoryID, let state, let session,
+        guard isEligible, let total = count?(), isEligible, let categoryID, let state, let session,
               let payload = session.begin(categoryID: categoryID, context: context, state: state, source: self) else {
             cancelCandidate(); return
         }
