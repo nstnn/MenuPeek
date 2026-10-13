@@ -27,6 +27,78 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+
+    func testCommittedCategoryOrderReloadsRetainedHistoryAndPreservesTasksAcrossFailureRetryAndReopen() throws {
+        let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let a = try repository.createCategory(name: "A")
+        let b = try repository.createCategory(name: "B")
+        let empty = try repository.createCategory(name: "Unused")
+        for key in ["2026-10-05", "2026-10-06"] {
+            try repository.add(note("General", key, done: false, categoryID: nil))
+            try repository.add(note("A completed", key, done: true, categoryID: a.id))
+            try repository.add(note("B open", key, done: false, categoryID: b.id))
+        }
+        try repository.addLater(LaterTask(id: UUID(), text: "Later B", createdAt: Date(timeIntervalSince1970: 3),
+                                          completedAt: nil, categoryID: b.id))
+        let (daily, _) = makeApp(repository: repository)
+        let presentation = daily.taskWindowPresentation
+        defer { presentation.stopForTermination(); daily.stopForTermination() }
+        daily.startup()
+        presentation.setWindowVisible(true, state: daily)
+        daily.draft = "Today draft"
+        daily.draftCategoryID = empty.id
+        daily.laterDraft = "Later draft"
+        daily.laterDraftCategoryID = a.id
+        for destination in [TaskListDestination.today, .later] {
+            daily.categoryPreferences.setCollapsed(true, for: .category(b.id), in: destination)
+        }
+        let defaultsBefore = defaults.persistentDomain(forName: suite) as NSDictionary?
+        let taskRows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let laterRows = try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid")
+        let categoryFields = try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid")
+        let schema = try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        let history = try XCTUnwrap(presentation.historyState)
+        try history.select(GregorianDay(key: "2026-10-05"))
+        let snapshot = try XCTUnwrap(history.daySnapshot)
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "A", "B"])
+        XCTAssertTrue(presentation.showToday(state: daily))
+        let revision = daily.historyRevision
+        let request = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id, empty.id], placement: .before(a.id))
+        // A real SQLite failure must roll back without publishing or invalidating History.
+        try executeRaw("CREATE TRIGGER fail_category_reorder BEFORE UPDATE OF creation_order ON categories BEGIN SELECT RAISE(ABORT, 'injected reorder failure'); END")
+        XCTAssertNil(daily.moveCategory(request, in: .list(.today)))
+        XCTAssertEqual(daily.categories, [a, b, empty])
+        XCTAssertEqual(daily.historyRevision, revision)
+        XCTAssertEqual(try repository.categories(), [a, b, empty])
+        XCTAssertNil(presentation.categoryMovementReveal)
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        XCTAssertEqual(history.daySnapshot, snapshot)
+        XCTAssertTrue(presentation.showToday(state: daily))
+        try executeRaw("DROP TRIGGER fail_category_reorder")
+        guard case .changed? = daily.moveCategory(request, in: .list(.today)) else { return XCTFail("Retry did not commit") }
+        XCTAssertEqual(daily.historyRevision, revision + 1)
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        XCTAssertTrue(presentation.historyState === history)
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "B", "A"])
+        XCTAssertEqual(history.selectedDay, snapshot.summary.day)
+        XCTAssertEqual(history.daySnapshot?.notes, snapshot.notes)
+        XCTAssertEqual(history.progress, snapshot.progress)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), taskRows)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterRows)
+        XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"), categoryFields)
+        XCTAssertEqual(try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"), schema)
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["4"]])
+        XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
+        XCTAssertEqual(daily.draft, "Today draft")
+        XCTAssertEqual(daily.draftCategoryID, empty.id)
+        XCTAssertEqual(daily.laterDraft, "Later draft")
+        XCTAssertEqual(daily.laterDraftCategoryID, a.id)
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.categories().map(\.id), [b.id, a.id, empty.id])
+        XCTAssertEqual(try reopened.historyDaySnapshot(for: "2026-10-05").notes, snapshot.notes)
+    }
+
     func testRetainedTodayHistoryReloadsAfterReorderAndCategoryMove() throws {
         let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
         let work = try repository.createCategory(name: "Work")

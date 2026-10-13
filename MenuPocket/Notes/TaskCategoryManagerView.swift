@@ -54,6 +54,7 @@ struct TaskCategoryManagerView: View {
         .onChange(of: presentation.categoryRemovalTarget?.id) { old, new in
             if let old, new == nil { restoreFocusAfterRemoval(old) }
         }
+        .onDisappear { presentation.setManagerRenaming(nil) }
     }
 
     private var manager: some View {
@@ -79,6 +80,12 @@ struct TaskCategoryManagerView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("categoryCommandError")
+            }
+            if let message = state.categoryReorderIssue?.message {
+                Text(message)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("categoryReorderError")
             }
             HStack {
                 Spacer()
@@ -334,6 +341,7 @@ struct TaskCategoryManagerView: View {
     private func beginRename(_ category: TaskCategory) {
         guard renamingID == nil, state.availableCategories != nil else { return }
         renamingID = category.id
+        presentation.setManagerRenaming(category.id)
         renameDraft = category.name
         nameIssueField = nil
         Task { @MainActor in
@@ -359,6 +367,7 @@ struct TaskCategoryManagerView: View {
 
     private func endRename(focusing id: UUID? = nil) {
         renamingID = nil
+        presentation.setManagerRenaming(nil)
         renameDraft = ""
         if case .rename = nameIssueField { nameIssueField = nil }
         guard let id else { return }

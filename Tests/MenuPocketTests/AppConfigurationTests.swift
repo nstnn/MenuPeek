@@ -936,6 +936,80 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.repository.removeAttempts, 0)
     }
 
+
+    @MainActor
+    func testCategoryManagerAccessibilitySupportsLegacyAttributesAndPress() {
+        let rename = LegacyManagerAccessibilityElement(identifier: "rename", children: [])
+        let root = LegacyManagerAccessibilityElement(identifier: "manager", children: [rename])
+        XCTAssertTrue(CategoryManagerAccessibility.find("rename", in: root) === rename)
+        XCTAssertNil(CategoryManagerAccessibility.find("missing", in: root))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
+        XCTAssertEqual(rename.pressCount, 1)
+    }
+
+    @MainActor
+    func testCategoryManagerAccessibilitySupportsModernOnlyAndUnsupportedNodes() {
+        let rename = ModernManagerAccessibilityElement(identifier: "rename", children: [])
+        let root = ModernManagerAccessibilityElement(identifier: "manager", children: [NSObject(), rename])
+        XCTAssertTrue(CategoryManagerAccessibility.find("rename", in: root) === rename)
+        XCTAssertNil(CategoryManagerAccessibility.find("missing", in: root))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
+        XCTAssertEqual(rename.pressCount, 1)
+        XCTAssertFalse(CategoryManagerAccessibility.press(NSObject()))
+    }
+
+    @MainActor
+    func testCategoryManagerReordersPreserveNativeNameDraftAndRenameGuard() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        fixture.repository.savedCategories = [a, b]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        await waitUntil { window.attachedSheet != nil }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        let editor = try await focusedEditor(in: sheet)
+        editor.insertText("Pending category", replacementRange: NSRange(location: 0, length: 0))
+        func assertDraft() async {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(30))
+            await waitUntil { editor.string == "Pending category" }
+            XCTAssertTrue(window.attachedSheet === sheet)
+            XCTAssertTrue(sheet.firstResponder === editor, "Reordering does not steal native field focus")
+            XCTAssertTrue(presentation.isManagingCategories)
+        }
+        let change = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .before(a.id))
+        guard case .changed? = fixture.state.moveCategory(change, in: .manager) else { return XCTFail("Expected reorder") }
+        await assertDraft()
+        let noOp = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [b.id, a.id], placement: .before(a.id))
+        XCTAssertEqual(fixture.state.moveCategory(noOp, in: .manager), .unchanged)
+        await assertDraft()
+        fixture.repository.failCategoryMove = true
+        let back = CategoryMoveRequest(categoryID: a.id, expectedOrderIDs: [b.id, a.id], placement: .before(b.id))
+        XCTAssertNil(fixture.state.moveCategory(back, in: .manager))
+        await waitUntil { CategoryManagerAccessibility.find("categoryReorderError", in: sheet) != nil }
+        await assertDraft()
+        fixture.repository.failCategoryMove = false
+        guard case .changed? = fixture.state.moveCategory(back, in: .manager) else { return XCTFail("Expected retry") }
+        await assertDraft()
+        XCTAssertNil(fixture.state.categoryReorderIssue)
+        // Activate the real Rename button, then cancel from its native field.
+        let rename = try XCTUnwrap(CategoryManagerAccessibility.find("renameCategory-\(a.id)", in: sheet))
+        XCTAssertTrue(CategoryManagerAccessibility.press(rename))
+        await waitUntil { presentation.managerRenamingID == a.id }
+        XCTAssertFalse(presentation.canReorderCategories(in: .manager, state: fixture.state))
+        let renameEditor = try await focusedEditor(in: sheet)
+        await waitUntil { renameEditor.string == "A" }
+        renameEditor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { presentation.managerRenamingID == nil }
+        XCTAssertTrue(presentation.canReorderCategories(in: .manager, state: fixture.state))
+        XCTAssertNotNil(CategoryManagerAccessibility.find("newCategoryName", in: sheet))
+    }
+
     @MainActor
     func testCategoryManagerSheetCreatesCategoriesAndKeepsInvalidNamesForCorrection() async throws {
         let fixture = try AppLifecycleFixture(context: .manual)
@@ -2092,6 +2166,97 @@ final class AppConfigurationTests: XCTestCase {
 
 }
 
+/// SwiftUI AX nodes on older macOS versions can implement the attribute/action
+/// API without exposing the newer protocol accessors. Keep both routes in the
+/// hosted test driver; this does not change application behavior.
+@MainActor
+private enum CategoryManagerAccessibility {
+    static func find(_ identifier: String, in root: NSObject) -> NSObject? {
+        var visited = Set<ObjectIdentifier>()
+        func visit(_ node: NSObject) -> NSObject? {
+            guard visited.insert(ObjectIdentifier(node)).inserted else { return nil }
+            let idSelector = NSSelectorFromString("accessibilityIdentifier")
+            let modernID = node.responds(to: idSelector)
+                ? node.perform(idSelector)?.takeUnretainedValue() as? String : nil
+            let supportsAttributes = node.responds(to: NSSelectorFromString("accessibilityAttributeValue:"))
+            let legacyID = supportsAttributes ? node.accessibilityAttributeValue(.identifier) as? String : nil
+            if modernID == identifier || legacyID == identifier {
+                return node
+            }
+            let childrenSelector = NSSelectorFromString("accessibilityChildren")
+            var children = node.responds(to: childrenSelector)
+                ? node.perform(childrenSelector)?.takeUnretainedValue() as? [NSObject] ?? [] : []
+            if supportsAttributes {
+                children.append(contentsOf: node.accessibilityAttributeValue(.children) as? [NSObject] ?? [])
+            }
+            if let window = node as? NSWindow, let content = window.contentView { children.append(content) }
+            if let view = node as? NSView { children.append(contentsOf: view.subviews) }
+            for child in children {
+                if let found = visit(child) { return found }
+            }
+            return nil
+        }
+        return visit(root)
+    }
+
+    static func press(_ node: NSObject) -> Bool {
+        let selector = NSSelectorFromString("accessibilityPerformPress")
+        if node.responds(to: selector), let implementation = node.method(for: selector) {
+            let action = unsafeBitCast(implementation, to: (@convention(c) (AnyObject, Selector) -> Bool).self)
+            return action(node, selector)
+        }
+        guard node.responds(to: NSSelectorFromString("accessibilityActionNames")),
+              node.responds(to: NSSelectorFromString("accessibilityPerformAction:")),
+              node.accessibilityActionNames().contains(.press) else { return false }
+        node.accessibilityPerformAction(.press)
+        return true
+    }
+}
+
+@MainActor
+private final class ModernManagerAccessibilityElement: NSObject {
+    let identifier: String
+    let children: [NSObject]
+    private(set) var pressCount = 0
+
+    init(identifier: String, children: [NSObject]) {
+        self.identifier = identifier
+        self.children = children
+    }
+
+    @objc func accessibilityIdentifier() -> String { identifier }
+    @objc func accessibilityChildren() -> [NSObject] { children }
+    @objc func accessibilityPerformPress() -> Bool {
+        pressCount += 1
+        return true
+    }
+}
+
+@MainActor
+private final class LegacyManagerAccessibilityElement: NSObject {
+    let identifier: String
+    let children: [NSObject]
+    private(set) var pressCount = 0
+
+    init(identifier: String, children: [NSObject]) {
+        self.identifier = identifier
+        self.children = children
+    }
+
+    override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+        switch attribute {
+        case .identifier: identifier
+        case .children: children
+        default: nil
+        }
+    }
+
+    override func accessibilityActionNames() -> [NSAccessibility.Action] { [.press] }
+    override func accessibilityPerformAction(_ action: NSAccessibility.Action) {
+        if action == .press { pressCount += 1 }
+    }
+}
+
 private final class TaskWindowReadFixture: NoteRepository {
     var saved: [Note] = []
     var savedLater: [LaterTask] = []
@@ -2105,6 +2270,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     var readAttempts = 0
     var allowAdd = false
     var failRemove = false
+    var failCategoryMove = false
     var removeAttempts = 0
     var onRemove: (() -> Void)?
 
@@ -2146,6 +2312,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     }
 
     func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        if failCategoryMove { throw CocoaError(.fileWriteNoPermission) }
         let outcome = CategoryMovePlanner.plan(request, categories: try categories())
         if case let .changed(ordered) = outcome { savedCategories = ordered }
         return outcome
