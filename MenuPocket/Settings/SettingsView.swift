@@ -5,6 +5,7 @@ struct SettingsView: View {
     let appVersion: String
     let onQuit: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showsMoreKeyboardControls = false
 
     init(model: AppModel, bundle: Bundle = .main, onQuit: @escaping () -> Void) {
         self.model = model
@@ -97,6 +98,47 @@ struct SettingsView: View {
                         }
                     }
 
+                    settingsSection("Keyboard Shortcuts") {
+                        shortcutGroup("From any app", shortcuts: [
+                            .init("Quick Add", ["⌃", "⌥", "N"], "Control-Option-N", note: quickAddShortcutStatus)
+                        ])
+                        shortcutGroup("In MenuPocket", shortcuts: SettingsShortcut.appCommands)
+
+                        Text("Adding tasks and switching lists are unavailable while editing, confirming deletion, or managing categories.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Divider()
+                        DisclosureGroup(isExpanded: $showsMoreKeyboardControls) {
+                            VStack(alignment: .leading, spacing: 18) {
+                                shortcutGroup("Task editor", shortcuts: SettingsShortcut.taskEditor)
+                                shortcutGroup("Quick Add panel", shortcuts: SettingsShortcut.quickAddPanel)
+                                Text("Command-N, Command-1, Command-2, Command-comma, and Command-Q do nothing in the Quick Add panel.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                shortcutGroup("Keyboard navigation", shortcuts: SettingsShortcut.navigation)
+                                shortcutGroup("History", shortcuts: SettingsShortcut.history)
+                                shortcutGroup("Category manager", shortcuts: SettingsShortcut.categories)
+                                shortcutGroup("Text editing", shortcuts: SettingsShortcut.textEditing)
+                                shortcutGroup("Other app commands", shortcuts: SettingsShortcut.otherCommands)
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            Text("More keyboard controls")
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityIdentifier("keyboardControlsDisclosure")
+
+                        Text("⌘ Command · ⌥ Option · ⌃ Control · ⇧ Shift")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Key symbols: Command, Option, Control, and Shift.")
+                    }
+                    .accessibilityIdentifier("keyboardShortcutsSection")
+
                     settingsSection("App") {
                         LabeledContent("Name", value: "MenuPocket")
                             .accessibilityRepresentation {
@@ -132,6 +174,78 @@ struct SettingsView: View {
         }
     }
 
+    private var quickAddShortcutStatus: String {
+        if !model.preferences.quickAddEnabled {
+            return "Enable Quick Add above to use this shortcut."
+        }
+        if model.quickAddRegistrationFailure != nil {
+            return "Unavailable. See Quick Add above for details."
+        }
+        if model.isQuickAddRegistered {
+            return "Quick Add is enabled."
+        }
+        return "Quick Add registration is pending."
+    }
+
+    private func shortcutGroup(_ title: String, shortcuts: [SettingsShortcut]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                ForEach(shortcuts.indices, id: \.self) { index in
+                    if index != shortcuts.startIndex { Divider() }
+                    shortcutRow(shortcuts[index])
+                }
+            }
+        }
+    }
+
+    private func shortcutRow(_ shortcut: SettingsShortcut) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(shortcut.title)
+                if let note = shortcut.note {
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 4) {
+                ForEach(shortcut.keys.indices, id: \.self) { index in
+                    let key = shortcut.keys[index]
+                    if key == "or" {
+                        Text(key).font(.system(size: 12)).foregroundStyle(.secondary)
+                    } else {
+                        Text(key)
+                            .font(.system(size: key.count > 1 ? 12 : 13))
+                            .padding(.horizontal, 6)
+                            .frame(minWidth: 25, minHeight: 24)
+                            .background {
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color.primary.opacity(colorScheme == .light ? 0.035 : 0.06))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 5)
+                                            .strokeBorder(Color.primary.opacity(0.12))
+                                    }
+                            }
+                    }
+                }
+            }
+            .fixedSize()
+        }
+        .padding(.vertical, 7)
+        .frame(minHeight: 36)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(shortcut.title)
+        .accessibilityValue(shortcut.spokenKeys)
+        .accessibilityHint(shortcut.note ?? "")
+    }
+
     private func settingsSection<Content: View>(
         _ title: String, @ViewBuilder content: () -> Content
     ) -> some View {
@@ -153,6 +267,68 @@ struct SettingsView: View {
                 }
         }
     }
+}
+
+/// Read-only reference for the existing handlers in AppDelegate, TaskWindowView,
+/// QuickAddPanelController, the History views, and TaskCategoryManagerView.
+/// Keep the descriptions in sync when those handlers change; this catalog installs no shortcuts.
+private struct SettingsShortcut {
+    let title: String
+    let keys: [String]
+    let spokenKeys: String
+    let note: String?
+
+    init(_ title: String, _ keys: [String], _ spokenKeys: String, note: String? = nil) {
+        self.title = title
+        self.keys = keys
+        self.spokenKeys = spokenKeys
+        self.note = note
+    }
+
+    static let appCommands: [Self] = [
+        .init("Add task", ["⌘", "N"], "Command-N", note: "In the selected list; Today when browsing History."),
+        .init("Show Today", ["⌘", "1"], "Command-1"),
+        .init("Show Later", ["⌘", "2"], "Command-2"),
+        .init("Open Settings", ["⌘", ","], "Command-comma"),
+        .init("Close active window", ["⌘", "W"], "Command-W"),
+        .init("Quit MenuPocket", ["⌘", "Q"], "Command-Q")
+    ]
+    static let taskEditor: [Self] = [
+        .init("Save task", ["Return"], "Return", note: "While typing a task, or with Save focused."),
+        .init("Cancel task entry or edit", ["Esc"], "Escape"),
+        .init("Choose category", ["↑", "↓"], "Up or Down arrow", note: "With the category picker focused.")
+    ]
+    static let quickAddPanel: [Self] = [
+        .init("Save to Today / General", ["Return"], "Return"),
+        .init("Close and discard text", ["Esc", "or", "⌘", "W"], "Escape or Command-W")
+    ]
+    static let navigation: [Self] = [
+        .init("Move focus", ["Tab"], "Tab", note: "Keyboard navigation follows your macOS keyboard settings."),
+        .init("Move focus backward", ["⇧", "Tab"], "Shift-Tab"),
+        .init("Activate focused task control", ["Space", "or", "Return"], "Space or Return")
+    ]
+    static let history: [Self] = [
+        .init("Move between calendar days", ["←", "↑", "↓", "→"], "Arrow keys", note: "With a calendar day focused."),
+        .init("Open focused day", ["Space", "or", "Return"], "Space or Return"),
+        .init("Change task filter", ["←", "→"], "Left or Right arrow", note: "With the All / Unfinished / Completed filter focused.")
+    ]
+    static let categories: [Self] = [
+        .init("Create or rename category", ["Return"], "Return", note: "While typing in its name field."),
+        .init("Cancel current action", ["Esc"], "Escape")
+    ]
+    static let textEditing: [Self] = [
+        .init("Cut", ["⌘", "X"], "Command-X"),
+        .init("Copy", ["⌘", "C"], "Command-C"),
+        .init("Paste", ["⌘", "V"], "Command-V"),
+        .init("Select all", ["⌘", "A"], "Command-A"),
+        .init("Undo typing", ["⌘", "Z"], "Command-Z", note: "Undo and redo apply to text in the focused field."),
+        .init("Redo typing", ["⇧", "⌘", "Z"], "Shift-Command-Z")
+    ]
+    static let otherCommands: [Self] = [
+        .init("Hide MenuPocket", ["⌘", "H"], "Command-H"),
+        .init("Hide other apps", ["⌥", "⌘", "H"], "Option-Command-H"),
+        .init("Minimize active window", ["⌘", "M"], "Command-M")
+    ]
 }
 
 private extension AppTheme {
