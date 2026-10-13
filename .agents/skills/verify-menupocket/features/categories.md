@@ -84,3 +84,9 @@ On an isolated basic fixture:
 5. Close/reopen the manager and quit/relaunch the same fixture without reseeding. Check saved order, picker order and unchanged task rows/defaults. Take snapshots and clean every fixture.
 
 Accessibility button/field checks establish ordinary controls only. Physical holds, target negotiation, scrolling/reveal, and preservation of the sheet draft through an actual native drop need observed pointer evidence; mark them Not tested when unavailable. Final physical acceptance remains TASK-010.
+
+## Integrated automated preservation (TASK-009)
+
+`TaskHistoryIntegrationTests.testCommittedCategoryOrderReloadsRetainedHistoryAndPreservesTasksAcrossFailureRetryAndReopen` uses real SQLite and shared state with an isolated defaults suite. It seeds sparse category/task ranks, unused and long-name categories, General, completed Today/Later tasks and an older day. It checks stale/equivalent requests, a rank-write trigger failure and a reader-lock COMMIT failure before a successful retry; retained History, Today/Later groups and category options then consume the saved order. Explicit create/rename/remove operations are accounted for separately before reopening the changed database and defaults through fresh state. Raw rowids and every task field/rank, category non-rank fields, schema and preferences are compared.
+
+Run this with the shared scheme's History integration, SQLite, daily state, movement, grouping and glance suites. This is automated source/storage evidence; native holds, drops, scrolling, control coexistence and quit/relaunch in the real interface remain TASK-010. Clean the temporary test host after each session, retaining logs/results and binary identity.

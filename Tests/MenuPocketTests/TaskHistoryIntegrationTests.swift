@@ -31,7 +31,8 @@ final class TaskHistoryIntegrationTests: XCTestCase {
     func testCommittedCategoryOrderReloadsRetainedHistoryAndPreservesTasksAcrossFailureRetryAndReopen() throws {
         let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
         let a = try repository.createCategory(name: "A")
-        let b = try repository.createCategory(name: "B")
+        let longName = "B — A long category name that wraps in the task window and manager"
+        let b = try repository.createCategory(name: longName)
         let empty = try repository.createCategory(name: "Unused")
         for key in ["2026-10-05", "2026-10-06"] {
             try repository.add(note("General", key, done: false, categoryID: nil))
@@ -40,6 +41,17 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         }
         try repository.addLater(LaterTask(id: UUID(), text: "Later B", createdAt: Date(timeIntervalSince1970: 3),
                                           completedAt: nil, categoryID: b.id))
+        try repository.addLater(LaterTask(id: UUID(), text: "Later A completed", createdAt: Date(timeIntervalSince1970: 4),
+                                          completedAt: Date(timeIntervalSince1970: 5), categoryID: a.id))
+        try repository.addLater(LaterTask(id: UUID(), text: "Later General", createdAt: Date(timeIntervalSince1970: 6),
+                                          completedAt: nil, categoryID: nil))
+        // Legacy sparse ranks are valid. Only a changed reorder may compact them.
+        try executeRaw("UPDATE categories SET creation_order = creation_order * 100 + 20")
+        try executeRaw("UPDATE notes SET display_order = display_order * 10 + 7")
+        let initialCategories = try repository.categories()
+        defaults.set("Unrelated preference", forKey: "integration.sentinel")
+        defaults.set(a.id.uuidString, forKey: TaskCategoryPreferences.lastUsedCategoryIDKey)
+        defaults.set(b.id.uuidString, forKey: TaskCategoryPreferences.laterLastUsedCategoryIDKey)
         let (daily, _) = makeApp(repository: repository)
         let presentation = daily.taskWindowPresentation
         defer { presentation.stopForTermination(); daily.stopForTermination() }
@@ -61,26 +73,53 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         let history = try XCTUnwrap(presentation.historyState)
         try history.select(GregorianDay(key: "2026-10-05"))
         let snapshot = try XCTUnwrap(history.daySnapshot)
-        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "A", "B"])
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "A", longName])
         XCTAssertTrue(presentation.showToday(state: daily))
         let revision = daily.historyRevision
         let request = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id, empty.id], placement: .before(a.id))
+        let allCategoriesBefore = try rawRows("SELECT rowid, * FROM categories ORDER BY rowid")
+        func assertUnchanged(file: StaticString = #filePath, line: UInt = #line) throws {
+            XCTAssertEqual(daily.categories, initialCategories, file: file, line: line)
+            XCTAssertEqual(daily.historyRevision, revision, file: file, line: line)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), allCategoriesBefore, file: file, line: line)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), taskRows, file: file, line: line)
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterRows, file: file, line: line)
+            XCTAssertNil(presentation.categoryMovementReveal, file: file, line: line)
+            XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore, file: file, line: line)
+        }
+        XCTAssertEqual(daily.moveCategory(CategoryMoveRequest(categoryID: b.id,
+            expectedOrderIDs: [b.id, a.id, empty.id], placement: .before(a.id)), in: .list(.today)), .rejected(.catalogChanged))
+        try assertUnchanged()
+        XCTAssertEqual(daily.moveCategory(CategoryMoveRequest(categoryID: b.id,
+            expectedOrderIDs: request.expectedOrderIDs, placement: .after(a.id)), in: .list(.today)), .unchanged)
+        try assertUnchanged()
         // A real SQLite failure must roll back without publishing or invalidating History.
         try executeRaw("CREATE TRIGGER fail_category_reorder BEFORE UPDATE OF creation_order ON categories BEGIN SELECT RAISE(ABORT, 'injected reorder failure'); END")
         XCTAssertNil(daily.moveCategory(request, in: .list(.today)))
-        XCTAssertEqual(daily.categories, [a, b, empty])
+        XCTAssertEqual(daily.categories, initialCategories)
         XCTAssertEqual(daily.historyRevision, revision)
-        XCTAssertEqual(try repository.categories(), [a, b, empty])
+        XCTAssertEqual(try repository.categories(), initialCategories)
         XCTAssertNil(presentation.categoryMovementReveal)
         XCTAssertTrue(presentation.showHistory(state: daily))
         XCTAssertEqual(history.daySnapshot, snapshot)
         XCTAssertTrue(presentation.showToday(state: daily))
+        try assertUnchanged()
         try executeRaw("DROP TRIGGER fail_category_reorder")
+        // An independent reader permits rank updates but blocks COMMIT in rollback-journal mode.
+        var reader: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &reader), SQLITE_OK)
+        let connection = try XCTUnwrap(reader)
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(sqlite3_exec(connection, "BEGIN; SELECT * FROM categories", nil, nil, nil), SQLITE_OK)
+        XCTAssertNil(daily.moveCategory(request, in: .list(.today)))
+        XCTAssertEqual(daily.categoryReorderIssue, .reorder)
+        XCTAssertEqual(sqlite3_exec(connection, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+        try assertUnchanged()
         guard case .changed? = daily.moveCategory(request, in: .list(.today)) else { return XCTFail("Retry did not commit") }
         XCTAssertEqual(daily.historyRevision, revision + 1)
         XCTAssertTrue(presentation.showHistory(state: daily))
         XCTAssertTrue(presentation.historyState === history)
-        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", "B", "A"])
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", longName, "A"])
         XCTAssertEqual(history.selectedDay, snapshot.summary.day)
         XCTAssertEqual(history.daySnapshot?.notes, snapshot.notes)
         XCTAssertEqual(history.progress, snapshot.progress)
@@ -94,8 +133,54 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         XCTAssertEqual(daily.draftCategoryID, empty.id)
         XCTAssertEqual(daily.laterDraft, "Later draft")
         XCTAssertEqual(daily.laterDraftCategoryID, a.id)
+        XCTAssertEqual(TaskGroup.groups(categories: daily.categories, notes: daily.notes).map(\.name), ["General", longName, "A"])
+        XCTAssertEqual(LaterTaskGroup.groups(categories: daily.categories, tasks: daily.laterTasks).map(\.name), ["General", longName, "A"])
+        XCTAssertEqual(TaskCategoryOption.ordered(categories: daily.categories).map(\.categoryID), [nil, b.id, a.id, empty.id])
+        XCTAssertTrue(presentation.showToday(state: daily))
+        // Account for CRUD separately: create/remove an unused row; rename preserves ID and rank.
+        let appended = try XCTUnwrap(daily.createCategory(name: "Temporary unused"))
+        XCTAssertEqual(appended.creationOrder, 3)
+        let renamed = try XCTUnwrap(daily.renameCategory(id: a.id, name: "A renamed"))
+        XCTAssertEqual(renamed.creationOrder, 1)
+        XCTAssertTrue(daily.removeCategory(id: appended.id))
+        XCTAssertEqual(daily.historyRevision, revision + 4)
+        XCTAssertEqual(daily.categories.map(\.id), [b.id, a.id, empty.id])
+        XCTAssertTrue(presentation.showHistory(state: daily))
+        XCTAssertTrue(presentation.historyState === history)
+        XCTAssertEqual(history.detailGroups.map(\.group.name), ["General", longName, "A renamed"])
+        XCTAssertEqual(history.daySnapshot?.notes, snapshot.notes)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), taskRows)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterRows)
+        // The only surviving non-rank category changes are the explicit rename's name/name_key.
+        var expectedFields = categoryFields
+        let renamedIndex = try XCTUnwrap(expectedFields.firstIndex { $0[1] == a.id.uuidString })
+        expectedFields[renamedIndex][2] = renamed.name
+        expectedFields[renamedIndex][3] = renamed.nameKey
+        XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"), expectedFields)
+        XCTAssertEqual(try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"), schema)
+        XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
+        presentation.stopForTermination()
+        daily.stopForTermination()
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
         XCTAssertEqual(try reopened.categories().map(\.id), [b.id, a.id, empty.id])
+        let reopenedDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let reloaded = DailyNotesState(repositoryFactory: { reopened },
+            day: NoteDay(now: { ISO8601DateFormatter().date(from: "2026-10-06T12:00:00Z")! }, timeZone: { TimeZone(secondsFromGMT: 0)! }),
+            notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+            categoryPreferences: TaskCategoryPreferences(userDefaults: reopenedDefaults))
+        defer { reloaded.stopForTermination() }
+        reloaded.startup()
+        XCTAssertEqual(reloaded.categories, daily.categories)
+        XCTAssertEqual(reloaded.notes, daily.notes)
+        XCTAssertEqual(reloaded.laterTasks, daily.laterTasks)
+        XCTAssertEqual(reloaded.categoryPreferences.lastUsedCategoryID, a.id)
+        XCTAssertEqual(reloaded.categoryPreferences.laterLastUsedCategoryID, b.id)
+        for destination in [TaskListDestination.today, .later] {
+            XCTAssertTrue(reloaded.categoryPreferences.isCollapsed(.category(b.id), in: destination))
+        }
+        XCTAssertEqual(reopenedDefaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
+        XCTAssertEqual(try rawRows("PRAGMA integrity_check"), [["ok"]])
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["4"]])
         XCTAssertEqual(try reopened.historyDaySnapshot(for: "2026-10-05").notes, snapshot.notes)
     }
 
