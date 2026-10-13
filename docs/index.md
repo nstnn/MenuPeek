@@ -12,6 +12,7 @@ MenuPocket manages daily tasks in one desktop window, where Today tasks can be d
 - [Later tasks acceptance](LATER_TASKS_ACCEPTANCE.md) — isolated native fixture identity and the Today/Later interface checklist; user-reported Pass on the isolated fixture, production/system checks not tested.
 - [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) — dated actual-interface observations, category, History, menu bar glance, and task movement fixtures, partial acceptance, and blocked/untested production and system checks.
 - [Task categories handoff](TASK_CATEGORIES_HANDOFF.md) — category source/artifact identity, automated and interface evidence, completed documentation, and the remaining TASK-011 acceptance gate.
+- [Settings shortcuts verification](SETTINGS_SHORTCUTS_VERIFICATION.md) — the read-only shortcut reference, focused tests, native Settings component evidence, keyboard/production limits, and temporary-app cleanup.
 
 ## Historical evidence
 
