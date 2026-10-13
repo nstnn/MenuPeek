@@ -337,6 +337,145 @@ final class DailyNotesStateTests: XCTestCase {
         tasks.ended(token: next.token)
     }
 
+    func testCategoryNativeDropDispatchPreservesTasksDraftsCollapseAndHandlesFailureNoOpAndGuards() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 10)
+        let hidden = try TaskCategory(name: "Unused", creationOrder: 30)
+        let b = try TaskCategory(name: "B", creationOrder: 80)
+        let task = categorized("Task", b, createdAt: 1)
+        for scenario in ["changed", "no-op", "failed", "guarded", "external"] {
+            let store = FakeNoteRepository(notes: [task], categories: [a, hidden, b])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            defer { state.stopForTermination() }
+            let presentation = state.taskWindowPresentation
+            presentation.setWindowVisible(true, state: state)
+            state.draft = "Pending"
+            state.laterDraft = "Later pending"
+            state.categoryPreferences.setCollapsed(true, for: .category(b.id))
+            let revision = state.historyRevision
+            let session = presentation.categoryDragSession
+            let source = CategoryDragSourceView(frame: .zero)
+            let payload = try XCTUnwrap(session.begin(categoryID: b.id, context: .list(.today), state: state, source: source))
+            let target = CategoryDropTargetView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+            let window = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = target
+            defer { window.close(); session.ended(token: payload.token) }
+            target.state = state; target.session = session; target.context = .list(.today)
+            target.group = .category(scenario == "no-op" ? hidden.id : a.id)
+            let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                            point: target.convert(NSPoint(x: 20, y: scenario == "no-op" ? 90 : 5), to: nil),
+                                            type: CategoryDragSession.pasteboardType)
+            defer { info.draggingPasteboard.releaseGlobally() }
+            XCTAssertEqual(target.draggingEntered(info), .move)
+            XCTAssertTrue(target.prepareForDragOperation(info))
+            if scenario == "failed" { store.failCategoryCommand = .reorder }
+            if scenario == "guarded" { state.beginEditing(id: task.id) }
+            if scenario == "external" { info.draggingSource = CategoryDragSourceView(frame: .zero) }
+            XCTAssertEqual(target.performDragOperation(info), scenario == "changed" || scenario == "no-op")
+            XCTAssertFalse(target.performDragOperation(info), "Duplicate drop cannot dispatch")
+            XCTAssertEqual(store.categoryMoveAttempts, scenario == "guarded" || scenario == "external" ? 0 : 1)
+            XCTAssertEqual(state.categories.map(\.id), scenario == "changed" ? [b.id, a.id, hidden.id] : [a.id, hidden.id, b.id])
+            XCTAssertEqual(state.historyRevision, revision + (scenario == "changed" ? 1 : 0))
+            XCTAssertEqual(presentation.categoryMovementReveal?.categoryID, scenario == "changed" ? b.id : nil)
+            XCTAssertEqual(state.notes, [task])
+            XCTAssertEqual(state.draft, "Pending")
+            XCTAssertEqual(state.laterDraft, "Later pending")
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(b.id)))
+            XCTAssertNil(session.hoveredRequest)
+            XCTAssertFalse(session.isScrolling)
+            XCTAssertTrue(session.isDragging, "Source-end still owns native reservation")
+        }
+    }
+
+    func testCategorySelfGroupHoverScrollsClampsAndStopsOnDestinationExit() throws {
+        let a = try TaskCategory(name: "Tall source", creationOrder: 0)
+        let b = try TaskCategory(name: "Other", creationOrder: 1)
+        let store = FakeNoteRepository(notes: [categorized("Task", a, createdAt: 1)], categories: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        defer { state.stopForTermination() }
+        state.taskWindowPresentation.setWindowVisible(true, state: state)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 2000))
+        scroll.documentView = document
+        let target = CategoryDropTargetView(frame: document.bounds)
+        document.addSubview(target)
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = scroll
+        window.orderFront(nil)
+        let session = state.taskWindowPresentation.categoryDragSession
+        let source = CategoryDragSourceView(frame: .zero)
+        let payload = try XCTUnwrap(session.begin(categoryID: a.id, context: .list(.today), state: state, source: source))
+        defer { session.ended(token: payload.token); window.close() }
+        target.state = state; target.session = session; target.group = .category(a.id)
+        let clip = scroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: 800))
+        func edgePoint(_ upper: Bool) -> NSPoint {
+            NSPoint(x: clip.bounds.midX, y: upper ? clip.bounds.minY + 1 : clip.bounds.maxY - 1)
+        }
+        let info = MovementDraggingInfo(source: source, token: payload.token, window: window,
+                                        point: clip.convert(edgePoint(true), to: nil),
+                                        type: CategoryDragSession.pasteboardType)
+        defer { info.draggingPasteboard.releaseGlobally() }
+        XCTAssertEqual(target.draggingEntered(info), [], "Self anchor offers no placement")
+        XCTAssertTrue(session.isScrolling, "Authorized self hover still starts edge scrolling")
+        XCTAssertNil(session.hoveredRequest)
+        let before = clip.bounds.origin.y
+        session.scrollAtPointer(screenPoint: window.convertPoint(toScreen: clip.convert(edgePoint(true), to: nil)))
+        XCTAssertNotEqual(clip.bounds.origin.y, before)
+        XCTAssertLessThanOrEqual(abs(clip.bounds.origin.y - before), 12)
+        for upper in [true, false] {
+            for _ in 0..<200 {
+                session.scrollAtPointer(screenPoint: window.convertPoint(toScreen: clip.convert(edgePoint(upper), to: nil)))
+            }
+            let clamped = clip.bounds.origin
+            session.scrollAtPointer(screenPoint: window.convertPoint(toScreen: clip.convert(edgePoint(upper), to: nil)))
+            XCTAssertEqual(clip.bounds.origin, clamped)
+            XCTAssertEqual(clip.constrainBoundsRect(clip.bounds).origin, clamped)
+        }
+        // Scrolling invalidates geometry even if a previous boundary was shown.
+        clip.scroll(to: NSPoint(x: 0, y: 800))
+        session.hoveredRequest = payload.request(.after(b.id))
+        session.scrollAtPointer(screenPoint: window.convertPoint(toScreen: clip.convert(edgePoint(true), to: nil)))
+        XCTAssertNil(session.hoveredRequest)
+        target.draggingExited(info)
+        XCTAssertFalse(session.isScrolling)
+        let exited = clip.bounds.origin
+        session.scrollAtPointer(screenPoint: window.convertPoint(toScreen: clip.convert(edgePoint(true), to: nil)))
+        XCTAssertEqual(clip.bounds.origin, exited)
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+    }
+
+    func testCategoryDropScrollingStopsOnExitConsumeCancelAndInvalidation() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let store = FakeNoteRepository(notes: [categorized("Task", a, createdAt: 1)], categories: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        defer { state.stopForTermination() }
+        state.taskWindowPresentation.setWindowVisible(true, state: state)
+        let session = state.taskWindowPresentation.categoryDragSession
+        let viewport = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        for path in 0..<4 {
+            let payload = try XCTUnwrap(session.begin(categoryID: a.id, context: .list(.today), state: state))
+            session.startScrolling(in: viewport, state: state)
+            XCTAssertTrue(session.isScrolling)
+            switch path {
+            case 0: session.stopScrolling() // destination exit
+            case 1: XCTAssertTrue(session.consume(payload, state: state))
+            case 2: session.cancel()
+            default: state.taskWindowPresentation.windowWillClose()
+            }
+            XCTAssertFalse(session.isScrolling)
+            if path == 1 { XCTAssertFalse(session.consume(payload, state: state)) }
+            session.ended(token: payload.token)
+            XCTAssertFalse(session.isDragging)
+        }
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+    }
+
     func testCategoryDragInvalidationClearsAuthorizationButKeepsNativeReservation() throws {
         let a = try TaskCategory(name: "A", creationOrder: 0)
         let b = try TaskCategory(name: "B", creationOrder: 1)
@@ -4520,13 +4659,14 @@ private final class MovementDraggingInfo: NSObject, NSDraggingInfo {
     var numberOfValidItemsForDrop = 1
     var springLoadingHighlight: NSSpringLoadingHighlight { .none }
 
-    init(source: TaskDragHandleView, token: UUID, window: NSWindow, point: NSPoint) {
+    init(source: AnyObject, token: UUID, window: NSWindow, point: NSPoint,
+         type: NSPasteboard.PasteboardType = TaskDragSession.pasteboardType) {
         draggingSource = source
         draggingDestinationWindow = window
         draggingLocation = point
         super.init()
         let item = NSPasteboardItem()
-        item.setString(token.uuidString, forType: TaskDragSession.pasteboardType)
+        item.setString(token.uuidString, forType: type)
         draggingPasteboard.writeObjects([item])
     }
     func resetSpringLoading() {}

@@ -28,6 +28,56 @@ final class CategoryDragSession {
     @ObservationIgnored private var nativeToken: UUID?
     @ObservationIgnored private var nativeSource: CategoryDragSourceView?
     @ObservationIgnored private var consumed: Payload?
+    @ObservationIgnored private var scrollTimer: Timer?
+    @ObservationIgnored private weak var scrollView: NSScrollView?
+    @ObservationIgnored private weak var dragState: DailyNotesState?
+    var isScrolling: Bool { scrollTimer != nil }
+
+    func startScrolling(in scrollView: NSScrollView?, state: DailyNotesState) {
+        guard active != nil, let scrollView else { return }
+        self.scrollView = scrollView
+        dragState = state
+        guard scrollTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
+            let hasOwner = MainActor.assumeIsolated {
+                guard let self else { return false }
+                self.scrollAtPointer()
+                return true
+            }
+            if !hasOwner { timer.invalidate() }
+        }
+        scrollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    func stopScrolling() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        scrollView = nil
+        dragState = nil
+    }
+
+    func scrollAtPointer(screenPoint: NSPoint = NSEvent.mouseLocation) {
+        guard let state = dragState else { stopScrolling(); return }
+        validate(state: state)
+        guard active != nil, let scrollView, let window = scrollView.window,
+              window.isVisible, let document = scrollView.documentView else { stopScrolling(); return }
+        let clip = scrollView.contentView
+        let point = clip.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        let viewport = clip.bounds
+        let topDown = NSPoint(x: point.x - viewport.minX,
+                              y: clip.isFlipped ? point.y - viewport.minY : viewport.maxY - point.y)
+        let step = TaskDragSession.edgeStep(point: topDown, viewport: NSRect(origin: .zero, size: viewport.size))
+        guard step != 0 else { return }
+        var next = viewport
+        next.origin.y += document.isFlipped ? step : -step
+        next = clip.constrainBoundsRect(next)
+        guard next.origin != viewport.origin else { return }
+        hoveredRequest = nil
+        clip.scroll(to: next.origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
 
     func canBegin(categoryID: UUID, context: CategoryReorderContext, state: DailyNotesState) -> Bool {
         nativeToken == nil &&
@@ -77,6 +127,7 @@ final class CategoryDragSession {
             validate(state: state)
             return false
         }
+        stopScrolling()
         active = nil
         hoveredRequest = nil
         consumed = payload
@@ -93,6 +144,7 @@ final class CategoryDragSession {
     }
 
     func cancel() {
+        stopScrolling()
         active = nil
         consumed = nil
         hoveredRequest = nil
