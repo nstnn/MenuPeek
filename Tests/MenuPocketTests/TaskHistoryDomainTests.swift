@@ -98,9 +98,9 @@ final class TaskHistoryDomainTests: XCTestCase {
         XCTAssertEqual(snapshot.progress, NoteProgress(completed: 3, total: 5))
         XCTAssertEqual(snapshot.notes, original)
         XCTAssertEqual(snapshot.categories, [home, work])
-        XCTAssertEqual(snapshot.groups.map(\.name), ["Home", "Renamed Work", "General"])
-        XCTAssertEqual(snapshot.groups[1].notes, [rows[0], rows[3]])
-        XCTAssertEqual(snapshot.groups[2].progress, NoteProgress(completed: 1, total: 2))
+        XCTAssertEqual(snapshot.groups.map(\.name), ["General", "Home", "Renamed Work"])
+        XCTAssertEqual(snapshot.groups[2].notes, [rows[0], rows[3]])
+        XCTAssertEqual(snapshot.groups[0].progress, NoteProgress(completed: 1, total: 2))
     }
 
     func testSnapshotRejectsWrongDayAndMissingCategoryInsteadOfDroppingRows() {

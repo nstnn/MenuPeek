@@ -22,8 +22,8 @@ final class MenuBarGlanceMenuTests: XCTestCase {
         let menu = make(notes: notes, categories: [work], laterCount: 3)
 
         XCTAssertEqual(layout(menu), ["header", "-",
-                                      "Task 2\tWork", "Task 4\tWork", "Task 6\tWork",
-                                      "Task 1\tGeneral", "Task 3\tGeneral", "2 more in Today", "-",
+                                      "Task 1\tGeneral", "Task 3\tGeneral", "Task 5\tGeneral",
+                                      "Task 7\tGeneral", "Task 2\tWork", "2 more in Today", "-",
                                       "Later · 3 remaining", "-"] + actionTitles)
     }
 

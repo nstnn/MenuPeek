@@ -312,15 +312,14 @@ final class TaskWindowPresentation {
             return TaskMoveRequest(taskID: id, expectedDayKey: dayKey, expectedSourceGroup: source,
                                    destinationGroup: group, placement: placement)
         }
-        let groups = state.categories.map { (title: $0.name, group: TaskGroupID.category($0.id)) } +
-            [(title: "General", group: TaskGroupID.general)]
+        let groups = TaskCategoryOption.ordered(categories: state.categories)
         let siblings = state.notes.filter { TaskGroupID(categoryID: $0.categoryID) == source }
         guard let index = siblings.firstIndex(where: { $0.id == id }) else { return nil }
         return MenuMoves(
             destinations: groups.map { group in
-                let isCurrent = group.group == source
-                return MenuMoves.Destination(title: group.title, group: group.group, isCurrent: isCurrent,
-                                             request: isCurrent ? nil : request(group.group, .endOfGroup))
+                let isCurrent = group.id == source
+                return MenuMoves.Destination(title: group.name, group: group.id, isCurrent: isCurrent,
+                                             request: isCurrent ? nil : request(group.id, .endOfGroup))
             },
             moveUp: index > 0 ? request(source, .before(siblings[index - 1].id)) : nil,
             moveDown: index + 1 < siblings.count ? request(source, .after(siblings[index + 1].id)) : nil)

@@ -95,16 +95,20 @@ struct TaskCategoryManagerView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    ForEach(TaskCategoryOption.ordered(categories: categories)) { option in
+                        switch option {
+                        case .general:
+                            generalRow
+                        case let .custom(category):
+                            categoryRow(category)
+                                .id(category.id)
+                        }
+                    }
                     if categories.isEmpty {
                         Text("No custom categories yet.")
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 8)
                     }
-                    ForEach(categories) { category in
-                        categoryRow(category)
-                            .id(category.id)
-                    }
-                    generalRow
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)

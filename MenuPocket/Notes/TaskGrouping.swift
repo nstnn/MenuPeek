@@ -32,6 +32,33 @@ enum TaskGroupID: Hashable, Sendable {
     }
 }
 
+/// One presentation order for groups, pickers, the manager, and Move To menus.
+/// General is fixed first; the custom-only saved catalog remains unchanged.
+enum TaskCategoryOption: Identifiable, Equatable {
+    case general
+    case custom(TaskCategory)
+
+    var id: TaskGroupID { TaskGroupID(categoryID: categoryID) }
+
+    var categoryID: UUID? {
+        switch self {
+        case .general: nil
+        case let .custom(category): category.id
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .general: TaskCategoryName.general
+        case let .custom(category): category.name
+        }
+    }
+
+    static func ordered(categories: [TaskCategory]) -> [Self] {
+        [.general] + categories.sorted { $0.creationOrder < $1.creationOrder }.map(Self.custom)
+    }
+}
+
 /// Presentation derived from the saved snapshot on each read; groups and their
 /// counts are never saved.
 struct TaskGroup: Identifiable, Equatable {
@@ -45,22 +72,17 @@ struct TaskGroup: Identifiable, Equatable {
         NoteProgress(completed: notes.count(where: \.isCompleted), total: notes.count)
     }
 
-    /// Custom categories in saved creation order, then General. Only groups
+    /// General first, then custom categories in saved rank order. Only groups
     /// with tasks appear unless a live drag requests transient empty targets.
     /// Each group filters the canonical task array. An
     /// explicit move follows its saved rank; Edit reassignment retains its rank.
     /// The state never publishes a task whose category is missing from the
     /// catalog, so every task lands in exactly one group.
     static func groups(categories: [TaskCategory], notes: [Note], includeEmpty: Bool = false) -> [TaskGroup] {
-        let custom = categories
-            .sorted { $0.creationOrder < $1.creationOrder }
-            .compactMap { category -> TaskGroup? in
-                let rows = notes.filter { $0.categoryID == category.id }
-                return rows.isEmpty && !includeEmpty ? nil : TaskGroup(id: .category(category.id), name: category.name, notes: rows)
-            }
-        let general = notes.filter { $0.categoryID == nil }
-        guard includeEmpty || !general.isEmpty else { return custom }
-        return custom + [TaskGroup(id: .general, name: TaskCategoryName.general, notes: general)]
+        TaskCategoryOption.ordered(categories: categories).compactMap { option in
+            let rows = notes.filter { $0.categoryID == option.categoryID }
+            return rows.isEmpty && !includeEmpty ? nil : TaskGroup(id: option.id, name: option.name, notes: rows)
+        }
     }
 }
 
@@ -79,21 +101,16 @@ struct LaterTaskGroup: Identifiable, Equatable {
         tasks.count { !$0.isCompleted }
     }
 
-    /// Custom categories in saved creation order, then General. Only groups
+    /// General first, then custom categories in saved rank order. Only groups
     /// with tasks appear. Each group filters the canonical task array, so a
     /// reassigned task takes its original relative position in its new group.
     /// The state never publishes a task whose category is missing from the
     /// catalog, so every task lands in exactly one group.
     static func groups(categories: [TaskCategory], tasks: [LaterTask]) -> [LaterTaskGroup] {
-        let custom = categories
-            .sorted { $0.creationOrder < $1.creationOrder }
-            .compactMap { category -> LaterTaskGroup? in
-                let rows = tasks.filter { $0.categoryID == category.id }
-                return rows.isEmpty ? nil : LaterTaskGroup(id: .category(category.id), name: category.name, tasks: rows)
-            }
-        let general = tasks.filter { $0.categoryID == nil }
-        guard !general.isEmpty else { return custom }
-        return custom + [LaterTaskGroup(id: .general, name: TaskCategoryName.general, tasks: general)]
+        TaskCategoryOption.ordered(categories: categories).compactMap { option in
+            let rows = tasks.filter { $0.categoryID == option.categoryID }
+            return rows.isEmpty ? nil : LaterTaskGroup(id: option.id, name: option.name, tasks: rows)
+        }
     }
 }
 

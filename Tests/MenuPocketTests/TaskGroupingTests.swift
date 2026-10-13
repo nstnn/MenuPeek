@@ -4,7 +4,46 @@ import XCTest
 final class TaskGroupingTests: XCTestCase {
     private let day = "2026-09-27"
 
-    func testGroupsFollowCategoryCreationOrderAndKeepSavedTaskOrderWithGeneralLast() throws {
+    func testSavedRankChangeAgreesAcrossGroupsHistoryGlanceAndCategoryOptions() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 8)
+        let personal = try TaskCategory(name: "Personal", creationOrder: 20)
+        let empty = try TaskCategory(name: "Empty", creationOrder: 40)
+        let catalog = [empty, personal, work]
+        let saved = [note("W1", work), note("G1", nil), note("P1", personal),
+                     note("W2", work, completed: true)]
+        let later = [laterTask("W1", work), laterTask("G1", nil), laterTask("P1", personal)]
+        let original = TaskGroup.groups(categories: catalog, notes: saved)
+        XCTAssertEqual(original.map(\.name), ["General", "Work", "Personal"])
+
+        // The same UUID/name now has an earlier saved rank; input array and
+        // names are not the ordering authority. Empty stays selectable.
+        let reordered = [empty, TaskCategory(personal, creationOrder: -5), work]
+        let options = TaskCategoryOption.ordered(categories: reordered)
+        XCTAssertEqual(options.map(\.name), ["General", "Personal", "Work", "Empty"])
+        XCTAssertEqual(options.map(\.categoryID), [nil, personal.id, work.id, empty.id])
+        XCTAssertEqual(options.map(\.id), [.general, .category(personal.id), .category(work.id), .category(empty.id)])
+        XCTAssertEqual(TaskCategoryOption.ordered(categories: []), [.general])
+
+        let groups = TaskGroup.groups(categories: reordered, notes: saved)
+        let history = try HistoryDaySnapshot(dayKey: day, notes: saved, categories: reordered)
+        let laterGroups = LaterTaskGroup.groups(categories: reordered, tasks: later)
+        XCTAssertEqual(groups.map(\.name), ["General", "Personal", "Work"])
+        XCTAssertEqual(history.groups, groups)
+        XCTAssertEqual(laterGroups.map(\.id), groups.map(\.id))
+        XCTAssertEqual(groups.map(\.notes), [[saved[1]], [saved[2]], [saved[0], saved[3]]])
+        XCTAssertEqual(laterGroups.map(\.tasks), [[later[1]], [later[2]], [later[0]]])
+        XCTAssertEqual(history.notes, saved)
+        XCTAssertEqual(history.progress, NoteProgress(completed: 1, total: 4))
+        let glance = MenuBarGlance(dayKey: day, progress: history.progress, groups: groups,
+                                   laterRemainingCount: 3, canAddTask: true)
+        guard case let .tasks(rows, overflow) = glance.body else { return XCTFail("Expected glance rows") }
+        XCTAssertEqual(rows.map(\.id), [saved[1].id, saved[2].id, saved[0].id])
+        XCTAssertNil(overflow)
+        XCTAssertEqual(glance.laterRemainingCount, 3)
+        XCTAssertEqual(catalog, [empty, personal, work], "Presentation cannot rewrite the catalog")
+    }
+
+    func testGroupsFollowSavedCategoryRankAndKeepSavedTaskOrderWithGeneralFirst() throws {
         let school = try TaskCategory(name: "School", creationOrder: 0)
         let work = try TaskCategory(name: "Work", creationOrder: 2)
         let fitness = try TaskCategory(name: "Fitness", creationOrder: 5)
@@ -19,12 +58,12 @@ final class TaskGroupingTests: XCTestCase {
         // Catalog input order and gaps in saved order do not change the result.
         let groups = TaskGroup.groups(categories: [fitness, work, school], notes: saved)
 
-        XCTAssertEqual(groups.map(\.id), [.category(school.id), .category(work.id), .general])
-        XCTAssertEqual(groups.map(\.name), ["School", "Work", "General"])
-        XCTAssertEqual(groups.map(\.notes), [[math, biology], [reply, report], [groceries, desk]])
-        XCTAssertEqual(groups.map(\.progress), [NoteProgress(completed: 1, total: 2),
+        XCTAssertEqual(groups.map(\.id), [.general, .category(school.id), .category(work.id)])
+        XCTAssertEqual(groups.map(\.name), ["General", "School", "Work"])
+        XCTAssertEqual(groups.map(\.notes), [[groceries, desk], [math, biology], [reply, report]])
+        XCTAssertEqual(groups.map(\.progress), [NoteProgress(completed: 0, total: 2),
                                                 NoteProgress(completed: 1, total: 2),
-                                                NoteProgress(completed: 0, total: 2)])
+                                                NoteProgress(completed: 1, total: 2)])
     }
 
     func testReassignedTaskTakesItsOriginalRelativePositionInTheDestination() throws {
@@ -39,8 +78,8 @@ final class TaskGroupingTests: XCTestCase {
 
         let groups = TaskGroup.groups(categories: [work], notes: [first, second, reassigned, fourth])
 
-        XCTAssertEqual(groups.map(\.id), [.category(work.id), .general])
-        XCTAssertEqual(groups.map(\.notes), [[first], [second, reassigned, fourth]])
+        XCTAssertEqual(groups.map(\.id), [.general, .category(work.id)])
+        XCTAssertEqual(groups.map(\.notes), [[second, reassigned, fourth], [first]])
     }
 
     func testGroupCountsSumToDailyProgress() throws {
@@ -100,15 +139,15 @@ final class TaskGroupingTests: XCTestCase {
         let saved = [note("Saved", work, completed: true)]
         let normal = TaskGroup.groups(categories: [work, empty], notes: saved)
         let dragging = TaskGroup.groups(categories: [work, empty], notes: saved, includeEmpty: true)
-        XCTAssertEqual(dragging.map(\.id), [.category(empty.id), .category(work.id), .general])
+        XCTAssertEqual(dragging.map(\.id), [.general, .category(empty.id), .category(work.id)])
         XCTAssertEqual(dragging.map(\.progress), [NoteProgress(completed: 0, total: 0),
-                                                NoteProgress(completed: 1, total: 1),
-                                                NoteProgress(completed: 0, total: 0)])
+                                                NoteProgress(completed: 0, total: 0),
+                                                NoteProgress(completed: 1, total: 1)])
         XCTAssertEqual(dragging.flatMap(\.notes), saved)
         XCTAssertEqual(TaskGroup.groups(categories: [work, empty], notes: saved), normal)
     }
 
-    func testLaterGroupsFollowCategoryCreationOrderAndKeepSavedOrderWithGeneralLast() throws {
+    func testLaterGroupsFollowSavedCategoryRankAndKeepSavedOrderWithGeneralFirst() throws {
         let school = try TaskCategory(name: "School", creationOrder: 0)
         let work = try TaskCategory(name: "Work", creationOrder: 2)
         let reply = laterTask("Reply to client", work, completed: true)
@@ -121,10 +160,10 @@ final class TaskGroupingTests: XCTestCase {
 
         let groups = LaterTaskGroup.groups(categories: [work, school], tasks: saved)
 
-        XCTAssertEqual(groups.map(\.id), [.category(school.id), .category(work.id), .general])
-        XCTAssertEqual(groups.map(\.name), ["School", "Work", "General"])
-        XCTAssertEqual(groups.map(\.tasks), [[math, biology], [reply, report], [groceries, desk]])
-        XCTAssertEqual(groups.map(\.remainingCount), [1, 1, 2])
+        XCTAssertEqual(groups.map(\.id), [.general, .category(school.id), .category(work.id)])
+        XCTAssertEqual(groups.map(\.name), ["General", "School", "Work"])
+        XCTAssertEqual(groups.map(\.tasks), [[groceries, desk], [math, biology], [reply, report]])
+        XCTAssertEqual(groups.map(\.remainingCount), [2, 1, 1])
     }
 
     func testLaterGroupsWithOnlyCompletedTasksRemainVisibleWithZeroRemaining() throws {
@@ -134,10 +173,10 @@ final class TaskGroupingTests: XCTestCase {
 
         let groups = LaterTaskGroup.groups(categories: [work], tasks: [completedWork, pendingGeneral])
 
-        XCTAssertEqual(groups.map(\.id), [.category(work.id), .general])
-        XCTAssertEqual(groups[0].remainingCount, 0)
+        XCTAssertEqual(groups.map(\.id), [.general, .category(work.id)])
+        XCTAssertEqual(groups[0].remainingCount, 1)
         XCTAssertEqual(groups[0].tasks.count, 1)
-        XCTAssertEqual(groups[1].remainingCount, 1)
+        XCTAssertEqual(groups[1].remainingCount, 0)
     }
 
     func testLaterEmptyGroupsDoNotAppear() throws {
