@@ -343,7 +343,12 @@ struct TaskWindowView: View {
             }
             .onDisappear { interruptMovement() }
             .onChange(of: presentation.canMoveTask(state: state)) { _, eligible in
-                if !eligible { interruptMovement() }
+                if !eligible {
+                    // Category ownership disables task movement without cancelling itself.
+                    presentation.dragSession.cancel()
+                    if let request = presentation.movementReveal { presentation.consumeMovementReveal(request) }
+                    presentation.validateCategoryMovement(state: state)
+                }
             }
             .onChange(of: state.todayKey) { _, _ in interruptMovement() }
             .onChange(of: state.notes) { _, notes in
@@ -700,6 +705,21 @@ struct TaskWindowView: View {
                         .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
                 }
         }
+        .overlay(alignment: .top) { categorySource(group).frame(height: 12) }
+        .overlay(alignment: .bottom) { categorySource(group).frame(height: 12) }
+        .overlay(alignment: .leading) { categorySource(group).frame(width: 16) }
+        .overlay(alignment: .trailing) { categorySource(group).frame(width: 16) }
+    }
+
+    @ViewBuilder
+    private func categorySource(_ group: Group, click: (() -> Void)? = nil) -> some View {
+        if case let .category(id) = group.id {
+            CategoryDragSource(name: group.name, categoryID: id, context: .list(destination),
+                               state: state, session: presentation.categoryDragSession,
+                               enabled: presentation.canReorderCategories(in: .list(destination), state: state),
+                               count: { group.notes.count }, click: click)
+                .accessibilityHidden(true)
+        }
     }
 
     private func groupHeader(_ group: Group, collapsed: Bool) -> some View {
@@ -726,6 +746,7 @@ struct TaskWindowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay { categorySource(group, click: { toggleGroup(group) }) }
         .focusable()
         .keyboardFocusAppearance()
         .focused($focusedControl, equals: .group(group.id))

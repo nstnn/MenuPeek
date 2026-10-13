@@ -41,3 +41,17 @@ Preconditions:
 - A `Work` menu item title can also match the composer's Category pop-up items if a pop-up is open. Close other menus with `key escape` first.
 - Reordering categories by drag in the manager is pointer-only and cannot be driven here. Report it as Not tested, or give the user manual steps, and check `categories.creation_order` in `db.txt` for the stored order.
 - Removing a category changes saved data on every day. Use a fresh run when another recipe needs the seeded categories.
+
+## Category hold sources (TASK-006)
+
+Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories source mounting and accepting category drops are later cards; TASK-006 starts transient drags only and saves nothing.
+
+On an isolated fixture, use actual pointer input with the window active:
+
+1. Short-click Work: disclosure toggles once. Restore the original collapse state.
+2. Hold its header for at least 300 ms then release without moving: disclosure stays unchanged. Move at least 4 pt before 300 ms: neither disclosure nor category drag starts.
+3. Hold then move on the header and empty outer padding, including while collapsed. The compact preview shows name and total task count including completed rows. Escape or outside release saves nothing. Repeat on Later.
+4. Select task text, toggle/restore a checkbox, open/close Actions, and use composer fields. These regions must not start category drag. General remains ordinary disclosure input.
+5. Close/reopen the window, switch destination, or begin editing: candidates lose authorization. A native reservation remains until AppKit source-end; another task/category drag cannot overlap it. After native end, a fresh drag can start.
+
+Take before/after SQLite and defaults snapshots; category ranks and task fields must be identical, and collapse defaults must match after explicitly restoring short-click checks. `mpax press` proves accessibility disclosure only; it cannot establish pointer hold timing or native drag. Hosted lifecycle tests are supporting evidence; unobserved physical gestures remain Not tested for TASK-010. Save the exact source/artifact identity and clean the fixture after every session.

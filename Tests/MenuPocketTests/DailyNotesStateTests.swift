@@ -210,6 +210,98 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertTrue(presentation.canReorderCategories(in: .list(.later), state: state))
     }
 
+    func testCategoryHoldSourceClickArmEarlyMovementAndInvalidation() throws {
+        let category = try TaskCategory(name: "Work", creationOrder: 0)
+        let task = categorized("Task", category, createdAt: 1)
+        let state = makeState(store: FakeNoteRepository(notes: [task], categories: [category]),
+                              now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.taskWindowPresentation.setWindowVisible(true, state: state)
+        let source = CategoryDragSourceView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        source.categoryID = category.id
+        source.catalog = state.categories
+        source.state = state
+        source.session = state.taskWindowPresentation.categoryDragSession
+        source.enabled = true
+        var clicks = 0
+        source.click = { clicks += 1 }
+        defer { source.cancelCandidate(); state.stopForTermination() }
+        func event(_ type: NSEvent.EventType, x: CGFloat = 10) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 10),
+                                             modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                             context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.mouseUp(with: try event(.leftMouseUp))
+        XCTAssertEqual(clicks, 1)
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.armCandidate()
+        XCTAssertEqual(source.phase, .armed)
+        source.mouseUp(with: try event(.leftMouseUp))
+        XCTAssertEqual(clicks, 1, "Stationary armed release never discloses")
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
+        source.armCandidate()
+        source.mouseUp(with: try event(.leftMouseUp))
+        XCTAssertEqual(clicks, 1, "Early movement cancels both hold and click")
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.cancelCandidate() // SwiftUI dismantle/window cancellation uses this path.
+        source.armCandidate()
+        source.mouseUp(with: try event(.leftMouseUp))
+        XCTAssertEqual(clicks, 1)
+        source.mouseDown(with: try event(.leftMouseDown))
+        state.beginEditing(id: task.id)
+        source.armCandidate()
+        XCTAssertEqual(source.phase, .cancelled)
+        XCTAssertNil(source.session?.active)
+        XCTAssertFalse(source.session?.isDragging ?? true)
+        source.enabled = false
+        XCTAssertNil(source.hitTest(NSPoint(x: 10, y: 10)))
+    }
+
+    func testCategoryNativeTokenRequiresExactSourceAndCatalogAndSurvivesUnmountUntilEnd() throws {
+        let category = try TaskCategory(name: "Work", creationOrder: 0)
+        let store = FakeNoteRepository(notes: [categorized("Task", category, createdAt: 1)], categories: [category])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.taskWindowPresentation.setWindowVisible(true, state: state)
+        defer { state.stopForTermination() }
+        let session = state.taskWindowPresentation.categoryDragSession
+        var source: CategoryDragSourceView? = CategoryDragSourceView(frame: .zero)
+        weak var retainedSource = source
+        let payload = try XCTUnwrap(session.begin(categoryID: category.id, context: .list(.today), state: state, source: source))
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        func write(_ token: UUID, extraType: Bool = false) {
+            board.clearContents()
+            let item = NSPasteboardItem()
+            item.setString(token.uuidString, forType: CategoryDragSession.pasteboardType)
+            if extraType { item.setString("external", forType: .string) }
+            board.writeObjects([item])
+        }
+        write(payload.token)
+        XCTAssertEqual(session.validatedPayload(source: source, pasteboard: board, state: state), payload)
+        XCTAssertNil(session.validatedPayload(source: CategoryDragSourceView(frame: .zero), pasteboard: board, state: state))
+        XCTAssertNil(session.validatedPayload(source: nil, pasteboard: board, state: state))
+        write(UUID())
+        XCTAssertNil(session.validatedPayload(source: source, pasteboard: board, state: state))
+        write(payload.token, extraType: true)
+        XCTAssertNil(session.validatedPayload(source: source, pasteboard: board, state: state))
+        write(payload.token)
+        source = nil
+        XCTAssertNotNil(retainedSource, "Native source remains owned across SwiftUI remount")
+        state.renameCategory(id: category.id, name: "Renamed")
+        XCTAssertNil(session.validatedPayload(source: retainedSource, pasteboard: board, state: state))
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: UUID())
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: payload.token)
+        XCTAssertNil(retainedSource)
+        session.ended(token: payload.token)
+        XCTAssertFalse(session.isDragging)
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+    }
+
     func testCategoryAndTaskReservationsExcludeEachOtherThroughCancelAndNativeEnd() throws {
         let a = try TaskCategory(name: "A", creationOrder: 0)
         let b = try TaskCategory(name: "B", creationOrder: 1)
