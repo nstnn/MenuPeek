@@ -121,6 +121,57 @@ final class SQLiteNoteRepository: NoteRepository {
         }
     }
 
+    func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        try transaction {
+            let snapshot = try categories()
+            let outcome = CategoryMovePlanner.plan(request, categories: snapshot)
+            guard case let .changed(ordered) = outcome else { return outcome }
+            let stagingStart = try Self.categoryStagingStart(
+                avoiding: snapshot.map(\.creationOrder), count: Int64(ordered.count)
+            )
+            let statement = try prepare("UPDATE categories SET creation_order = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            // The temporary range is disjoint from both saved and final ranks.
+            // All arithmetic is checked before the first UPDATE.
+            for temporary in [true, false] {
+                for (index, category) in ordered.enumerated() {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    let rank = temporary ? stagingStart + Int64(index) : category.creationOrder
+                    try check(sqlite3_bind_int64(statement, 1, rank), operation: "bind category order")
+                    try bind(category.id.uuidString, at: 2, to: statement)
+                    try executeWrite(statement, id: category.id, operation: "rewrite category order",
+                                     notFound: TaskCategoryRepositoryError.notFound(category.id))
+                }
+            }
+            // No post-commit read can misreport a successful write as a failure.
+            // transaction publishes this coherent catalog only after COMMIT.
+            return outcome
+        }
+    }
+
+    /// Find a contiguous Int64 range outside the saved ranks and final 0..<count.
+    /// Kept separate so exhaustion/overflow can be checked without a huge store.
+    static func categoryStagingStart(avoiding ranks: [Int64], count: Int64) throws -> Int64 {
+        guard count > 0 else { throw TaskCategoryRepositoryError.orderExhausted }
+        let blocked = (ranks.map { (lower: $0, upper: $0) } + [(lower: Int64(0), upper: count - 1)])
+            .sorted { $0.lower < $1.lower }
+        var start = Int64.min
+        for range in blocked {
+            if range.upper < start { continue }
+            let end = start.addingReportingOverflow(count - 1)
+            guard !end.overflow else { throw TaskCategoryRepositoryError.orderExhausted }
+            if end.partialValue < range.lower { return start }
+            let next = range.upper.addingReportingOverflow(1)
+            guard !next.overflow else { throw TaskCategoryRepositoryError.orderExhausted }
+            start = next.partialValue
+        }
+        guard !start.addingReportingOverflow(count - 1).overflow else {
+            throw TaskCategoryRepositoryError.orderExhausted
+        }
+        return start
+    }
+
     func renameCategory(id: UUID, name: String) throws -> TaskCategory {
         let name = try TaskCategoryName.validate(name)
         return try transaction {

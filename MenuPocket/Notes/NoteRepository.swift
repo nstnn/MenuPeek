@@ -22,10 +22,14 @@ enum LaterTaskRepositoryError: Error, Equatable {
 /// All mutations either persist fully or throw, including writes for a missing
 /// ID. Callers should publish changed notes only after successful persistence.
 protocol NoteRepository {
-    /// Custom categories only, in saved creation order. General has no row.
+    /// Custom categories only, in saved rank order. General has no row.
     func categories() throws -> [TaskCategory]
     func createCategory(name: String) throws -> TaskCategory
-    /// Keeps the category's identity and creation order.
+    /// Revalidates the full catalog inside a write transaction. Changed saved
+    /// catalogs return only after COMMIT; rejected/unchanged requests perform
+    /// no updates. Storage failures throw without publishing a partial reorder.
+    func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome
+    /// Keeps the category's identity and saved rank.
     func renameCategory(id: UUID, name: String) throws -> TaskCategory
     /// Includes completed and incomplete tasks across every saved day and the
     /// Later list. A missing category throws, rather than reporting an unused category.
