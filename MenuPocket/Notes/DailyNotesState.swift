@@ -46,6 +46,7 @@ enum CategoryNameIssue: Equatable {
 enum CategoryCommandIssue: Equatable {
     case create
     case rename
+    case reorder
     case remove
     case usage
     case notFound
@@ -55,6 +56,7 @@ enum CategoryCommandIssue: Equatable {
         switch self {
         case .create: "Could not create category. Try again."
         case .rename: "Could not rename category. Try again."
+        case .reorder: "Could not reorder categories. Try again."
         case .remove: "Could not remove category. Try again."
         case .usage: "Could not count this category's tasks. Try again."
         case .notFound: "This category is no longer available."
@@ -91,8 +93,12 @@ final class DailyNotesState {
     private(set) var historyRevision: UInt64 = 0
 
     private(set) var todayKey: String?
-    private(set) var hasLoadedCatalog = false
-    private(set) var categories: [TaskCategory] = []
+    private(set) var hasLoadedCatalog = false {
+        didSet { if !hasLoadedCatalog { taskWindowPresentation.cancelCategoryMovement() } }
+    }
+    private(set) var categories: [TaskCategory] = [] {
+        didSet { if categories != oldValue { taskWindowPresentation.cancelCategoryMovement() } }
+    }
     private(set) var notes: [Note] = []
     private(set) var yesterdayIncompleteCount = 0
     private(set) var hasLoadedToday = false
@@ -100,6 +106,8 @@ final class DailyNotesState {
     private(set) var taskIssue: DailyNotesIssue?
     private(set) var categoryNameIssue: CategoryNameIssue?
     private(set) var categoryIssue: CategoryCommandIssue?
+    /// Reorder failures do not replace name/CRUD errors or task errors.
+    private(set) var categoryReorderIssue: CategoryCommandIssue?
 
     private(set) var laterTasks: [LaterTask] = []
     private(set) var hasLoadedLater = false
@@ -114,7 +122,9 @@ final class DailyNotesState {
     var draft = ""
     /// The new task's category; nil is General. Independent of the edit draft.
     var draftCategoryID: UUID?
-    private(set) var editingNoteID: UUID?
+    private(set) var editingNoteID: UUID? {
+        didSet { if editingNoteID != nil { taskWindowPresentation.cancelCategoryMovement() } }
+    }
     var editDraft = ""
     /// The edited task's category; begins as its saved association.
     var editCategoryID: UUID?
@@ -124,7 +134,9 @@ final class DailyNotesState {
     var laterDraft = ""
     /// The new Later task's category; nil is General. Independent of Today's draft.
     var laterDraftCategoryID: UUID?
-    private(set) var editingLaterTaskID: UUID?
+    private(set) var editingLaterTaskID: UUID? {
+        didSet { if editingLaterTaskID != nil { taskWindowPresentation.cancelCategoryMovement() } }
+    }
     var laterEditDraft = ""
     /// The edited Later task's category; begins as its saved association.
     var laterEditCategoryID: UUID?
@@ -159,6 +171,17 @@ final class DailyNotesState {
 
     var canMoveTasks: Bool {
         !isTerminating && hasLoadedToday && todayKey == day.keys().today && editingNoteID == nil
+    }
+
+    /// Readiness never refreshes here: a stale visible context must not be
+    /// silently retargeted, or alter drafts/revision on a blocked reorder.
+    func canReorderCategories(in context: CategoryReorderContext) -> Bool {
+        guard !isTerminating, hasLoadedCatalog, editingNoteID == nil, editingLaterTaskID == nil else { return false }
+        switch context {
+        case .list(.today): return hasLoadedToday && todayKey == day.keys().today
+        case .list(.later): return hasLoadedLater
+        case .manager: return hasLoadedToday || hasLoadedLater
+        }
     }
 
     @ObservationIgnored private let repositoryFactory: () throws -> any NoteRepository
@@ -220,6 +243,7 @@ final class DailyNotesState {
     func stopForTermination() {
         isTerminating = true
         taskWindowPresentation.cancelMovement()
+        taskWindowPresentation.cancelCategoryMovement()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
         repository = nil
@@ -235,7 +259,10 @@ final class DailyNotesState {
 
     private func refresh(keys: (today: String, yesterday: String)) {
         guard !isTerminating else { return }
-        defer { historyRevision += 1 }
+        defer {
+            taskWindowPresentation.validateCategoryMovement(state: self)
+            historyRevision += 1
+        }
         if todayKey != keys.today {
             // Invalidate the old snapshot before asking storage for the new day.
             let hadPreviousDay = todayKey != nil
@@ -401,6 +428,40 @@ final class DailyNotesState {
     func clearCategoryIssues() {
         categoryNameIssue = nil
         categoryIssue = nil
+        categoryReorderIssue = nil
+    }
+
+    /// Publish only the repository's committed catalog; task snapshots, drafts,
+    /// collapse preferences and the task movement reveal are untouched.
+    @discardableResult
+    func moveCategory(_ request: CategoryMoveRequest, in context: CategoryReorderContext) -> CategoryMoveOutcome? {
+        let presentation = taskWindowPresentation
+        presentation.validateCategoryMovement(state: self)
+        let authorized = presentation.categoryDragSession.authorizesSave(request, context: context)
+        presentation.cancelCategoryMovement()
+        guard authorized, presentation.canReorderCategories(in: context, state: self), let repository else { return nil }
+        if case let .rejected(reason) = CategoryMovePlanner.plan(request, categories: categories) {
+            categoryReorderIssue = .reorder
+            return .rejected(reason)
+        }
+        do {
+            let outcome = try repository.moveCategory(request)
+            switch outcome {
+            case let .changed(saved):
+                categories = saved
+                historyRevision += 1
+                presentation.requestCategoryMovementReveal(categoryID: request.categoryID, context: context, catalog: saved)
+                categoryReorderIssue = nil
+            case .unchanged:
+                categoryReorderIssue = nil
+            case .rejected:
+                categoryReorderIssue = .reorder
+            }
+            return outcome
+        } catch {
+            categoryReorderIssue = .reorder
+            return nil
+        }
     }
 
     func clearLaterIssues() {

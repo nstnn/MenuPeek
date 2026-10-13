@@ -94,6 +94,7 @@ final class TaskWindowPresentation {
     func setWindowVisible(_ visible: Bool, state: DailyNotesState) {
         guard !isTerminating else { return }
         isWindowVisible = visible
+        if !visible { cancelCategoryMovement() }
         refreshBrowser(state: state)
     }
 
@@ -131,6 +132,7 @@ final class TaskWindowPresentation {
     func stopForTermination() {
         isTerminating = true
         isWindowVisible = false
+        cancelMovement()
         updateBrowserVisibility()
     }
 
@@ -175,6 +177,63 @@ final class TaskWindowPresentation {
 
     let dragSession = TaskDragSession()
     private(set) var movementReveal: MovementReveal?
+    let categoryDragSession = CategoryDragSession()
+    private(set) var managerRenamingID: UUID?
+
+    struct CategoryMovementReveal: Equatable {
+        let id = UUID()
+        let categoryID: UUID
+        let context: CategoryReorderContext
+        let catalog: [TaskCategory]
+    }
+
+    private(set) var categoryMovementReveal: CategoryMovementReveal?
+
+    /// Both start and save use this path. The manager owns its idle sheet;
+    /// list sources never act through that sheet or a hidden browser pane.
+    func canReorderCategories(in context: CategoryReorderContext, state: DailyNotesState) -> Bool {
+        guard !isTerminating, isWindowVisible, isShowingList,
+              state.canReorderCategories(in: context), deletionTarget == nil,
+              categoryRemovalTarget == nil, !dragSession.isDragging else { return false }
+        switch context {
+        case let .list(destination):
+            return !isManagingCategories && selectedDestination == destination
+        case .manager:
+            return isManagingCategories && managerRenamingID == nil
+        }
+    }
+
+    func setManagerRenaming(_ id: UUID?) {
+        guard managerRenamingID != id else { return }
+        managerRenamingID = id
+        cancelCategoryMovement()
+    }
+
+    func requestCategoryMovementReveal(categoryID: UUID, context: CategoryReorderContext, catalog: [TaskCategory]) {
+        categoryMovementReveal = CategoryMovementReveal(categoryID: categoryID, context: context, catalog: catalog)
+    }
+
+    func isCategoryMovementRevealValid(_ request: CategoryMovementReveal, state: DailyNotesState) -> Bool {
+        categoryMovementReveal == request && state.categories == request.catalog &&
+            request.catalog.contains { $0.id == request.categoryID } &&
+            canReorderCategories(in: request.context, state: state)
+    }
+
+    func consumeCategoryMovementReveal(_ request: CategoryMovementReveal) {
+        if categoryMovementReveal == request { categoryMovementReveal = nil }
+    }
+
+    func cancelCategoryMovement() {
+        categoryDragSession.cancel()
+        categoryMovementReveal = nil
+    }
+
+    func validateCategoryMovement(state: DailyNotesState) {
+        categoryDragSession.validate(state: state)
+        if let request = categoryMovementReveal, !isCategoryMovementRevealValid(request, state: state) {
+            categoryMovementReveal = nil
+        }
+    }
 
     func requestMovementReveal(_ request: TaskMoveRequest) {
         movementReveal = MovementReveal(taskID: request.taskID, dayKey: request.expectedDayKey,
@@ -188,6 +247,7 @@ final class TaskWindowPresentation {
     func cancelMovement() {
         dragSession.cancel()
         movementReveal = nil
+        cancelCategoryMovement()
     }
 
     private(set) var selectedDestination: TaskListDestination = .today
@@ -283,7 +343,7 @@ final class TaskWindowPresentation {
     /// visible Today list moves tasks; Later and History never do.
     func canMoveTask(state: DailyNotesState) -> Bool {
         isShowingList && selectedDestination == .today && state.canMoveTasks &&
-            !hasGuardedInteraction(state: state)
+            !hasGuardedInteraction(state: state) && !categoryDragSession.isDragging
     }
 
     /// Row-menu alternatives to dragging. They form the same identity-based
@@ -458,6 +518,8 @@ final class TaskWindowPresentation {
     }
 
     func dismissCategoryManager() {
+        cancelCategoryMovement()
+        managerRenamingID = nil
         cancelCategoryRemoval()
         isManagingCategories = false
     }
@@ -467,8 +529,10 @@ final class TaskWindowPresentation {
     @discardableResult
     func requestCategoryRemoval(id: UUID, state: DailyNotesState) -> Bool {
         guard isManagingCategories,
+              managerRenamingID == nil,
               let category = state.availableCategories?.first(where: { $0.id == id }),
               let count = state.categoryUsageCount(id: id) else { return false }
+        cancelCategoryMovement()
         categoryRemovalTarget = CategoryRemovalTarget(id: id, name: category.name,
                                                       usageCount: count, countChanged: false)
         return true

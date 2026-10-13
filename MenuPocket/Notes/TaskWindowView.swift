@@ -113,6 +113,11 @@ struct TaskWindowView: View {
                                 .accessibilityIdentifier("laterMoveNotice")
                         }
                         if let message = topWriteError { taskWriteError(message) }
+                        if let message = state.categoryReorderIssue?.message {
+                            Text(message)
+                                .foregroundStyle(.red)
+                                .accessibilityIdentifier("categoryReorderError")
+                        }
                     }
                     .padding(16)
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
@@ -539,7 +544,7 @@ struct TaskWindowView: View {
     private var hasMoveNotice: Bool { isLater && isMoveNoticeVisible && issue != .moveToToday }
 
     private var hasTopInteractionContent: Bool {
-        presentation.deletionTarget == nil && (hasComposer || hasMoveNotice || topWriteError != nil)
+        presentation.deletionTarget == nil && (hasComposer || hasMoveNotice || topWriteError != nil || state.categoryReorderIssue != nil)
     }
 
     private var hasFooterContent: Bool {

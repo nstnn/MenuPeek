@@ -8,6 +8,326 @@ import XCTest
 final class DailyNotesStateTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/Toronto")!
 
+
+    func testCategoryReorderPublishesCommittedCatalogOnceAndPreservesOtherState() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 8)
+        let home = try TaskCategory(name: "Home", creationOrder: 40)
+        let task = categorized("Done", work, createdAt: 1, completedAt: Date(timeIntervalSince1970: 2))
+        let later = laterTask("Later", createdAt: 3, categoryID: home.id)
+        let store = FakeNoteRepository(notes: [task], categories: [work, home], laterTasks: [later])
+        var opens = 0
+        let state = DailyNotesState(repositoryFactory: { opens += 1; return store },
+                                   day: NoteDay(now: { self.instant("2026-09-27T12:00:00-04:00") }, timeZone: { self.zone }),
+                                   notificationCenter: NotificationCenter(), workspaceNotificationCenter: NotificationCenter(),
+                                   categoryPreferences: isolatedCategoryPreferences())
+        defer { state.stopForTermination() }
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        state.draft = "Pending Today"
+        state.draftCategoryID = work.id
+        state.laterDraft = "Pending Later"
+        state.laterDraftCategoryID = home.id
+        state.categoryPreferences.rememberLastUsed(work.id)
+        state.categoryPreferences.rememberLastUsed(home.id, in: .later)
+        for destination in [TaskListDestination.today, .later] {
+            state.categoryPreferences.setCollapsed(true, for: .category(work.id), in: destination)
+            state.categoryPreferences.setCollapsed(true, for: .category(home.id), in: destination)
+        }
+        store.failWrite = .add
+        XCTAssertFalse(state.addDraft())
+        store.failWrite = nil
+        XCTAssertNil(state.createCategory(name: " "))
+        store.failCategoryCommand = .usage
+        XCTAssertNil(state.categoryUsageCount(id: work.id))
+        store.failCategoryCommand = nil
+        let nameIssue = state.categoryNameIssue
+        let revision = state.historyRevision
+        let notes = state.notes
+        let laterTasks = state.laterTasks
+        let progress = state.availableProgress
+        let remaining = state.availableLaterRemainingCount
+        let reads = store.readAttempts
+        store.onCategoryMove = { [weak state] in
+            guard let state else { return XCTFail("State released before save") }
+            XCTAssertEqual(state.categories, [work, home], "No proposal published before storage returns")
+            XCTAssertEqual(state.historyRevision, revision)
+        }
+        let request = CategoryMoveRequest(categoryID: home.id, expectedOrderIDs: [work.id, home.id], placement: .before(work.id))
+        guard case .changed? = state.moveCategory(request, in: .list(.today)) else { return XCTFail("Expected commit") }
+        XCTAssertEqual(state.categories.map(\.id), [home.id, work.id])
+        XCTAssertEqual(state.historyRevision, revision + 1)
+        XCTAssertEqual(store.categoryMoveAttempts, 1)
+        XCTAssertEqual(store.readAttempts, reads + 1, "Only fake storage's transaction catalog read; no state refresh")
+        XCTAssertEqual(opens, 1)
+        XCTAssertEqual(state.notes, notes)
+        XCTAssertEqual(state.laterTasks, laterTasks)
+        XCTAssertEqual(state.availableProgress, progress)
+        XCTAssertEqual(state.availableLaterRemainingCount, remaining)
+        XCTAssertEqual(state.draft, "Pending Today")
+        XCTAssertEqual(state.draftCategoryID, work.id)
+        XCTAssertEqual(state.laterDraft, "Pending Later")
+        XCTAssertEqual(state.laterDraftCategoryID, home.id)
+        XCTAssertEqual(state.taskIssue, .add)
+        XCTAssertEqual(state.categoryIssue, .usage)
+        XCTAssertEqual(state.categoryNameIssue, nameIssue)
+        XCTAssertNil(state.categoryReorderIssue)
+        XCTAssertEqual(state.categoryPreferences.lastUsedCategoryID, work.id)
+        XCTAssertEqual(state.categoryPreferences.laterLastUsedCategoryID, home.id)
+        for destination in [TaskListDestination.today, .later] {
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(work.id), in: destination))
+            XCTAssertTrue(state.categoryPreferences.isCollapsed(.category(home.id), in: destination))
+        }
+        let reveal = try XCTUnwrap(presentation.categoryMovementReveal)
+        XCTAssertEqual(reveal.categoryID, home.id)
+        XCTAssertEqual(reveal.context, .list(.today))
+        XCTAssertTrue(presentation.isCategoryMovementRevealValid(reveal, state: state))
+        XCTAssertNil(presentation.movementReveal)
+        presentation.consumeCategoryMovementReveal(TaskWindowPresentation.CategoryMovementReveal(
+            categoryID: home.id, context: .list(.today), catalog: state.categories))
+        XCTAssertEqual(presentation.categoryMovementReveal, reveal, "Foreign request cannot consume reveal")
+        presentation.consumeCategoryMovementReveal(reveal)
+        XCTAssertNil(presentation.categoryMovementReveal)
+    }
+
+    func testCategoryReorderNoOpRejectionsAndWriteFailureKeepSnapshotAndAllowRetry() throws {
+        let a = try TaskCategory(name: "A", creationOrder: -7)
+        let b = try TaskCategory(name: "B", creationOrder: 80)
+        let store = FakeNoteRepository(notes: [categorized("Task", a, createdAt: 1)], categories: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        defer { state.stopForTermination() }
+        state.startup()
+        state.taskWindowPresentation.setWindowVisible(true, state: state)
+        let revision = state.historyRevision
+        let request = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .before(a.id))
+        let noOp = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .after(a.id))
+        XCTAssertEqual(state.moveCategory(noOp, in: .list(.today)), .unchanged)
+        XCTAssertEqual(state.categories, [a, b], "No-op preserves sparse legacy ranks")
+        let stale = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [b.id, a.id], placement: .before(a.id))
+        XCTAssertEqual(state.moveCategory(stale, in: .list(.today)), .rejected(.catalogChanged))
+        XCTAssertEqual(store.categoryMoveAttempts, 1, "Displayed stale request never reaches storage")
+        // Storage must revalidate against its fresh catalog, too.
+        store.savedCategories = [TaskCategory(b, creationOrder: 0), TaskCategory(a, creationOrder: 1)]
+        XCTAssertEqual(state.moveCategory(request, in: .list(.today)), .rejected(.catalogChanged))
+        store.savedCategories = [a, b]
+        store.failCategoryCommand = .reorder
+        XCTAssertNil(state.moveCategory(request, in: .list(.today)))
+        XCTAssertEqual(state.categoryReorderIssue, .reorder)
+        XCTAssertEqual(state.categoryReorderIssue?.message, "Could not reorder categories. Try again.")
+        XCTAssertEqual(state.categories, [a, b])
+        XCTAssertEqual(store.savedCategories, [a, b])
+        XCTAssertEqual(state.historyRevision, revision)
+        XCTAssertTrue(state.hasLoadedCatalog)
+        XCTAssertTrue(state.hasLoadedToday)
+        XCTAssertNil(state.taskWindowPresentation.categoryMovementReveal)
+        store.failCategoryCommand = nil
+        guard case .changed? = state.moveCategory(request, in: .list(.today)) else { return XCTFail("Retry failed") }
+        XCTAssertEqual(state.historyRevision, revision + 1)
+        XCTAssertNil(state.categoryReorderIssue)
+    }
+
+    func testCategoryReorderStartAndSaveShareAllContextGuards() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let task = categorized("Today", a, createdAt: 1)
+        let later = laterTask("Later", createdAt: 2, categoryID: a.id)
+        let request = CategoryMoveRequest(categoryID: a.id, expectedOrderIDs: [a.id, b.id], placement: .after(b.id))
+        typealias Guard = (String, CategoryReorderContext, (DailyNotesState, FakeNoteRepository) -> Void)
+        let guards: [Guard] = [
+            ("hidden window", .list(.today), { state, _ in state.taskWindowPresentation.setWindowVisible(false, state: state) }),
+            ("wrong list", .list(.later), { _, _ in }),
+            ("History", .list(.today), { state, _ in _ = state.taskWindowPresentation.showHistory(state: state) }),
+            ("Today edit", .list(.today), { state, _ in state.beginEditing(id: task.id) }),
+            ("Later edit", .list(.today), { state, _ in state.beginEditingLater(id: later.id) }),
+            ("deletion", .list(.today), { state, _ in _ = state.taskWindowPresentation.requestDeletion(id: task.id, state: state) }),
+            ("sheet over list", .list(.today), { state, _ in _ = state.taskWindowPresentation.showCategoryManager(state: state) }),
+            ("manager closed", .manager, { _, _ in }),
+            ("rename", .manager, { state, _ in
+                state.taskWindowPresentation.showCategoryManager(state: state)
+                state.taskWindowPresentation.setManagerRenaming(a.id)
+            }),
+            ("category removal", .manager, { state, _ in
+                state.taskWindowPresentation.showCategoryManager(state: state)
+                state.taskWindowPresentation.requestCategoryRemoval(id: a.id, state: state)
+            }),
+            ("catalog unavailable", .list(.today), { state, store in store.failSnapshotRead = .categories; state.refresh() }),
+            ("Today unavailable", .list(.today), { state, store in store.failSnapshotRead = .notes; state.refresh() }),
+            ("Later unavailable", .list(.later), { state, store in
+                state.taskWindowPresentation.selectDestination(.later, state: state)
+                store.failLaterRead = true; state.refresh()
+            }),
+            ("manager data unavailable", .manager, { state, store in
+                state.taskWindowPresentation.showCategoryManager(state: state)
+                store.failSnapshotRead = .notes; store.failLaterRead = true; state.refresh()
+            }),
+            ("presentation termination", .list(.today), { state, _ in state.taskWindowPresentation.stopForTermination() }),
+            ("state termination", .list(.today), { state, _ in state.stopForTermination() }),
+        ]
+        for (reason, context, block) in guards {
+            let store = FakeNoteRepository(notes: [task], categories: [a, b], laterTasks: [later])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            let presentation = state.taskWindowPresentation
+            presentation.setWindowVisible(true, state: state)
+            block(state, store)
+            let revision = state.historyRevision
+            XCTAssertFalse(presentation.canReorderCategories(in: context, state: state), reason)
+            XCTAssertNil(presentation.categoryDragSession.begin(categoryID: a.id, context: context, state: state), reason)
+            XCTAssertNil(state.moveCategory(request, in: context), reason)
+            XCTAssertEqual(state.categories, [a, b], reason)
+            XCTAssertEqual(state.historyRevision, revision, reason)
+            XCTAssertEqual(store.categoryMoveAttempts, 0, reason)
+            state.stopForTermination()
+        }
+    }
+
+    func testLaterAndIdleManagerReorderDoNotRequireAvailableToday() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let empty = try TaskCategory(name: "Empty", creationOrder: 1)
+        let store = FakeNoteRepository(categories: [a, empty], laterTasks: [laterTask("Later", createdAt: 1, categoryID: a.id)])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        defer { state.stopForTermination() }
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        presentation.selectDestination(.later, state: state)
+        store.failSnapshotRead = .notes
+        state.refresh()
+        XCTAssertTrue(presentation.canReorderCategories(in: .list(.later), state: state))
+        XCTAssertFalse(presentation.canReorderCategories(in: .list(.today), state: state))
+        XCTAssertNil(presentation.categoryDragSession.begin(categoryID: empty.id, context: .list(.later), state: state))
+        XCTAssertTrue(presentation.showCategoryManager(state: state))
+        let session = presentation.categoryDragSession
+        let payload = try XCTUnwrap(session.begin(categoryID: empty.id, context: .manager, state: state))
+        XCTAssertFalse(presentation.canReorderCategories(in: .list(.later), state: state))
+        XCTAssertTrue(session.consume(payload, state: state))
+        guard case .changed? = state.moveCategory(payload.request(.before(a.id)), in: .manager) else { return XCTFail("Manager reorder failed") }
+        XCTAssertEqual(presentation.categoryMovementReveal?.context, .manager)
+        XCTAssertTrue(session.isDragging)
+        session.ended(token: payload.token)
+        presentation.dismissCategoryManager()
+        XCTAssertNil(presentation.categoryMovementReveal)
+        XCTAssertTrue(presentation.canReorderCategories(in: .list(.later), state: state))
+    }
+
+    func testCategoryAndTaskReservationsExcludeEachOtherThroughCancelAndNativeEnd() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let task = categorized("Task", a, createdAt: 1)
+        let store = FakeNoteRepository(notes: [task], categories: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        defer { state.stopForTermination() }
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        let tasks = presentation.dragSession
+        let categories = presentation.categoryDragSession
+        let source = TaskDragHandleView(frame: .zero)
+        let taskPayload = try XCTUnwrap(tasks.begin(taskID: task.id, state: state, source: source))
+        tasks.cancel()
+        XCTAssertNil(categories.begin(categoryID: a.id, context: .list(.today), state: state))
+        let request = CategoryMoveRequest(categoryID: a.id, expectedOrderIDs: [a.id, b.id], placement: .after(b.id))
+        XCTAssertNil(state.moveCategory(request, in: .list(.today)))
+        tasks.ended(token: taskPayload.token)
+        let payload = try XCTUnwrap(categories.begin(categoryID: a.id, context: .list(.today), state: state))
+        XCTAssertNil(categories.begin(categoryID: a.id, context: .list(.today), state: state))
+        XCTAssertNil(tasks.begin(taskID: task.id, state: state, source: source))
+        XCTAssertTrue(categories.consume(payload, state: state))
+        XCTAssertFalse(categories.consume(payload, state: state), "Token consumes only once")
+        guard case .changed? = state.moveCategory(request, in: .list(.today)) else { return XCTFail("Consumed drop failed") }
+        XCTAssertNil(state.moveCategory(request, in: .list(.today)), "Consumed dispatch cannot save twice")
+        XCTAssertEqual(store.categoryMoveAttempts, 1)
+        XCTAssertNil(tasks.begin(taskID: task.id, state: state, source: source))
+        categories.ended(token: UUID())
+        XCTAssertTrue(categories.isDragging)
+        categories.ended(token: payload.token)
+        let next = try XCTUnwrap(tasks.begin(taskID: task.id, state: state, source: source))
+        tasks.ended(token: next.token)
+    }
+
+    func testCategoryDragInvalidationClearsAuthorizationButKeepsNativeReservation() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let task = categorized("Task", a, createdAt: 1)
+        let invalidations: [(String, (DailyNotesState, FakeNoteRepository) -> Void)] = [
+            ("catalog rename", { state, _ in _ = state.renameCategory(id: a.id, name: "Renamed") }),
+            ("context switch", { state, _ in _ = state.taskWindowPresentation.selectDestination(.later, state: state) }),
+            ("window close", { state, _ in state.taskWindowPresentation.windowWillClose() }),
+            ("start edit", { state, _ in state.beginEditing(id: task.id) }),
+            ("unavailable read", { state, store in store.failSnapshotRead = .notes; state.refresh() }),
+            ("source disappears", { state, store in store.saved = []; state.refresh() }),
+            ("termination", { state, _ in state.stopForTermination() }),
+        ]
+        for (reason, invalidate) in invalidations {
+            let store = FakeNoteRepository(notes: [task], categories: [a, b])
+            let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+            state.startup()
+            let presentation = state.taskWindowPresentation
+            presentation.setWindowVisible(true, state: state)
+            let session = presentation.categoryDragSession
+            let payload = try XCTUnwrap(session.begin(categoryID: a.id, context: .list(.today), state: state))
+            session.hoveredRequest = payload.request(.after(b.id))
+            invalidate(state, store)
+            XCTAssertNil(session.active, reason)
+            XCTAssertNil(session.hoveredRequest, reason)
+            XCTAssertTrue(session.isDragging, reason)
+            XCTAssertFalse(session.consume(payload, state: state), reason)
+            XCTAssertNil(state.moveCategory(payload.request(.after(b.id)), in: .list(.today)), reason)
+            XCTAssertEqual(store.categoryMoveAttempts, 0, reason)
+            session.ended(token: payload.token)
+            XCTAssertFalse(session.isDragging, reason)
+            state.stopForTermination()
+        }
+    }
+
+    func testCategoryDragManagerRenameAndDismissCancelConsumedAuthorization() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let store = FakeNoteRepository(categories: [a, b])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        defer { state.stopForTermination() }
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        presentation.showCategoryManager(state: state)
+        let session = presentation.categoryDragSession
+        let payload = try XCTUnwrap(session.begin(categoryID: a.id, context: .manager, state: state))
+        XCTAssertTrue(session.consume(payload, state: state))
+        presentation.setManagerRenaming(b.id)
+        XCTAssertNil(state.moveCategory(payload.request(.after(b.id)), in: .manager))
+        presentation.setManagerRenaming(nil)
+        XCTAssertNil(state.moveCategory(payload.request(.after(b.id)), in: .manager), "Returning to idle cannot restore a cancelled token")
+        session.ended(token: payload.token)
+        let next = try XCTUnwrap(session.begin(categoryID: a.id, context: .manager, state: state))
+        presentation.dismissCategoryManager()
+        XCTAssertNil(session.active)
+        XCTAssertNil(presentation.managerRenamingID)
+        XCTAssertFalse(session.consume(next, state: state))
+        session.ended(token: next.token)
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+    }
+
+    func testCategoryTodayReorderRejectsElapsedDayWithoutRefreshingOrRetargeting() throws {
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        let store = FakeNoteRepository(notes: [categorized("Task", a, createdAt: 1)], categories: [a, b])
+        var now = instant("2026-09-27T12:00:00-04:00")
+        let state = makeState(store: store, now: { now })
+        defer { state.stopForTermination() }
+        state.startup()
+        let presentation = state.taskWindowPresentation
+        presentation.setWindowVisible(true, state: state)
+        let payload = try XCTUnwrap(presentation.categoryDragSession.begin(categoryID: a.id, context: .list(.today), state: state))
+        let revision = state.historyRevision
+        now = instant("2026-09-28T12:00:00-04:00")
+        XCTAssertFalse(presentation.categoryDragSession.consume(payload, state: state))
+        XCTAssertNil(state.moveCategory(payload.request(.after(b.id)), in: .list(.today)))
+        XCTAssertEqual(state.todayKey, "2026-09-27")
+        XCTAssertEqual(state.historyRevision, revision)
+        XCTAssertEqual(store.categoryMoveAttempts, 0)
+        presentation.categoryDragSession.ended(token: payload.token)
+    }
+
     func testDragScrollBoundsCancellationAndSourceUnmount() throws {
         let a = note("A", day: "2026-09-27", createdAt: 1)
         let state = makeState(store: FakeNoteRepository(notes: [a]),
@@ -3844,6 +4164,8 @@ private final class FakeNoteRepository: NoteRepository {
     var failLaterWrite: DailyNotesIssue?
     var laterWriteAttempts = 0
     var moveAttempts = 0
+    var categoryMoveAttempts = 0
+    var onCategoryMove: (() -> Void)?
     var onMove: (() -> Void)?
 
     init(notes: [Note] = [], categories: [TaskCategory] = [], laterTasks: [LaterTask] = []) {
@@ -3893,6 +4215,9 @@ private final class FakeNoteRepository: NoteRepository {
     }
 
     func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        categoryMoveAttempts += 1
+        onCategoryMove?()
+        if failCategoryCommand == .reorder { throw FakeFailure.failed }
         let outcome = CategoryMovePlanner.plan(request, categories: try categories())
         if case let .changed(ordered) = outcome { savedCategories = ordered }
         return outcome

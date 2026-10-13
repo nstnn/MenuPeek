@@ -936,6 +936,81 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.repository.removeAttempts, 0)
     }
 
+
+    @MainActor
+    func testCategoryManagerReordersPreserveNativeNameDraftAndRenameGuard() async throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        let a = try TaskCategory(name: "A", creationOrder: 0)
+        let b = try TaskCategory(name: "B", creationOrder: 1)
+        fixture.repository.savedCategories = [a, b]
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let presentation = controller.presentation
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        await waitUntil { window.attachedSheet != nil }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        let editor = try await focusedEditor(in: sheet)
+        editor.insertText("Pending category", replacementRange: NSRange(location: 0, length: 0))
+        // SwiftUI's synthetic AX nodes need not declare NSAccessibilityProtocol.
+        func find(_ identifier: String, in node: NSObject, depth: Int = 0) -> NSObject? {
+            let idSelector = NSSelectorFromString("accessibilityIdentifier")
+            if node.responds(to: idSelector),
+               node.perform(idSelector)?.takeUnretainedValue() as? String == identifier { return node }
+            guard depth < 32 else { return nil }
+            let childrenSelector = NSSelectorFromString("accessibilityChildren")
+            var children: [NSObject] = []
+            if node.responds(to: childrenSelector) {
+                children = node.perform(childrenSelector)?.takeUnretainedValue() as? [NSObject] ?? []
+            }
+            if let window = node as? NSWindow, let content = window.contentView { children.append(content) }
+            if let view = node as? NSView { children.append(contentsOf: view.subviews) }
+            for child in children {
+                if let found = find(identifier, in: child, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        func assertDraft() async {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(30))
+            await waitUntil { editor.string == "Pending category" }
+            XCTAssertTrue(window.attachedSheet === sheet)
+            XCTAssertTrue(sheet.firstResponder === editor, "Reordering does not steal native field focus")
+            XCTAssertTrue(presentation.isManagingCategories)
+        }
+        let change = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [a.id, b.id], placement: .before(a.id))
+        guard case .changed? = fixture.state.moveCategory(change, in: .manager) else { return XCTFail("Expected reorder") }
+        await assertDraft()
+        let noOp = CategoryMoveRequest(categoryID: b.id, expectedOrderIDs: [b.id, a.id], placement: .before(a.id))
+        XCTAssertEqual(fixture.state.moveCategory(noOp, in: .manager), .unchanged)
+        await assertDraft()
+        fixture.repository.failCategoryMove = true
+        let back = CategoryMoveRequest(categoryID: a.id, expectedOrderIDs: [b.id, a.id], placement: .before(b.id))
+        XCTAssertNil(fixture.state.moveCategory(back, in: .manager))
+        await waitUntil { find("categoryReorderError", in: sheet) != nil }
+        await assertDraft()
+        fixture.repository.failCategoryMove = false
+        guard case .changed? = fixture.state.moveCategory(back, in: .manager) else { return XCTFail("Expected retry") }
+        await assertDraft()
+        XCTAssertNil(fixture.state.categoryReorderIssue)
+        // Activate the real Rename button, then cancel from its native field.
+        let rename = try XCTUnwrap(find("renameCategory-\(a.id)", in: sheet))
+        let pressSelector = NSSelectorFromString("accessibilityPerformPress")
+        XCTAssertTrue(rename.responds(to: pressSelector))
+        let press = unsafeBitCast(try XCTUnwrap(rename.method(for: pressSelector)),
+                                 to: (@convention(c) (AnyObject, Selector) -> Bool).self)
+        XCTAssertTrue(press(rename, pressSelector))
+        await waitUntil { presentation.managerRenamingID == a.id }
+        XCTAssertFalse(presentation.canReorderCategories(in: .manager, state: fixture.state))
+        let renameEditor = try await focusedEditor(in: sheet)
+        await waitUntil { renameEditor.string == "A" }
+        renameEditor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await waitUntil { presentation.managerRenamingID == nil }
+        XCTAssertTrue(presentation.canReorderCategories(in: .manager, state: fixture.state))
+        XCTAssertNotNil(find("newCategoryName", in: sheet))
+    }
+
     @MainActor
     func testCategoryManagerSheetCreatesCategoriesAndKeepsInvalidNamesForCorrection() async throws {
         let fixture = try AppLifecycleFixture(context: .manual)
@@ -2105,6 +2180,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     var readAttempts = 0
     var allowAdd = false
     var failRemove = false
+    var failCategoryMove = false
     var removeAttempts = 0
     var onRemove: (() -> Void)?
 
@@ -2146,6 +2222,7 @@ private final class TaskWindowReadFixture: NoteRepository {
     }
 
     func moveCategory(_ request: CategoryMoveRequest) throws -> CategoryMoveOutcome {
+        if failCategoryMove { throw CocoaError(.fileWriteNoPermission) }
         let outcome = CategoryMovePlanner.plan(request, categories: try categories())
         if case let .changed(ordered) = outcome { savedCategories = ordered }
         return outcome
