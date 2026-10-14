@@ -276,7 +276,7 @@ final class DailyNotesStateTests: XCTestCase {
         }
     }
 
-    func testManagerHoldCountFailureAndPostReadGuardStartNoNativeSession() throws {
+    func testManagerDragCountFailureAndPostReadGuardStartNoNativeSession() throws {
         let used = try TaskCategory(name: "Used", creationOrder: 0)
         let done = categorized("Done", used, createdAt: 1, completedAt: Date(timeIntervalSince1970: 2))
         let older = Note(id: UUID(), text: "Older", dayKey: "2026-09-26", createdAt: Date(timeIntervalSince1970: 3),
@@ -300,8 +300,8 @@ final class DailyNotesStateTests: XCTestCase {
                                              context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         }
         source.mouseDown(with: try event(.leftMouseDown, x: 10))
-        source.armCandidate()
-        XCTAssertEqual(store.categoryUsageReadAttempts, 0, "Rendering/arming does not query every row")
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 13))
+        XCTAssertEqual(store.categoryUsageReadAttempts, 0, "A click or pointer jitter does not query usage")
         store.failCategoryCommand = .usage
         source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
         XCTAssertEqual(store.categoryUsageReadAttempts, 1)
@@ -316,7 +316,6 @@ final class DailyNotesStateTests: XCTestCase {
             return previewCount
         }
         source.mouseDown(with: try event(.leftMouseDown, x: 10))
-        source.armCandidate()
         source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
         XCTAssertEqual(previewCount, 3, "Completed, older-day and Later tasks count")
         XCTAssertEqual(store.categoryUsageReadAttempts, 2)
@@ -329,7 +328,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(store.savedCategories, [used])
     }
 
-    func testCategoryHoldSourceClickArmEarlyMovementAndInvalidation() throws {
+    func testCategorySourceClickMovementThresholdAndInvalidation() throws {
         let category = try TaskCategory(name: "Work", creationOrder: 0)
         let task = categorized("Task", category, createdAt: 1)
         let state = makeState(store: FakeNoteRepository(notes: [task], categories: [category]),
@@ -344,34 +343,49 @@ final class DailyNotesStateTests: XCTestCase {
         source.enabled = true
         var clicks = 0
         source.click = { clicks += 1 }
+        var countReads = 0
+        // Reach drag preparation without starting a synthetic native drag session.
+        source.count = { countReads += 1; return nil }
         defer { source.cancelCandidate(); state.stopForTermination() }
-        func event(_ type: NSEvent.EventType, x: CGFloat = 10) throws -> NSEvent {
+        func event(_ type: NSEvent.EventType, x: CGFloat = 10, timestamp: TimeInterval = 0) throws -> NSEvent {
             try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 10),
-                                             modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                             modifierFlags: [], timestamp: timestamp, windowNumber: 0,
                                              context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         }
         source.mouseDown(with: try event(.leftMouseDown))
         source.mouseUp(with: try event(.leftMouseUp))
         XCTAssertEqual(clicks, 1)
         source.mouseDown(with: try event(.leftMouseDown))
-        source.armCandidate()
-        XCTAssertEqual(source.phase, .armed)
-        source.mouseUp(with: try event(.leftMouseUp))
-        XCTAssertEqual(clicks, 1, "Stationary armed release never discloses")
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 13, timestamp: 0.01))
+        XCTAssertEqual(countReads, 0)
+        XCTAssertEqual(source.phase, .pressed)
+        source.mouseUp(with: try event(.leftMouseUp, x: 13))
+        XCTAssertEqual(clicks, 2, "Below 4 pt, pointer jitter remains a disclosure click")
         source.mouseDown(with: try event(.leftMouseDown))
+        source.mouseUp(with: try event(.leftMouseUp, timestamp: 1))
+        XCTAssertEqual(clicks, 3, "A stationary release still clicks regardless of press duration")
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 14, timestamp: 0.01))
+        XCTAssertEqual(countReads, 1, "Drag preparation starts at 4 pt without a hold delay")
+        XCTAssertEqual(source.phase, .cancelled, "An unavailable preview count aborts the drag")
         source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
-        source.armCandidate()
+        XCTAssertEqual(countReads, 1, "A cancelled candidate cannot attempt a second start")
         source.mouseUp(with: try event(.leftMouseUp))
-        XCTAssertEqual(clicks, 1, "Early movement cancels both hold and click")
+        XCTAssertEqual(clicks, 3, "Crossing the drag threshold suppresses disclosure, even on failure")
+        source.mouseDown(with: try event(.leftMouseDown))
+        source.mouseUp(with: try event(.leftMouseUp, x: 210))
+        XCTAssertEqual(clicks, 3, "Releasing outside the header never discloses")
         source.mouseDown(with: try event(.leftMouseDown))
         source.cancelCandidate() // SwiftUI dismantle/window cancellation uses this path.
-        source.armCandidate()
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
         source.mouseUp(with: try event(.leftMouseUp))
-        XCTAssertEqual(clicks, 1)
+        XCTAssertEqual(clicks, 3)
+        XCTAssertEqual(countReads, 1)
         source.mouseDown(with: try event(.leftMouseDown))
         state.beginEditing(id: task.id)
-        source.armCandidate()
+        source.mouseDragged(with: try event(.leftMouseDragged, x: 20))
         XCTAssertEqual(source.phase, .cancelled)
+        XCTAssertEqual(countReads, 1, "A newly guarded context cannot read the preview count or begin dragging")
         XCTAssertNil(source.session?.active)
         XCTAssertFalse(source.session?.isDragging ?? true)
         source.enabled = false

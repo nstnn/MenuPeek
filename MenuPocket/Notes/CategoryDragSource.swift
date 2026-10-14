@@ -42,9 +42,8 @@ struct CategoryDragSource: NSViewRepresentable {
 
 @MainActor
 final class CategoryDragSourceView: NSView, NSDraggingSource {
-    static let holdDuration: TimeInterval = 0.300
     static let movementDistance: CGFloat = 4
-    enum Phase { case idle, pressed, armed, dragging, cancelled }
+    enum Phase { case idle, pressed, dragging, cancelled }
     var name = ""
     var categoryID: UUID?
     var context: CategoryReorderContext = .list(.today)
@@ -56,7 +55,6 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
     var click: (() -> Void)?
     private(set) var phase = Phase.idle
     private var origin = NSPoint.zero
-    private var timer: Timer?
     private var escapeMonitor: Any?
     private var windowObserver: NSObjectProtocol?
     private var nativeToken: UUID?
@@ -75,19 +73,9 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         cancelCandidate()
         origin = convert(event.locationInWindow, from: nil)
         phase = .pressed
-        let timer = Timer(timeInterval: Self.holdDuration, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.phase == .pressed, self.enabled,
-                      let window = self.window, window.isKeyWindow else { return }
-                self.armCandidate()
-            }
-        }
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        RunLoop.main.add(timer, forMode: .eventTracking)
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, let self,
-                  self.phase == .pressed || self.phase == .armed else { return event }
+                  self.phase == .pressed else { return event }
             self.cancelCandidate()
             return nil
         }
@@ -99,16 +87,13 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard phase == .pressed || phase == .armed else { return }
+        guard phase == .pressed else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - origin.x, point.y - origin.y) >= Self.movementDistance else { return }
-        guard phase == .armed else { cancelCandidate(); return }
         guard isEligible, let total = count?(), isEligible, let categoryID, let state, let session,
               let payload = session.begin(categoryID: categoryID, context: context, state: state, source: self) else {
             cancelCandidate(); return
         }
-        timer?.invalidate()
-        timer = nil
         nativeToken = payload.token
         sourceSession = session
         phase = .dragging
@@ -127,27 +112,12 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         let shortClick = phase == .pressed && isEligible && bounds.contains(convert(event.locationInWindow, from: nil))
         removeTracking()
         phase = .idle
-        needsDisplay = true
         if shortClick { click?() }
     }
 
     private var isEligible: Bool {
         guard enabled, let categoryID, let state, let session, state.categories == catalog else { return false }
         return session.canBegin(categoryID: categoryID, context: context, state: state)
-    }
-
-    func armCandidate() {
-        guard phase == .pressed, isEligible else { cancelCandidate(); return }
-        timer?.invalidate()
-        timer = nil
-        phase = .armed
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard phase == .armed else { return }
-        NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4).fill()
     }
 
     func cancelCandidate() {
@@ -157,12 +127,9 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         } else {
             phase = .cancelled
         }
-        needsDisplay = true
     }
 
     private func removeTracking() {
-        timer?.invalidate()
-        timer = nil
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
         if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
@@ -185,7 +152,6 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         nativeToken = nil
         sourceSession = nil
         phase = .idle
-        needsDisplay = true
         removeTracking()
     }
 

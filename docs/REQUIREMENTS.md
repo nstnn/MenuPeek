@@ -65,7 +65,7 @@ One shared daily state publishes categories, today's tasks, and yesterday's coun
 
 ## Category reordering contract
 
-Today and Later custom-group headers and empty outer padding accept a hold of approximately 300 ms followed by at least 4 pt movement. There is no category drag handle. Short header clicks retain disclosure; releasing an armed stationary hold does not disclose or reorder, and significant movement before arming cancels the candidate. Task text, checkboxes, menus, buttons, and fields retain their existing input. Collapsed categories can move without expanding.
+Today and Later custom-group headers and empty outer padding begin a category drag after at least 4 pt pointer movement, with no hold delay or source highlight. There is no category drag handle. Header press/release below the movement threshold retains disclosure regardless of press duration; crossing the threshold suppresses disclosure even if drag preparation fails. Task text, checkboxes, menus, buttons, and fields retain their existing input. Collapsed categories can move without expanding.
 
 A compact preview shows the name and total task count, including completed tasks. An insertion line at a group boundary proposes before/after placement. Manage categories uses the same gesture on custom labels and their vertical padding, including unused rows, while Rename/Remove and name fields keep ordinary input. Its preview counts assignments across every saved day and Later, once at drag start; a failed count aborts the attempt with the existing usage-read error. Category reordering adds no keyboard commands or Move Up/Down menu. Escape remains cancellation, and existing disclosure, task actions, fields and picker keys remain supported.
 
