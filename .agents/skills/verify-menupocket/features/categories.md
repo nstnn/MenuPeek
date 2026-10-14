@@ -10,7 +10,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 - `cat-picker` lists every saved category in the composer and edit pop-ups.
 - `cat-collapse` collapses or expands a group; the state survives relaunch.
 - `cat-move-to` moves a Today task to another category from its row menu (Move To).
-- `cat-manager-reorder` saves the shared custom-category order with a mouse hold/drop, including unused categories; General stays first.
+- `cat-manager-reorder` saves the shared custom-category order with a mouse drag/drop, including unused categories; General stays first.
 
 ## How to get to it (user POV)
 
@@ -44,43 +44,43 @@ Preconditions:
 - Reordering categories by drag in the manager is pointer-only and cannot be driven here. Report it as Not tested, or give the user manual steps, and check `categories.creation_order` in `db.txt` for the stored order.
 - Removing a category changes saved data on every day. Use a fresh run when another recipe needs the seeded categories.
 
-## Category hold sources (TASK-006)
+## Category drag sources (TASK-006; immediate-drag revision)
 
-Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer holds. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-sheet guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
+Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer drags after at least 4 pt movement, without a hold delay or source highlight. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-sheet guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
 
 On an isolated fixture, use actual pointer input with the window active:
 
-1. Short-click Work: disclosure toggles once. Restore the original collapse state.
-2. Hold its header for at least 300 ms then release without moving: disclosure stays unchanged. Move at least 4 pt before 300 ms: neither disclosure nor category drag starts.
-3. Hold then move on the header and empty outer padding, including while collapsed. The compact preview shows name and total task count including completed rows. Escape or outside release saves nothing. Repeat on Later.
+1. Click Work: disclosure toggles once. Restore the original collapse state. Move less than 4 pt before releasing: it still clicks once.
+2. Press its header, keep it stationary for more than 300 ms, and release: disclosure toggles once, with no armed highlight. Restore the original state. Press and immediately move at least 4 pt: dragging starts without waiting, and release must not toggle disclosure.
+3. Press and drag on the header and empty outer padding, including while collapsed. Neither a stationary press nor an active drag tints the source header. The compact preview shows name and total task count including completed rows. Escape or outside release saves nothing. Repeat on Later.
 4. Select task text, toggle/restore a checkbox, open/close Actions, and use composer fields. These regions must not start category drag. General remains ordinary disclosure input.
 5. Close/reopen the window, switch destination, or begin editing: candidates lose authorization. A native reservation remains until AppKit source-end; another task/category drag cannot overlap it. After native end, a fresh drag can start.
 
-Take before/after SQLite and defaults snapshots; category ranks and task fields must be identical, and collapse defaults must match after explicitly restoring short-click checks. `mpax press` proves accessibility disclosure only; it cannot establish pointer hold timing or native drag. Hosted lifecycle tests are supporting evidence; unobserved physical gestures remain Not tested for TASK-010. Save the exact source/artifact identity and clean the fixture after every session.
+Take before/after SQLite and defaults snapshots; category ranks and task fields must be identical, and collapse defaults must match after explicitly restoring short-click checks. `mpax press` proves accessibility disclosure only; it cannot establish immediate pointer dragging or native drag. Hosted lifecycle tests are supporting evidence; unobserved physical gestures remain Not tested for TASK-010. Save the exact source/artifact identity and clean the fixture after every session.
 
 ## Category drop routing (TASK-007)
 
-On Today/Later, hold a custom header or its empty outer padding, then drag over the upper/lower half of another visible group. The accent insertion line appears at that group's top/bottom boundary, outside task rows. The gap after General offers before the first visible custom UUID; the upper half of General rejects drops. Gaps after custom groups offer after that UUID. Hidden categories remain in the full saved catalog with UUID anchors; they do not appear as empty targets. General has no category source. Task handles and targets remain separate.
+On Today/Later, press and immediately drag a custom header or its empty outer padding over the upper/lower half of another visible group. The accent insertion line appears at that group's top/bottom boundary, outside task rows. The gap after General offers before the first visible custom UUID; the upper half of General rejects drops. Gaps after custom groups offer after that UUID. Hidden categories remain in the full saved catalog with UUID anchors; they do not appear as empty targets. General has no category source. Task handles and targets remain separate.
 
 Using an identified isolated fixture, take before/after snapshots for these physical checks:
 
 1. Move Errands before Work on Today; confirm the new visible order and `categories.creation_order`, with General first. Collapse a source first and confirm it stays collapsed after moving.
 2. On Later, use at least two populated custom categories (create a fictional task through the composer if needed). Reorder first/last custom groups and check Today, picker and retained History consume the same saved order.
-3. Hold a tall-group header/background, move near viewport edges, and observe clamped scrolling and insertion feedback recomputed after scrolling. After a changed save only, its small header target is revealed without expanding or taking text focus.
-4. Escape, leave the authorized list, release outside, and drop at an equivalent position: ranks, revision, collapse and drafts stay unchanged. A new hold/drop must work after native source-end. Exercise edit/removal/context guards and an injected failed repository save in focused hosted tests; native failure/retry remains TASK-010 when a UI failure fixture is available.
+3. Drag from a tall-group header/background, move near viewport edges, and observe clamped scrolling and insertion feedback recomputed after scrolling. After a changed save only, its small header target is revealed without expanding or taking text focus.
+4. Escape, leave the authorized list, release outside, and drop at an equivalent position: ranks, revision, collapse and drafts stay unchanged. A new drag/drop must work after native source-end. Exercise edit/removal/context guards and an injected failed repository save in focused hosted tests; native failure/retry remains TASK-010 when a UI failure fixture is available.
 5. Verify task checkbox, text selection, Actions, composer and existing task pointer drag coexist. Quit/relaunch the same fixture without reseeding and compare saved category order, task rows and scoped defaults.
 
 `mpax` cannot generate category drags. Callback tests prove routing/authorization/storage dispatch, not native negotiation or physical scrolling. Record each physical case as observed Pass/Fail or Not tested; broader final acceptance remains TASK-010. Clean fixtures and Debug hosts even when access fails.
 
 ## Manage categories mouse reorder (TASK-008)
 
-The custom row's label and its vertical background padding accept the same 300 ms hold and 4 pt movement. Rename/Remove buttons and name fields retain ordinary input. General has no source; its lower half offers before the first custom UUID. Every custom row, including unused categories, offers before/after placement. Targets use the manager's scroll view for edge scrolling; a committed changed move reveals its row without changing field focus or drafts. No keyboard reorder actions are added.
+The custom row's label and its vertical background padding accept the same immediate drag at 4 pt movement, without a timer or source highlight. Rename/Remove buttons and name fields retain ordinary input. General has no source; its lower half offers before the first custom UUID. Every custom row, including unused categories, offers before/after placement. Targets use the manager's scroll view for edge scrolling; a committed changed move reveals its row without changing field focus or drafts. No keyboard reorder actions are added.
 
 On an isolated basic fixture:
 
-1. Open Manage categories, create `Unused`, then type `Pending category` into `newCategoryName` without creating it. Hold Unused's label/padding and drop before Work. Check General remains first, the new-name draft remains, and `categories.creation_order` stores Unused/Work/Errands. Task rows and preferences must match the pre-drop snapshot.
-2. Hold Work to inspect its preview count: all saved days and Later assignments count, including completed tasks (4 with the unchanged basic seed). Do not count only visible Today rows. Cancel without saving.
-3. Rename/Remove remain clickable, rename text stays editable, and rename/removal confirmation blocks holds and drops. Cancel each action, then try a fresh hold. Done/dismissal cancels authorization; normal task/category drags resume after native source-end.
+1. Open Manage categories, create `Unused`, then type `Pending category` into `newCategoryName` without creating it. Press and immediately drag Unused's label/padding and drop before Work. Check General remains first, the new-name draft remains, and `categories.creation_order` stores Unused/Work/Errands. Task rows and preferences must match the pre-drop snapshot.
+2. Drag Work to inspect its preview count: all saved days and Later assignments count, including completed tasks (4 with the unchanged basic seed). Do not count only visible Today rows. Cancel without saving.
+3. Rename/Remove remain clickable, rename text stays editable, and rename/removal confirmation blocks drags and drops. Cancel each action, then try a fresh drag. Done/dismissal cancels authorization; normal task/category drags resume after native source-end.
 4. With many fictional categories, observe sheet edge scrolling and committed row reveal. Long names must leave Rename/Remove available. Escape/outside/equivalent drop preserves rank and typed drafts. Focused hosted checks exercise usage-read failure and failed save/retry; physical failure/retry needs a fixture that injects those errors.
 5. Close/reopen the manager and quit/relaunch the same fixture without reseeding. Check saved order, picker order and unchanged task rows/defaults. Take snapshots and clean every fixture.
 
