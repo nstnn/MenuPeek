@@ -106,6 +106,10 @@ Commit and push the workflow to activate it on GitHub, then confirm a real run s
 
 ## Local Release and login-item checks
 
+For an automatic local install, run `./install.sh` from this checkout (or invoke it by absolute path). It builds the current working tree with the shared Release scheme into a fresh ignored `build/install-release.*` directory, validates the bundle/signature, and stages it in Applications before quitting the installed copy. It refuses unexpected/symlink destinations, overlapping installer runs, other running production-identity copies, corrupt databases, or a saved schema newer than this checkout supports. SQLite backups and preference copies are retained with before/after preservation checks. The old bundle moves to recoverable Trash; a replacement failure attempts to restore it without restoring or rewriting user data. Temporary build/staging apps are trashed and unregistered on exit. `--no-open` skips launch; the default opens `/Applications/MenuPocket.app` after replacement is verified. The script preserves existing login registration. If an installer is killed before its exit trap runs, verify it is no longer active before removing `/Applications/.MenuPocket-install.lock` and inspect its printed build/backup directory.
+
+The installer does not run tests or establish native/system acceptance. After launch starts, the new app may perform its normal supported schema migration; rollback of user data or a downgrade is a separate deliberate action. A launch failure keeps the verified new bundle installed. This workflow requires write access to Applications and never invokes sudo automatically.
+
 Build a local Release app with the same scheme:
 
 ```bash

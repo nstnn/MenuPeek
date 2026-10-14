@@ -19,6 +19,14 @@ Open `MenuPocket.xcodeproj` in Xcode, or run the local Debug launcher from this 
 
 The launcher builds with the shared `MenuPocket` scheme into ignored `build/DerivedData`, stops this checkout's running Debug copy, and opens the rebuilt app. MenuPocket appears in the Dock. Its saved completed/total count in the menu bar opens the task window on Today.
 
+To build and update the app in Applications automatically:
+
+```bash
+./install.sh
+```
+
+This builds Release from the current checkout, quits the installed copy, backs up existing SQLite data and preferences, moves the old app to Trash, replaces `/Applications/MenuPocket.app`, and opens the new app. It keeps saved data and login settings. A failed build leaves the installed app in place; a failed replacement restores the previous bundle when possible. `./install.sh --no-open` installs without launching. Build logs and backups stay under ignored `build/install-release.*`; the script prints their location. Another running MenuPocket copy must be quit before replacement. See [the local Release workflow](docs/WORKFLOW.md#local-release-and-login-item-checks).
+
 To run the hosted XCTest target:
 
 ```bash
