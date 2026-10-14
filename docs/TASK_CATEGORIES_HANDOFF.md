@@ -4,6 +4,8 @@
 
 The implemented product contract is [REQ-014 and Category contract](REQUIREMENTS.md#category-contract), including optional categories, grouping/order, collapse/counts, atomic drafts, all-days removal, and recovery. [Architecture](ARCHITECTURE.md) owns the state/storage boundaries and additive schema v2; [Workflow](WORKFLOW.md#category-verification) owns verification, preferences isolation, and [first real-data upgrade preparation](WORKFLOW.md#schema-v4-upgrade-preparation). [README](../README.md#use-the-today-window) provides usage.
 
+Current ordering amendment, 2026-10-13: [Category reordering](CATEGORY_REORDERING_HANDOFF.md) supersedes earlier creation-order/General-last and no-category-reorder assumptions. Custom categories now use one mutable saved rank under schema v4, General is fixed first, and Today/Later plus the idle manager support mouse hold/drop. The new handoff separates its automated and partial native evidence from this dated record. Its TASK-011 is the reordering review/documentation card; the TASK-011/TASK-012 references below belong to the original category plan and retain their historical outcomes and remaining gates.
+
 ## Verified source and artifacts
 
 Verification baseline: repository `MenuPeek`, branch `main`, HEAD `7be53da0c4fd3cb5a64bf381ecb15afb5103ddff`, plus the then-uncommitted long-name removal layout repair and documentation changes. The repaired `MenuPocket/Notes/TaskCategoryManagerView.swift` SHA-256 is `73406faf370270262ab9b13259108ebec42ab289844362373b5bb3a793d41a98`. TASK-012 changes documentation and ignored plan status only; the repair's 49 Swift/project/scheme/entitlements inputs still match `build/category-fix-20261002/source-hashes.json`.

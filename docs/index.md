@@ -12,6 +12,7 @@ MenuPocket manages daily tasks in one desktop window, where Today tasks can be d
 - [Later tasks acceptance](LATER_TASKS_ACCEPTANCE.md) — isolated native fixture identity and the Today/Later interface checklist; user-reported Pass on the isolated fixture, production/system checks not tested.
 - [Desktop acceptance](DESKTOP_TASK_ACCEPTANCE.md) — dated actual-interface observations, category, History, menu bar glance, and task movement fixtures, partial acceptance, and blocked/untested production and system checks.
 - [Task categories handoff](TASK_CATEGORIES_HANDOFF.md) — category source/artifact identity, automated and interface evidence, completed documentation, and the remaining TASK-011 acceptance gate.
+- [Category reordering handoff](CATEGORY_REORDERING_HANDOFF.md) — global General-first saved order, independent review, automated preservation/regression, partial native acceptance and remaining pointer/system gaps.
 - [Settings shortcuts verification](SETTINGS_SHORTCUTS_VERIFICATION.md) — the read-only shortcut reference, focused tests, native Settings component evidence, keyboard/production limits, and temporary-app cleanup.
 
 ## Historical evidence
@@ -28,6 +29,8 @@ The [History, Unfinished, and monthly calendar plan](../plan/task-history/task-h
 The [menu bar glance plan](../plan/menu-bar-glance/menu-bar-glance.md) records the read-only right-click glance's task cards, evidence, and handoff. It is implemented, and 12 of 16 native fixture checks passed outright (Control-click only synthetically); VoiceOver, the native tooltip, Themes with macOS in Light, and a physical Control-click remain Not tested.
 
 The [task movement plan](../plan/task-movement/task-movement.md) records saved reordering and category movement: task cards, evidence, and handoff. It is implemented and merged; automated checks and CI pass, and native fixture results are partial, with several merged-build drag scenarios, the minimum window, Light appearance, VoiceOver, and macOS 14 Not tested.
+
+The [category reordering plan](../plan/category-reordering/category-reordering.md) records the implemented mouse hold/drop feature, final automated integration and partial native session. Its TASK-011 reviews the exact feature and delivers current documentation while keeping required unobserved cases open. Current category ordering assumptions live in [Requirements](REQUIREMENTS.md#category-reordering-contract), with evidence in the tracked reordering handoff; earlier local plans and dated records retain their original results.
 
 The [task-categories plan](../plan/task-categories/task-categories.md) defines the category implementation and acceptance sequence. The [desktop task-management plan](../plan/desktop-task-management/desktop-task-management.md) defines the preceding desktop increment. The earlier [Notes MVP design](../plan/mvp/NOTES_MVP_PLAN.md) and [task cards](../plan/mvp/NOTES_MVP_TASKS.md) describe the superseded compact panel. The [initial roadmap](../plan/init/master_plan.md) records the historical demo-shell phase.
 
