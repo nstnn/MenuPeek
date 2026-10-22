@@ -52,6 +52,14 @@ final class MenuBarGlanceMenuTests: XCTestCase {
         XCTAssertTrue(unavailable.items[3].isEnabled)
     }
 
+    func testContinuedOnlyDayShowsNoUnfinishedInsteadOfAllDone() {
+        let continued = Note(id: UUID(), text: "Continued", dayKey: day, createdAt: Date(),
+                             completedAt: nil, continuedOn: "2026-10-08")
+        let menu = make(notes: [continued])
+        XCTAssertEqual(layout(menu), ["header", "-", "No unfinished tasks", "-"] + actionTitles)
+        XCTAssertFalse(menu.items[2].isEnabled)
+    }
+
     func testLaterLineAppearsInEveryTodayStateOnlyForAPositiveCount() {
         let states: [(NoteProgress?, [Note])] = [
             (NoteProgress(completed: 0, total: 0), []),

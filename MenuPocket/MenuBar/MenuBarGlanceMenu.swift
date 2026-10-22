@@ -39,6 +39,8 @@ enum MenuBarGlanceMenu {
             menu.addItem(disabledItem("No tasks yet"))
         case .allDone:
             menu.addItem(disabledItem("All done"))
+        case .noUnfinished:
+            menu.addItem(disabledItem("No unfinished tasks"))
         case let .tasks(rows, overflowCount):
             let tabStop = categoryTabStop(for: rows)
             for row in rows {

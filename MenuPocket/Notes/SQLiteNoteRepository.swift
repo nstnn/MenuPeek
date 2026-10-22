@@ -15,7 +15,7 @@ enum SQLiteNoteStoreError: Error {
 /// One connection to the app's local notes database. SQLite stores dates as
 /// seconds since the Unix epoch and keeps the assigned local day separately.
 final class SQLiteNoteRepository: NoteRepository {
-    static let schemaVersion = 4
+    static let schemaVersion = 5
 
     private let database: OpaquePointer
 
@@ -248,7 +248,7 @@ final class SQLiteNoteRepository: NoteRepository {
         let statement = try prepare(
             """
             SELECT notes.id, text, day_key, created_at, completed_at, category_id,
-                   categories.id, name, name_key, creation_order, notes.display_order
+                   categories.id, name, name_key, creation_order, notes.display_order, continued_on
             FROM notes LEFT JOIN categories ON categories.id = notes.category_id
             WHERE day_key = ? ORDER BY notes.display_order ASC
             """
@@ -299,10 +299,58 @@ final class SQLiteNoteRepository: NoteRepository {
                 }
                 categoryID = reference
             }
+            let continuedOn: String?
+            if sqlite3_column_type(statement, 11) == SQLITE_NULL {
+                continuedOn = nil
+            } else {
+                let target = try GregorianDay(key: text(at: 11, from: statement))
+                guard completedAt == nil, target.key > dayKey else { throw SQLiteNoteStoreError.invalidNoteRow }
+                continuedOn = target.key
+            }
             result.append(Note(id: id, text: try text(at: 1, from: statement),
                                dayKey: try text(at: 2, from: statement),
                                createdAt: Date(timeIntervalSince1970: createdAt),
-                               completedAt: completedAt, categoryID: categoryID))
+                               completedAt: completedAt, categoryID: categoryID, continuedOn: continuedOn))
+        }
+    }
+
+    func continueTasks(_ sources: [Note], to dayKey: String, at instant: Date) throws -> [Note] {
+        _ = try GregorianDay(key: dayKey)
+        guard !sources.isEmpty, Set(sources.map(\.id)).count == sources.count,
+              instant.timeIntervalSince1970.isFinite,
+              sources.allSatisfy({ $0.isUnfinished && $0.dayKey < dayKey }) else {
+            throw TaskContinuationError.invalidSelection
+        }
+        return try transaction {
+            // Compare saved content inside the same write transaction. A stale
+            // selection fails as a whole; no task can be continued twice.
+            for key in Set(sources.map(\.dayKey)) {
+                let saved = try notes(for: key)
+                for source in sources where source.dayKey == key {
+                    guard saved.contains(source) else { throw TaskContinuationError.staleSource }
+                }
+            }
+            var saved: [Note] = []
+            for source in sources {
+                let target = Note(id: UUID(), text: source.text, dayKey: dayKey,
+                                  createdAt: instant, completedAt: nil, categoryID: source.categoryID)
+                let insert = try prepare("INSERT INTO notes (id, text, day_key, created_at, completed_at, category_id, display_order) VALUES (?, ?, ?, ?, NULL, ?, ?)")
+                defer { sqlite3_finalize(insert) }
+                try bind(target.id.uuidString, at: 1, to: insert)
+                try bind(target.text, at: 2, to: insert)
+                try bind(dayKey, at: 3, to: insert)
+                try bindInstant(instant, at: 4, to: insert)
+                try bindCategoryID(target.categoryID, at: 5, to: insert)
+                try check(sqlite3_bind_int64(insert, 6, nextDailyOrder(for: dayKey)), operation: "bind continuation order")
+                try check(sqlite3_step(insert), expected: SQLITE_DONE, operation: "continue task")
+                let mark = try prepare("UPDATE notes SET continued_on = ? WHERE id = ? AND completed_at IS NULL AND continued_on IS NULL")
+                defer { sqlite3_finalize(mark) }
+                try bind(dayKey, at: 1, to: mark)
+                try bind(source.id.uuidString, at: 2, to: mark)
+                try executeWrite(mark, id: source.id, operation: "mark continued task")
+                saved.append(target)
+            }
+            return saved
         }
     }
 
@@ -371,7 +419,7 @@ final class SQLiteNoteRepository: NoteRepository {
                    SUM(CASE WHEN completed_at IS NULL OR
                        (typeof(completed_at) IN ('integer', 'real') AND
                         completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
-                       THEN 0 ELSE 1 END)
+                       THEN 0 ELSE 1 END), COUNT(continued_on)
             FROM notes WHERE day_key >= ? AND day_key < ?
             GROUP BY day_key ORDER BY day_key ASC
             """
@@ -399,10 +447,10 @@ final class SQLiteNoteRepository: NoteRepository {
                    SUM(CASE WHEN completed_at IS NULL OR
                        (typeof(completed_at) IN ('integer', 'real') AND
                         completed_at BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308)
-                       THEN 0 ELSE 1 END) AS invalid_completion
+                       THEN 0 ELSE 1 END) AS invalid_completion, COUNT(continued_on)
             FROM notes WHERE day_key < ?
             GROUP BY day_key
-            HAVING COUNT(*) > COUNT(completed_at) OR invalid_completion > 0
+            HAVING COUNT(*) > COUNT(completed_at) + COUNT(continued_on) OR invalid_completion > 0
             ORDER BY day_key DESC LIMIT ?
             """
         )
@@ -434,7 +482,8 @@ final class SQLiteNoteRepository: NoteRepository {
             throw SQLiteNoteStoreError.invalidNoteRow
         }
         return try DayTaskSummary(dayKey: text(at: 0, from: statement),
-                                  progress: NoteProgress(completed: completed, total: total))
+                                  progress: NoteProgress(completed: completed, total: total),
+                                  continued: Int(sqlite3_column_int64(statement, 4)))
     }
 
     func historyDaySnapshot(for dayKey: String) throws -> HistoryDaySnapshot {
@@ -448,7 +497,7 @@ final class SQLiteNoteRepository: NoteRepository {
 
     func incompleteCount(for dayKey: String) throws -> Int {
         let statement = try prepare(
-            "SELECT COUNT(*) FROM notes WHERE day_key = ? AND completed_at IS NULL"
+            "SELECT COUNT(*) FROM notes WHERE day_key = ? AND completed_at IS NULL AND continued_on IS NULL"
         )
         defer { sqlite3_finalize(statement) }
         try bind(dayKey, at: 1, to: statement)
@@ -458,7 +507,7 @@ final class SQLiteNoteRepository: NoteRepository {
 
     func setCompleted(id: UUID, completedAt: Date?) throws {
         try transaction {
-            let statement = try prepare("UPDATE notes SET completed_at = ? WHERE id = ?")
+            let statement = try prepare("UPDATE notes SET completed_at = ? WHERE id = ? AND continued_on IS NULL")
             defer { sqlite3_finalize(statement) }
             let timestampResult = completedAt.map {
                 sqlite3_bind_double(statement, 1, $0.timeIntervalSince1970)
@@ -472,7 +521,7 @@ final class SQLiteNoteRepository: NoteRepository {
     func update(id: UUID, text: String, categoryID: UUID?) throws {
         try transaction {
             if let categoryID { _ = try requireCategory(categoryID) }
-            let statement = try prepare("UPDATE notes SET text = ?, category_id = ? WHERE id = ?")
+            let statement = try prepare("UPDATE notes SET text = ?, category_id = ? WHERE id = ? AND continued_on IS NULL")
             defer { sqlite3_finalize(statement) }
             try bind(text, at: 1, to: statement)
             try bindCategoryID(categoryID, at: 2, to: statement)
@@ -779,6 +828,7 @@ final class SQLiteNoteRepository: NoteRepository {
         if !isFresh {
             let expected: [[String?]]
             switch version {
+            case 5: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
             case 3, 4: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
             case 2: expected = [["table", "categories"], ["table", "notes"]]
             default: expected = [["table", "notes"]]
@@ -801,7 +851,8 @@ final class SQLiteNoteRepository: NoteRepository {
                 try addCategories(toFreshStore: isFresh, in: database)
             }
             if version < 3 { try addLaterTasks(in: database) }
-            try addDisplayOrder(in: database)
+            if version < 4 { try addDisplayOrder(in: database) }
+            try execute("ALTER TABLE notes ADD COLUMN continued_on TEXT DEFAULT NULL", in: database)
             try validateSchema(version: schemaVersion, in: database)
             try validateIntegrity(in: database)
             try execute("PRAGMA user_version = \(schemaVersion)", in: database)
@@ -934,6 +985,15 @@ final class SQLiteNoteRepository: NoteRepository {
         }
         if version >= 4 {
             noteColumns.append(["display_order", "INTEGER", "1", "0", "0", "0"])
+        }
+        if version >= 5 {
+            noteColumns.append(["continued_on", "TEXT", "0", "NULL", "0", "0"])
+            for row in try schemaRows("SELECT day_key, continued_on, completed_at FROM notes WHERE continued_on IS NOT NULL", in: database) {
+                guard let source = row[0], let target = row[1], row[2] == nil,
+                      try GregorianDay(key: source) < GregorianDay(key: target) else {
+                    throw SQLiteNoteStoreError.incompatibleSchema("Invalid task continuation")
+                }
+            }
         }
         try validateColumns("notes", expected: noteColumns, in: database)
         if version >= 4 { try validateDisplayOrder(in: database) }

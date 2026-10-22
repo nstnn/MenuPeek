@@ -91,18 +91,20 @@ extension NoteDay {
 struct DayTaskSummary: Equatable {
     let day: GregorianDay
     let progress: NoteProgress
+    let continued: Int
 
     var dayKey: String { day.key }
-    var incomplete: Int { progress.total - progress.completed }
+    var incomplete: Int { progress.total - progress.completed - continued }
 
-    init(dayKey: String, progress: NoteProgress) throws {
+    init(dayKey: String, progress: NoteProgress, continued: Int = 0) throws {
         self.day = try GregorianDay(key: dayKey)
         guard progress.total >= 0, progress.completed >= 0,
-              progress.completed <= progress.total else {
+              continued >= 0, continued <= progress.total - progress.completed else {
             throw TaskHistoryDomainError.invalidProgress(completed: progress.completed,
                                                         total: progress.total)
         }
         self.progress = progress
+        self.continued = continued
     }
 }
 
@@ -112,7 +114,7 @@ enum HistoryTaskFilter: CaseIterable, Equatable, Sendable {
     func includes(_ note: Note) -> Bool {
         switch self {
         case .all: true
-        case .unfinished: !note.isCompleted
+        case .unfinished: note.isUnfinished
         case .completed: note.isCompleted
         }
     }
@@ -142,7 +144,8 @@ struct HistoryDaySnapshot: Equatable {
             }
         }
         self.summary = try DayTaskSummary(dayKey: dayKey,
-                                         progress: NoteProgress(notes: notes, for: dayKey))
+                                         progress: NoteProgress(notes: notes, for: dayKey),
+                                         continued: notes.count { $0.continuedOn != nil })
         self.notes = notes
         self.categories = categories.sorted { $0.creationOrder < $1.creationOrder }
     }

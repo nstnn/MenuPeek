@@ -199,7 +199,7 @@ cmd_snapshot() {
 .mode column
 SELECT user_version AS schema_version FROM pragma_user_version;
 SELECT rowid, * FROM categories ORDER BY creation_order;
-SELECT n.rowid, n.day_key, n.display_order, n.text, n.completed_at IS NOT NULL AS done, COALESCE(c.name, 'General') AS category
+SELECT n.rowid, n.id, n.day_key, n.display_order, n.text, n.completed_at IS NOT NULL AS done, n.continued_on, COALESCE(c.name, 'General') AS category
   FROM notes n LEFT JOIN categories c ON c.id = n.category_id ORDER BY n.day_key, n.display_order;
 SELECT l.rowid, l.text, l.completed_at IS NOT NULL AS done, COALESCE(c.name, 'General') AS category
   FROM later_tasks l LEFT JOIN categories c ON c.id = l.category_id ORDER BY l.rowid;

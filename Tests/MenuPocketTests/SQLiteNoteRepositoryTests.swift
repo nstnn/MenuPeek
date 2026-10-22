@@ -46,6 +46,109 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
     }
 
+    func testContinuationPreservesHistoryCountsAndOrderAndSurvivesReopenWithoutDuplicates() throws {
+        let today = "2026-10-22"
+        let yesterday = "2026-10-21"
+        var sources: [Note] = []
+        var targets: [Note] = []
+        var originalRows: [[String?]] = []
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            let category = try store.createCategory(name: "Work")
+            sources = [note("First 📝", day: yesterday, createdAt: 1, categoryID: category.id),
+                       note("Second", day: yesterday, createdAt: 2)]
+            for source in sources { try store.add(source) }
+            let done = Note(id: UUID(), text: "Done", dayKey: yesterday,
+                            createdAt: Date(timeIntervalSince1970: 3), completedAt: Date(timeIntervalSince1970: 4))
+            try store.add(done)
+            try store.add(note("Existing", day: today, createdAt: 5))
+            originalRows = try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id, display_order FROM notes WHERE day_key = '\(yesterday)' ORDER BY rowid")
+            targets = try store.continueTasks(sources, to: today, at: Date(timeIntervalSince1970: 9))
+            XCTAssertEqual(targets.map(\.text), sources.map(\.text))
+            XCTAssertEqual(targets.map(\.categoryID), sources.map(\.categoryID))
+            XCTAssertTrue(Set(targets.map(\.id)).isDisjoint(with: sources.map(\.id)))
+            XCTAssertEqual(try store.notes(for: today).map(\.text), ["Existing", "First 📝", "Second"])
+            let snapshot = try store.historyDaySnapshot(for: yesterday)
+            XCTAssertEqual(snapshot.progress, NoteProgress(completed: 1, total: 3))
+            XCTAssertEqual(snapshot.summary.incomplete, 0)
+            XCTAssertEqual(snapshot.notes.filter { $0.continuedOn == today }.count, 2)
+            XCTAssertEqual(snapshot.filteredNotes(.unfinished), [])
+            XCTAssertEqual(try store.incompleteCount(for: yesterday), 0)
+            XCTAssertEqual(try store.unfinishedDayPage(before: GregorianDay(key: today), limit: 31).summaries, [])
+            let range = try HistoryDayRange.month(containing: GregorianDay(key: today))
+            XCTAssertEqual(try store.daySummaries(in: range).first?.progress, snapshot.progress)
+            XCTAssertEqual(try store.daySummaries(in: range).first?.continued, 2)
+            let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            XCTAssertThrowsError(try store.continueTasks(sources, to: today, at: Date()))
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(Array(try reopened.notes(for: today).suffix(2)), targets)
+        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id, display_order FROM notes WHERE day_key = '\(yesterday)' ORDER BY rowid"), originalRows)
+        XCTAssertThrowsError(try reopened.continueTasks(sources, to: "2026-10-23", at: Date()))
+        // Deleting the new attempt must not silently make the old one actionable again.
+        try reopened.delete(id: targets[0].id)
+        XCTAssertEqual(try reopened.incompleteCount(for: yesterday), 0)
+        let nextAttempt = try reopened.continueTasks([targets[1]], to: "2026-10-23", at: Date())
+        XCTAssertEqual(nextAttempt.map(\.text), ["Second"])
+        XCTAssertEqual(try reopened.incompleteCount(for: today), 1)
+        XCTAssertEqual(try rawRows("PRAGMA integrity_check"), [["ok"]])
+    }
+
+    func testContinuationRollsBackWholeBatchOnWriteAndCommitFailuresThenRetries() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let sources = [note("A", day: "2026-10-21", createdAt: 1), note("B", day: "2026-10-21", createdAt: 2)]
+        for source in sources { try store.add(source) }
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        try executeRaw("CREATE TRIGGER fail_continuation BEFORE UPDATE OF continued_on ON notes WHEN old.text = 'B' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END")
+        XCTAssertThrowsError(try store.continueTasks(sources, to: "2026-10-22", at: Date()))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        try executeRaw("DROP TRIGGER fail_continuation")
+        var reader: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &reader), SQLITE_OK)
+        let connection = try XCTUnwrap(reader)
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(sqlite3_exec(connection, "BEGIN; SELECT * FROM notes;", nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try store.continueTasks(sources, to: "2026-10-22", at: Date()))
+        XCTAssertEqual(sqlite3_exec(connection, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        XCTAssertEqual(try store.continueTasks(sources, to: "2026-10-22", at: Date()).count, 2)
+    }
+
+    func testContinuationRejectsStaleCompletedFutureAndDuplicateSelectionsWithoutWrites() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let source = note("Original", day: "2026-10-21", createdAt: 1)
+        try store.add(source)
+        try store.update(id: source.id, text: "Changed", categoryID: nil)
+        let before = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        XCTAssertThrowsError(try store.continueTasks([source], to: "2026-10-22", at: Date()))
+        let current = try XCTUnwrap(store.notes(for: source.dayKey).first)
+        for day in ["2026-10-21", "2026-10-20", "bad-date"] {
+            XCTAssertThrowsError(try store.continueTasks([current], to: day, at: Date()))
+        }
+        XCTAssertThrowsError(try store.continueTasks([current, current], to: "2026-10-22", at: Date()))
+        XCTAssertThrowsError(try store.continueTasks([], to: "2026-10-22", at: Date()))
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), before)
+        try store.setCompleted(id: source.id, completedAt: Date())
+        let completed = try XCTUnwrap(store.notes(for: source.dayKey).first)
+        XCTAssertThrowsError(try store.continueTasks([completed], to: "2026-10-22", at: Date()))
+        XCTAssertEqual(try store.notes(for: "2026-10-22"), [])
+    }
+
+    func testVersionFourMigrationOnlyAddsEmptyContinuationMarker() throws {
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.add(note("Keep", day: "2026-10-21", createdAt: 1))
+        }
+        try executeRaw("ALTER TABLE notes DROP COLUMN continued_on; PRAGMA user_version = 4; UPDATE notes SET display_order = 17;")
+        let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id, display_order FROM notes ORDER BY rowid"), rows)
+        XCTAssertEqual(try rawRows("SELECT continued_on FROM notes"), [[nil]])
+        XCTAssertEqual(try store.notes(for: "2026-10-21").map(\.text), ["Keep"])
+        XCTAssertEqual(try schemaVersion(), 5)
+    }
+
     func testUnversionedExistingTableKeepsItsRows() throws {
         try seedLegacy(version: 0)
         let before = try legacyRows()
@@ -105,7 +208,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-27"), 2)
         XCTAssertEqual(try reopened.incompleteCount(for: "2026-09-26"), 1)
         XCTAssertEqual(Array(try legacyRows().prefix(before.count)), before)
-        XCTAssertEqual(try schemaVersion(), 4)
+        XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
         XCTAssertEqual(try laterRows(), [])
     }
 
@@ -114,17 +217,17 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             """
             CREATE TABLE future_data (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
             INSERT INTO future_data VALUES (1, 'Preserve unknown future data 📝');
-            PRAGMA user_version = 5;
+            PRAGMA user_version = 6;
             """
         )
         let originalBytes = try Data(contentsOf: databaseURL)
 
         XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
-            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(5) = error else {
+            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(6) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
         }
-        XCTAssertEqual(try schemaVersion(), 5)
+        XCTAssertEqual(try schemaVersion(), 6)
         XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
     }
 
@@ -133,7 +236,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         let yesterday = note("Yesterday", day: "2026-09-26", createdAt: 20)
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
             XCTAssertEqual(try rawRows("SELECT * FROM categories"), [])
             XCTAssertEqual(try laterRows(), [])
             try store.add(today)
@@ -197,7 +300,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
-    func testVersionFourReopenDoesNotChangeSchemaDataOrDatabaseBytes() throws {
+    func testCurrentVersionReopenDoesNotChangeSchemaDataOrDatabaseBytes() throws {
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             try store.add(note("Keep 📝", day: "2026-09-27", createdAt: 10))
@@ -212,7 +315,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         for _ in 0..<2 {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             XCTAssertEqual(try store.notes(for: "2026-09-27").count, 1)
-            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
             XCTAssertEqual(try schemaSnapshot(), schema)
             XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
             XCTAssertEqual(try laterRows(), later)
@@ -230,7 +333,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
 
         do {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
             XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes ORDER BY rowid"), rows)
             XCTAssertEqual(try rawRows("SELECT * FROM categories ORDER BY creation_order"), categories)
             XCTAssertEqual(try laterRows(), [])
@@ -247,7 +350,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
 
         let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
-        XCTAssertEqual(try schemaVersion(), 4)
+        XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
         XCTAssertEqual(Array(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes ORDER BY rowid").prefix(rows.count)), rows)
         XCTAssertEqual(try reopened.notes(for: "2026-09-27").map(\.text),
                        ["Today ' quote 📝", "Today completed", "Added after upgrade"])
@@ -267,7 +370,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             let later = version == 3 ? try laterRows() : []
             do {
                 let store = try SQLiteNoteRepository(databaseURL: databaseURL)
-                XCTAssertEqual(try schemaVersion(), 4)
+                XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
                 XCTAssertEqual(try legacyRows(), before)
                 XCTAssertEqual(try rawRows("SELECT rowid, display_order FROM notes ORDER BY rowid"),
                                [["7", "0"], ["21", "0"], ["35", "1"], ["80", "1"]])
@@ -305,7 +408,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             try executeRaw("DROP INDEX notes_day_display_order_idx")
             do {
                 _ = try SQLiteNoteRepository(databaseURL: databaseURL)
-                XCTAssertEqual(try schemaVersion(), 4)
+                XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
                 XCTAssertEqual(try legacyRows(), rows.map { Array($0.prefix(6)) })
                 XCTAssertEqual(try laterRows(), later)
             }
@@ -330,7 +433,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             let bytes = try Data(contentsOf: databaseURL)
             let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
             XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL), sql)
-            XCTAssertEqual(try schemaVersion(), 4)
+            XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
             XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rows)
             XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
             try FileManager.default.removeItem(at: databaseURL)
@@ -449,7 +552,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
                 : [[nil], [nil], [nil], [nil]]
             do {
                 let retried = try SQLiteNoteRepository(databaseURL: databaseURL)
-                XCTAssertEqual(try schemaVersion(), 4)
+                XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
                 XCTAssertEqual(try legacyRows(), beforeRows.map { Array($0.prefix(6)) })
                 XCTAssertEqual(try retried.incompleteCount(for: "2026-09-27"), 1)
                 XCTAssertEqual(try retried.incompleteCount(for: "2026-09-26"), 1)
@@ -1763,7 +1866,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         try store.add(c)
         XCTAssertEqual(try store.notes(for: a.dayKey), [b, a, c])
         XCTAssertEqual(try rawRows("SELECT display_order FROM notes WHERE day_key = '2026-10-07' ORDER BY display_order"), [["0"], ["1"], ["2"]])
-        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes WHERE id != '\(c.id.uuidString)' ORDER BY rowid"), before.map { Array($0.dropLast()) })
+        XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id FROM notes WHERE id != '\(c.id.uuidString)' ORDER BY rowid"), before.map { Array($0.prefix(7)) })
         XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).notes(for: old.dayKey), [old])
     }
 

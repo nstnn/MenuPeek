@@ -101,6 +101,8 @@ final class DailyNotesState {
     }
     private(set) var notes: [Note] = []
     private(set) var yesterdayIncompleteCount = 0
+    private(set) var continuationMessage: String?
+    private(set) var continuationFailed = false
     private(set) var hasLoadedToday = false
     private(set) var readIssue: DailyNotesIssue?
     private(set) var taskIssue: DailyNotesIssue?
@@ -403,7 +405,7 @@ final class DailyNotesState {
                 guard note.categoryID == id else { return note }
                 return Note(id: note.id, text: note.text, dayKey: note.dayKey,
                             createdAt: note.createdAt, completedAt: note.completedAt,
-                            categoryID: nil)
+                            categoryID: nil, continuedOn: note.continuedOn)
             }
             laterTasks = laterTasks.map { task in
                 guard task.categoryID == id else { return task }
@@ -637,6 +639,57 @@ final class DailyNotesState {
         }
     }
 
+    /// A History selection is tied to the displayed day and action-time Today.
+    /// Publish only the committed outcome, without a fallible post-write read.
+    @discardableResult
+    func continueHistoryTasks(_ sources: [Note], expectedToday: GregorianDay) -> Bool {
+        let instant = day.now()
+        let keys = day.keys(for: instant)
+        continuationMessage = nil
+        continuationFailed = false
+        guard keys.today == expectedToday.key else {
+            refresh()
+            continuationFailed = true
+            continuationMessage = "The date changed. Review your selection and try again."
+            return false
+        }
+        if todayKey != keys.today || !hasLoadedToday || !hasLoadedCatalog { refresh(keys: keys) }
+        guard !isTerminating, hasLoadedToday, hasLoadedCatalog, let repository,
+              taskWindowPresentation.route == .history || taskWindowPresentation.route == .unfinishedDay,
+              taskWindowPresentation.canBrowse(state: self),
+              let snapshot = taskWindowPresentation.historyState?.daySnapshot,
+              !sources.isEmpty, sources.allSatisfy({ snapshot.notes.contains($0) && $0.isUnfinished && $0.dayKey < keys.today }) else {
+            continuationFailed = true
+            continuationMessage = "Could not continue tasks. Reload the day and try again."
+            return false
+        }
+        do {
+            let saved = try repository.continueTasks(sources, to: keys.today, at: instant)
+            notes.append(contentsOf: saved)
+            yesterdayIncompleteCount = max(0, yesterdayIncompleteCount - sources.count { $0.dayKey == keys.yesterday })
+            for note in saved {
+                categoryPreferences.setCollapsed(false, for: TaskGroupID(categoryID: note.categoryID), in: .today)
+            }
+            historyRevision += 1
+            continuationMessage = saved.count == 1 ? "Continued 1 task in Today." : "Continued \(saved.count) tasks in Today."
+            taskWindowPresentation.refreshBrowser(state: self)
+            return true
+        } catch {
+            if case TaskContinuationError.staleSource = error {
+                historyRevision += 1
+                taskWindowPresentation.refreshBrowser(state: self)
+            }
+            continuationFailed = true
+            continuationMessage = "Could not continue tasks. Reload the day and try again."
+            return false
+        }
+    }
+
+    func clearContinuationMessage() {
+        continuationMessage = nil
+        continuationFailed = false
+    }
+
     private func recordLaterError(_ error: Error, fallback: DailyNotesIssue) {
         switch error {
         case LaterTaskRepositoryError.notFound, LaterTaskRepositoryError.alreadyCompleted,
@@ -750,7 +803,7 @@ final class DailyNotesState {
     func setCompleted(id: UUID, completed: Bool) -> Bool {
         let instant = day.now()
         guard readyForExistingTask(on: day.key(for: instant)), let repository,
-              let index = notes.firstIndex(where: { $0.id == id }) else { return false }
+              let index = notes.firstIndex(where: { $0.id == id }), notes[index].continuedOn == nil else { return false }
         let saved = notes[index]
         let completedAt = completed ? instant : nil
         do {
@@ -769,7 +822,7 @@ final class DailyNotesState {
 
     func beginEditing(id: UUID) {
         guard readyForExistingTask(on: day.keys().today),
-              let note = notes.first(where: { $0.id == id }) else { return }
+              let note = notes.first(where: { $0.id == id }), note.continuedOn == nil else { return }
         editingNoteID = id
         editDraft = note.text
         editCategoryID = note.categoryID

@@ -37,7 +37,7 @@ This takes about 40 s and needs no UI. It compiles the fixture and `mpax` into `
 
 Launch is ready when it prints `Ready: PID <pid>, status item: … title="1/4" …`. It waits for the status item and for the task window's `id=todayTab`. A status title of `—` means storage could not be read. The first launch of a fresh build can take up to a minute while macOS assesses the newly signed bundle; later launches take a few seconds. If launch times out, run `doctor` instead of launching again. `doctor` finds and adopts a fixture that started late, and `launch` refuses to start a second instance of the same run.
 
-- **`--seed empty`** (the default) gives a fresh schema-v4 store created by the production migrations: Today shows `0/0` and an empty state.
+- **`--seed empty`** (the default) gives a fresh schema-v5 store created by the production migrations: Today shows `0/0` and an empty state.
 - **`--seed basic`** adds categories `Work` and `Errands`. Today has `Review pull request` (Work), `Write release notes` (Work, completed), `Buy coffee beans` (Errands), and `Water the plants` (General). Yesterday has `Call the dentist` (unfinished) and `Send weekly report` (completed). Three days ago has `Renew library books` (unfinished). Later has `Plan the team offsite` (Work) and `Read the SQLite docs` (General).
 - **Seeding** happens only when the run's database does not exist yet. Relaunching the same run keeps every change, which is how persistence is checked.
 - **`--now 2026-10-08T16:00:00Z --tz America/Toronto`** fixes the clock for date-sensitive checks. Without it the fixture uses the real clock.

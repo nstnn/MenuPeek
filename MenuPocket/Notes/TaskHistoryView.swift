@@ -7,6 +7,7 @@ struct TaskHistoryView: View {
     let history: TaskHistoryState
     let isWide: Bool
     var calendarWidth: CGFloat = 380
+    var state: DailyNotesState? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -14,12 +15,12 @@ struct TaskHistoryView: View {
                 HStack(alignment: .top, spacing: 28) {
                     calendarPane.frame(width: calendarWidth)
                     Divider()
-                    HistoryDayDetailView(history: history)
+                    HistoryDayDetailView(history: history, state: state)
                 }
             } else {
                 calendarPane
                 Divider()
-                HistoryDayDetailView(history: history)
+                HistoryDayDetailView(history: history, state: state)
             }
         }
     }
