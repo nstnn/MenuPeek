@@ -174,7 +174,7 @@ struct TaskBrowserView: View {
                                 .keyboardFocusAppearance()
                         } else if presentation.route == .history, let history = presentation.historyState {
                             TaskHistoryView(history: history, isWide: isWide,
-                                            calendarWidth: min(380, contentWidth * 0.43))
+                                            calendarWidth: min(380, contentWidth * 0.43), state: state)
                         } else if presentation.route == .unfinished, let unfinished = presentation.unfinishedState {
                             UnfinishedTasksView(unfinished: unfinished, focusedDay: $unfinishedDayFocus) { day in
                                 presentation.showUnfinishedDay(day, state: state)
@@ -185,7 +185,7 @@ struct TaskBrowserView: View {
                                     .foregroundStyle(.secondary)
                                     .accessibilityIdentifier("unfinishedSelectionIssue")
                             }
-                            HistoryDayDetailView(history: history)
+                            HistoryDayDetailView(history: history, state: state)
                         }
                     }
                     .frame(maxWidth: isWide ? 920 : 660, alignment: .leading)

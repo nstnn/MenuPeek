@@ -50,6 +50,7 @@ enum TaskMovePlanner {
             return .rejected(.taskNotFound)
         }
         let source = notes[sourceIndex]
+        guard source.continuedOn == nil else { return .rejected(.sourceChanged) }
         guard TaskGroupID(categoryID: source.categoryID) == request.expectedSourceGroup else {
             return .rejected(.sourceChanged)
         }
@@ -79,7 +80,7 @@ enum TaskMovePlanner {
         }
         let moved = Note(id: source.id, text: source.text, dayKey: source.dayKey,
                          createdAt: source.createdAt, completedAt: source.completedAt,
-                         categoryID: destinationCategoryID)
+                         categoryID: destinationCategoryID, continuedOn: source.continuedOn)
         result.insert(moved, at: insertionIndex)
 
         // Other groups can lie between adjacent visible rows. If the task's

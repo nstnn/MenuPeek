@@ -8,6 +8,7 @@ struct TaskWindowView: View {
         let text: String
         let isCompleted: Bool
         let categoryID: UUID?
+        var continuedOn: String? = nil
     }
 
     private struct Group: Identifiable {
@@ -28,7 +29,7 @@ struct TaskWindowView: View {
         if isLater {
             return state.laterTasks.map { Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID) }
         }
-        return state.notes.map { Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID) }
+        return state.notes.map { Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID, continuedOn: $0.continuedOn) }
     }
     private var groups: [Group] {
         if isLater {
@@ -40,7 +41,7 @@ struct TaskWindowView: View {
         }
         return movementGroups.map { group in
             Group(id: group.id, name: group.name, notes: group.notes.map {
-                Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID)
+                Row(id: $0.id, text: $0.text, isCompleted: $0.isCompleted, categoryID: $0.categoryID, continuedOn: $0.continuedOn)
             })
         }
     }
@@ -868,6 +869,8 @@ struct TaskWindowView: View {
             .accessibilityIdentifier("\(isLater ? "laterTaskActions" : "taskActions")-\(note.id)")
         }
         .font(.system(size: 14))
+        .disabled(note.continuedOn != nil)
+        .help(note.continuedOn.map { "Continued on \($0)" } ?? "")
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
         .frame(minHeight: 44)

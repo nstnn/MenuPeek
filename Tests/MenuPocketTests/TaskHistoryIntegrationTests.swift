@@ -27,6 +27,56 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testContinueHistorySelectionUpdatesBothSurfacesPreservesDraftsAndRejectsRollover() throws {
+        let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let category = try repository.createCategory(name: "Work")
+        let source = note("Continue me", "2026-10-05", done: false, categoryID: category.id)
+        let remaining = note("Keep yesterday", "2026-10-05", done: false, categoryID: nil)
+        try repository.add(source)
+        try repository.add(remaining)
+        let (daily, _) = makeApp(repository: repository)
+        let presentation = daily.taskWindowPresentation
+        defer { presentation.stopForTermination(); daily.stopForTermination() }
+        daily.startup()
+        presentation.setWindowVisible(true, state: daily)
+        daily.draft = "Today draft"
+        daily.laterDraft = "Later draft"
+        XCTAssertTrue(presentation.showHistory(state: daily, entry: .yesterday))
+        let history = try XCTUnwrap(presentation.historyState)
+        let today = history.today
+        let rowsBefore = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        // A write failure preserves selection targets, published rows and drafts.
+        try executeRaw("CREATE TRIGGER fail_continuation BEFORE UPDATE OF continued_on ON notes BEGIN SELECT RAISE(ABORT, 'fixture failure'); END")
+        XCTAssertFalse(daily.continueHistoryTasks([source], expectedToday: today))
+        XCTAssertEqual(daily.notes, [])
+        XCTAssertEqual(daily.yesterdayIncompleteCount, 2)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), rowsBefore)
+        try executeRaw("DROP TRIGGER fail_continuation")
+        XCTAssertTrue(daily.continueHistoryTasks([source], expectedToday: today))
+        XCTAssertEqual(presentation.route, .history)
+        XCTAssertEqual(daily.availableProgress, NoteProgress(completed: 0, total: 1))
+        XCTAssertEqual(daily.notes.map(\.text), [source.text])
+        XCTAssertEqual(daily.notes.first?.categoryID, category.id)
+        XCTAssertEqual(daily.yesterdayIncompleteCount, 1)
+        XCTAssertEqual(history.progress, NoteProgress(completed: 0, total: 2))
+        XCTAssertEqual(history.daySnapshot?.filteredNotes(.unfinished), [remaining])
+        XCTAssertEqual(history.daySnapshot?.notes.first?.continuedOn, "2026-10-06")
+        XCTAssertEqual(daily.draft, "Today draft")
+        XCTAssertEqual(daily.laterDraft, "Later draft")
+        XCTAssertFalse(daily.continueHistoryTasks([source], expectedToday: today))
+        XCTAssertEqual(daily.notes.count, 1)
+        clock.now = "2026-10-07T12:00:00Z"
+        XCTAssertFalse(daily.continueHistoryTasks([remaining], expectedToday: today))
+        XCTAssertEqual(try repository.notes(for: "2026-10-07"), [])
+        XCTAssertEqual(try repository.incompleteCount(for: remaining.dayKey), 1)
+        XCTAssertEqual(daily.draft, "Today draft")
+        // Completing the new attempt does not rewrite its source day's result.
+        let attempt = try XCTUnwrap(repository.notes(for: "2026-10-06").first)
+        try repository.setCompleted(id: attempt.id, completedAt: Date())
+        XCTAssertEqual(try repository.historyDaySnapshot(for: source.dayKey).progress,
+                       NoteProgress(completed: 0, total: 2))
+    }
+
 
     func testCommittedCategoryOrderReloadsRetainedHistoryAndPreservesTasksAcrossFailureRetryAndReopen() throws {
         let repository = try SQLiteNoteRepository(databaseURL: databaseURL)
@@ -127,7 +177,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterRows)
         XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"), categoryFields)
         XCTAssertEqual(try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"), schema)
-        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["4"]])
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["5"]])
         XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
         XCTAssertEqual(daily.draft, "Today draft")
         XCTAssertEqual(daily.draftCategoryID, empty.id)
@@ -180,7 +230,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         }
         XCTAssertEqual(reopenedDefaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
         XCTAssertEqual(try rawRows("PRAGMA integrity_check"), [["ok"]])
-        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["4"]])
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["5"]])
         XCTAssertEqual(try reopened.historyDaySnapshot(for: "2026-10-05").notes, snapshot.notes)
     }
 

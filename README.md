@@ -1,6 +1,6 @@
 # MenuPocket
 
-MenuPocket is a local macOS desktop and menu bar app for daily tasks. Manage today's checklist and an undated Later list in one resizable task window, browse earlier days read-only in History, and see today's saved completed/total progress in the menu bar. Tasks stay in local SQLite storage. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. See the [product requirements](docs/REQUIREMENTS.md) for scope and the [desktop](docs/DESKTOP_TASK_ACCEPTANCE.md) and [Later](docs/LATER_TASKS_ACCEPTANCE.md) acceptance records for verification status.
+MenuPocket is a local macOS desktop and menu bar app for daily tasks. Manage today's checklist and an undated Later list in one resizable task window, browse earlier days in History and continue selected unfinished tasks in Today, and see today's saved completed/total progress in the menu bar. Tasks stay in local SQLite storage. The checkout directory is named `MenuPeek`; the Xcode project and app are named `MenuPocket`. See the [product requirements](docs/REQUIREMENTS.md) for scope and the [desktop](docs/DESKTOP_TASK_ACCEPTANCE.md) and [Later](docs/LATER_TASKS_ACCEPTANCE.md) acceptance records for verification status.
 
 ## Requirements
 
@@ -55,7 +55,7 @@ The menu bar shows saved completed/total progress, including `0/0` after a succe
 
 Right-click (or Control-click) the menu bar count for a read-only quick look: the date, Today's progress bar and `N of M done`, the next five unfinished Today tasks, how many Later tasks remain, and Open Today, Add Task… (always to Today), Settings…, and Quit. The quick look never completes or changes a task. Like other menu bar menus, it follows the macOS appearance rather than the Theme setting. VoiceOver and a few other checks are still untested (see [Requirements](docs/REQUIREMENTS.md#menu-bar-glance--implemented-2026-10-07)).
 
-Today tasks keep their assigned local day; unfinished tasks do not carry forward. The yesterday reminder opens History at yesterday with the Unfinished filter. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
+Today tasks keep their assigned local day; unfinished tasks do not carry forward automatically. In History, select unfinished tasks from a past day and choose Continue today. New attempts keep the text/category; originals retain their day and progress, show Continued on the destination date, and stop appearing in unfinished reminders. The yesterday reminder opens History at yesterday with the Unfinished filter. Existing notes remain in the sandbox's Application Support `MenuPocket/notes.sqlite`; preferences and onboarding state remain in `UserDefaults`.
 
 ## Use the Later list
 
@@ -80,7 +80,7 @@ Focused text fields support native cut/copy/paste/select-all and text undo/redo.
 
 ## Browse history
 
-Click the calendar button beside Today's date (View task history) to open History in the same window. It replaces the Today content with a History heading and Back to Today; Today's unsaved new-task draft, open composer, and scroll position are kept for your return. History is read-only: old tasks cannot be completed, edited, deleted, or moved.
+Click the calendar button beside Today's date (View task history) to open History in the same window. It replaces the Today content with a History heading and Back to Today; Today's unsaved new-task draft, open composer, and scroll position are kept for your return. Old tasks cannot be completed, edited, deleted, or moved in History. Continue today creates new attempts for selected unfinished past tasks while preserving the originals and their progress.
 
 History opens on yesterday in a Sunday-first month calendar. Each day shows completed/total for the tasks currently saved on that day: `0/0` for a past day with none, `—` for an empty future day, and Unavailable with Retry if the month could not be read. Use Previous month, Next month, and This month, or arrow keys, to move; click a day, or press Space or Return, to show its detail. Detail lists the day's tasks by current category in saved order. All, Unfinished, and Completed change only the rows shown; the day's count always covers every task.
 

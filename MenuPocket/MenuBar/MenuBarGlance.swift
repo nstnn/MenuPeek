@@ -62,6 +62,8 @@ struct MenuBarGlance: Equatable {
         /// A successful read with no tasks.
         case empty
         case allDone
+        /// Earlier attempts were continued; their saved progress stays incomplete.
+        case noUnfinished
         /// `overflowCount` is nil when every unfinished task is listed.
         case tasks(rows: [Row], overflowCount: Int?)
     }
@@ -102,9 +104,12 @@ struct MenuBarGlance: Equatable {
         // Collapsed groups are included: the header count covers their tasks.
         let showsCategory = groups.count > 1
         let unfinished = groups.flatMap { group in
-            group.notes.filter { !$0.isCompleted }.map { (note: $0, group: group) }
+            group.notes.filter(\.isUnfinished).map { (note: $0, group: group) }
         }
-        guard !unfinished.isEmpty else { return progress.total == 0 ? .empty : .allDone }
+        guard !unfinished.isEmpty else {
+            if progress.total == 0 { return .empty }
+            return progress.completed == progress.total ? .allDone : .noUnfinished
+        }
         let rows = unfinished.prefix(rowLimit).map { entry in
             Row(id: entry.note.id, title: title(for: entry.note.text), fullText: entry.note.text,
                 categoryName: showsCategory ? title(for: entry.group.name, limit: categoryLimit) : nil,

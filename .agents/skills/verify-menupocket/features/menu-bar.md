@@ -7,6 +7,7 @@ MenuPocket keeps a status item in the macOS menu bar that shows Today's saved pr
 - `menubar-count` mirrors saved Today progress after every write, including Quick Add and Move to Today.
 - `menubar-open-today` restores the window on Today, even when closed or on Later.
 - `menubar-glance` shows the read-only quick look with correct rows and counts.
+- `menubar-continued-rollback` shows No unfinished tasks, rather than All done, when a simulated backward date makes continued originals Today again; real completion/total remains unchanged.
 - `menubar-glance-actions` covers Open Today; Add Task… (always to Today); Settings…; and Quit.
 - `menubar-unavailable` shows `—`, then recovers through Retry in the window.
 - `menubar-window-closed` keeps the count live with the window closed.
@@ -40,3 +41,7 @@ Preconditions:
 - The glance follows the macOS appearance, not the app's Theme setting, so a Dark theme with macOS in Light shows a light menu by design.
 - The user's real MenuPocket shows its own count beside the fixture's. Always read `status-item` through this run's `ax`, never by screen position.
 - `fail-open` only affects the next storage open. Set it before `launch`, not while the fixture is running.
+
+## Continued originals after a backward date
+
+On a fresh `basic` fixture frozen at Oct 22, continue the unfinished Oct 21 dentist task through [History](history.md#continue-today-recipe). Stop and relaunch the same run with `--now 2026-10-21T16:00:00Z --tz America/Toronto` (no next-day offset for this recipe). This is an injected backward clock, never a change to the Mac's date. The saved original date is now Today with one real completion out of two, and no actionable unfinished task. Open the glance with `action status-item "Show quick look"`: header remains `1 of 2 done`, and the disabled body says `No unfinished tasks`, without `All done`. Snapshot both states and verify no rows changed during relaunch/browsing; dismiss with Escape and clean the run. Continued-only `0/1` and completed-plus-continued are also covered by model/menu tests.

@@ -52,15 +52,34 @@ extension View {
     func historyFocusScroll() -> some View { modifier(HistoryFocusScroll()) }
 }
 
-/// Read-only detail of one saved day. Progress always covers the whole day;
+/// Historical detail with explicit continuation of selected unfinished work.
+/// Progress always covers the whole day;
 /// filters change visible rows only. Shared by History and Unfinished.
 struct HistoryDayDetailView: View {
     let history: TaskHistoryState
+    var state: DailyNotesState? = nil
+    @State private var selection: Set<UUID> = []
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             heading
+            if let state {
+                if !eligibleNotes.isEmpty {
+                    Button(selection.isEmpty ? "Continue today" : "Continue today (\(selection.count))") {
+                        continueSelection(state)
+                    }
+                    .historyKeyAction { continueSelection(state) }
+                    .disabled(selection.isEmpty || !state.hasLoadedToday)
+                    .accessibilityIdentifier("continueHistoryTasks")
+                }
+                if let message = state.continuationMessage {
+                    Text(message)
+                        .font(.callout)
+                        .foregroundStyle(state.continuationFailed ? Color.red : Color.secondary)
+                        .accessibilityIdentifier("historyContinuationMessage")
+                }
+            }
             if history.daySnapshot != nil {
                 Picker("Show", selection: Binding(get: { history.filter }, set: { history.setFilter($0) })) {
                     Text("All").tag(HistoryTaskFilter.all)
@@ -102,6 +121,25 @@ struct HistoryDayDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("historyDayDetail")
+        .onChange(of: history.selectedDay) { _, _ in
+            selection = []
+            state?.clearContinuationMessage()
+        }
+        .onChange(of: history.filter) { _, _ in selection = [] }
+        .onChange(of: history.today) { _, _ in selection = [] }
+        .onChange(of: history.daySnapshot) { _, _ in
+            selection.formIntersection(eligibleNotes.map(\.id))
+        }
+    }
+
+    private var eligibleNotes: [Note] {
+        guard state != nil else { return [] }
+        return history.daySnapshot?.notes.filter { $0.isUnfinished && $0.dayKey < history.today.key } ?? []
+    }
+
+    private func continueSelection(_ state: DailyNotesState) {
+        let sources = eligibleNotes.filter { selection.contains($0.id) }
+        if state.continueHistoryTasks(sources, expectedToday: history.today) { selection = [] }
     }
 
     @ViewBuilder
@@ -122,12 +160,6 @@ struct HistoryDayDetailView: View {
                             .accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Label("View only", systemImage: "lock")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                        .padding(.top, 4)
-                        .accessibilityIdentifier("historyReadOnly")
                 }
                 if let progress = history.progress {
                     HStack(spacing: 10) {
@@ -207,10 +239,25 @@ struct HistoryDayDetailView: View {
         }
     }
 
-    /// A status image, not a checkbox: historical tasks have no actions.
+    /// Checkboxes select work to continue; they never change old completion.
     private func row(_ note: Note) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if note.isCompleted {
+            if state != nil, note.isUnfinished, note.dayKey < history.today.key {
+                Toggle("Select \(note.text) to continue today", isOn: Binding(
+                    get: { selection.contains(note.id) },
+                    set: { if $0 { selection.insert(note.id) } else { selection.remove(note.id) } }
+                ))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .focusable()
+                .keyboardFocusAppearance()
+                .onKeyPress(keys: [.space, .return]) { _ in
+                    if !selection.insert(note.id).inserted { selection.remove(note.id) }
+                    return .handled
+                }
+                .historyFocusScroll()
+                .accessibilityIdentifier("continueSelection-\(note.id)")
+            } else if note.isCompleted {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.accentColor)
@@ -224,16 +271,23 @@ struct HistoryDayDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(note.isCompleted ? "Completed" : "Unfinished")
+            Text(status(note))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .fixedSize()
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 14))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(note.isCompleted ? "Completed" : "Not completed"): \(note.text)")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(status(note)): \(note.text)")
         .accessibilityIdentifier("historyTaskRow-\(note.id)")
+    }
+
+    private func status(_ note: Note) -> String {
+        if let key = note.continuedOn, let day = try? GregorianDay(key: key) {
+            return "Continued on \(day.label("MMM d, yyyy"))"
+        }
+        return note.isCompleted ? "Completed" : "Unfinished"
     }
 }

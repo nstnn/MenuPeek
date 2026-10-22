@@ -1,5 +1,11 @@
 import Foundation
 
+enum TaskContinuationError: Error {
+    case invalidSelection
+    case staleSource
+    case unsupported
+}
+
 enum TaskCategoryRepositoryError: Error, Equatable {
     case duplicateName
     case notFound(UUID)
@@ -57,6 +63,9 @@ protocol NoteRepository {
     func incompleteCount(for dayKey: String) throws -> Int
     /// Appends a task after the day's existing tasks.
     func add(_ note: Note) throws
+    /// Atomically creates new attempts at the end of Today and marks each
+    /// unchanged, unfinished past source as continued. Preserves old progress.
+    func continueTasks(_ sources: [Note], to dayKey: String, at instant: Date) throws -> [Note]
     func setCompleted(id: UUID, completedAt: Date?) throws
     /// Saves both fields together, preserving day, timestamps, completion, and order.
     func update(id: UUID, text: String, categoryID: UUID?) throws
@@ -81,4 +90,10 @@ protocol NoteRepository {
     /// `LaterTaskRepositoryError.notFound`, `.alreadyCompleted`, or
     /// `.idCollision` without changing either list.
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note
+}
+
+extension NoteRepository {
+    func continueTasks(_ sources: [Note], to dayKey: String, at instant: Date) throws -> [Note] {
+        throw TaskContinuationError.unsupported
+    }
 }

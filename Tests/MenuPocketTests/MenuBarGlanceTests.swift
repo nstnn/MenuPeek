@@ -63,6 +63,17 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(glance.body, .allDone)
     }
 
+    func testContinuedOriginalsOnClockRollbackDoNotClaimAllDone() {
+        let continued = Note(id: UUID(), text: "Continued", dayKey: day, createdAt: Date(),
+                             completedAt: nil, continuedOn: "2026-10-08")
+        for notes in [[continued], [continued, note("Done", nil, completed: true)]] {
+            let result = glance(notes: notes)
+            XCTAssertEqual(result.body, .noUnfinished)
+            XCTAssertEqual(result.header.progress?.total, notes.count)
+            XCTAssertEqual(result.header.progress?.completed, notes.count - 1)
+        }
+    }
+
     func testUnavailableTodayShowsDashNoBarAndIgnoresStaleRows() {
         let stale = TaskGroup.groups(categories: [], notes: [note("Stale", nil)])
 
