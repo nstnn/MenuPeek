@@ -15,6 +15,8 @@ MenuPocket manages daily tasks in one desktop window, where Today tasks can be d
 - [Category reordering handoff](CATEGORY_REORDERING_HANDOFF.md) — global General-first saved order, independent review, automated preservation/regression, partial native acceptance and remaining pointer/system gaps.
 - [Settings shortcuts verification](SETTINGS_SHORTCUTS_VERIFICATION.md) — the read-only shortcut reference, focused tests, native Settings component evidence, keyboard/production limits, and temporary-app cleanup.
 
+- [Manual task continuation](TASK_CONTINUATION_HANDOFF.md) — Continue today, schema-v5 preservation, automated/native verification, review and cleanup.
+
 ## Historical evidence
 
 - [Notes MVP regression](NOTES_MVP_REGRESSION.md) — original 2026-09-27 compact-panel build/test evidence.

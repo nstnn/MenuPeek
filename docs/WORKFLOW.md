@@ -40,7 +40,7 @@ Exercise create/duplicate/rename/remove, categorized add/edit/reassignment and c
 
 For saved-data persistence, make actual isolated changes, quit the fixture completely, confirm process exit, and relaunch the same identified artifact without reseeding. Compare stopped/relaunched task and category IDs, assignments, rowids/order, text, day, timestamps, completion/counts, and both presentation preferences. Check the visible result and a fresh blank draft's remembered category. Unsaved drafts are process-local and need not survive Quit. An unchanged seed or headless reopen is narrower evidence than this changed-data/interface check.
 
-Category preferences use `local.menupocket.app.taskCategories.lastUsedCategoryID` (UUID string; absent means General) and `local.menupocket.app.taskCategories.collapsedGroupIDs` (category UUID strings plus `general`). Later uses separate `local.menupocket.app.taskCategories.later.lastUsedCategoryID` and `local.menupocket.app.taskCategories.later.collapsedGroupIDs` keys. Both scopes are separate from schema-1 `AppPreferences` and SQLite schema v4. A fixture must use an isolated defaults suite for these keys as well as existing preferences/onboarding, preserving the real user's values. Missing/deleted choices fall back safely; Quick Add saves to General without changing the remembered Today choice.
+Category preferences use `local.menupocket.app.taskCategories.lastUsedCategoryID` (UUID string; absent means General) and `local.menupocket.app.taskCategories.collapsedGroupIDs` (category UUID strings plus `general`). Later uses separate `local.menupocket.app.taskCategories.later.lastUsedCategoryID` and `local.menupocket.app.taskCategories.later.collapsedGroupIDs` keys. Both scopes are separate from schema-1 `AppPreferences` and SQLite schema v5. A fixture must use an isolated defaults suite for these keys as well as existing preferences/onboarding, preserving the real user's values. Missing/deleted choices fall back safely; Quick Add saves to General without changing the remembered Today choice.
 
 Record automated, native-fixture, production-identity, and genuine-system outcomes separately. The [category handoff](TASK_CATEGORIES_HANDOFF.md) owns the current evidence summary and remaining gate; the dated desktop records retain the detailed results. TASK-012 documentation completion does not substitute for TASK-011 interface acceptance.
 
@@ -68,7 +68,7 @@ A v2 binary cannot reopen a v3 store. Do not downgrade, reset, or hand-edit the 
 
 ## History verification
 
-History is read-only, so verification must show that browsing writes nothing. Hosted tests use temporary SQLite databases, isolated defaults, and injected clocks/calendars; cover Gregorian month edges (leap years, every starting weekday, year boundaries) with civil-day keys rather than 86,400-second steps.
+History browsing must write nothing. Continue today is an explicit write action; verify it separately from the read-only browsing baseline. Hosted tests use temporary SQLite databases, isolated defaults, and injected clocks/calendars; cover Gregorian month edges (leap years, every starting weekday, year boundaries) with civil-day keys rather than 86,400-second steps.
 
 For native checks, build a fixture from the production views/state with an isolated SQLite database and defaults suite, a fixed clock, and fake login/hotkey services; never seed History scenarios in the user's data. Seed enough earlier unfinished days to need Load more (more than 31). To exercise Retry, wrap the production repository so month, day, or Unfinished-page reads throw on demand, and record those as injected failures rather than storage faults. Verify the fixture's path, bundle, executable hash, database, and defaults suite before interacting.
 
@@ -131,3 +131,11 @@ Use Pass, Fail, Not tested, or Blocked for checks with recorded outcomes. A depe
 Update [Requirements](REQUIREMENTS.md) when product behavior or scope changes, [Architecture](ARCHITECTURE.md) when component or data boundaries change, and this workflow when verification or release steps change. Keep [README](../README.md) concise and update [AGENTS.md](../AGENTS.md) only when its project-wide rules or document map changes.
 
 For documentation-only changes, review links, commands, behavior descriptions, and evidence provenance, and run `git diff --check`. Do not turn copied historical results into new test or acceptance claims. Preserve the dated Notes MVP records as history. Maintain local plan status separately from tracked requirements/evidence, without changing the ignored-plan policy.
+
+## Schema v5 upgrade preparation
+
+Before first launching a v5 build on real data, quit every MenuPocket copy and make a consistent recoverable SQLite backup using the procedure under [Schema v3 upgrade preparation](#schema-v3-upgrade-preparation). Record source version, backup location/integrity and the target build. V5 only adds nullable notes.continued_on to v4; it does not rewrite existing rows or ranks. A v1–v4 binary cannot reopen v5. Do not hand-edit the version or restore an old backup without a separate deliberate decision about losing newer changes. Fixture verification does not authorize opening the user's database or installing a release.
+
+## Continue today verification
+
+Run SQLiteNoteRepositoryTests and TaskHistoryIntegrationTests for continuation batches, stale/completed/duplicate/date guards, write/COMMIT rollback and retry, reopen, migration and progress preservation; then run the shared-scheme full suite. Follow the [History feature recipe](../.agents/skills/verify-menupocket/features/history.md) on a fresh isolated fixture. Observe selection, keyboard activation, saved source marker/new attempts, Today/menu bar count, unchanged old progress, Unfinished/reminder removal, changed-data quit/relaunch, and cleanup. Record native/system limits separately in [continuation handoff](TASK_CONTINUATION_HANDOFF.md).

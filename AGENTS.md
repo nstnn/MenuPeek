@@ -13,6 +13,7 @@ MenuPocket is a native macOS desktop and menu bar app built with SwiftUI and App
 - [`docs/LATER_TASKS_REGRESSION.md`](docs/LATER_TASKS_REGRESSION.md) and [`docs/LATER_TASKS_ACCEPTANCE.md`](docs/LATER_TASKS_ACCEPTANCE.md): Today/Later automated evidence, isolated-fixture interface results, and remaining production/system gaps.
 - [`docs/TASK_CATEGORIES_HANDOFF.md`](docs/TASK_CATEGORIES_HANDOFF.md): category implementation/verification handoff and remaining acceptance gate.
 - [`docs/CATEGORY_REORDERING_HANDOFF.md`](docs/CATEGORY_REORDERING_HANDOFF.md): global saved category order, independent review, automated/native evidence, and remaining acceptance gaps.
+- [`docs/TASK_CONTINUATION_HANDOFF.md`](docs/TASK_CONTINUATION_HANDOFF.md): manual Continue today, schema-v5 preservation, automated/native verification, review and cleanup.
 - [`docs/NOTES_MVP_REGRESSION.md`](docs/NOTES_MVP_REGRESSION.md) and [`docs/NOTES_MVP_ACCEPTANCE.md`](docs/NOTES_MVP_ACCEPTANCE.md): historical compact-panel evidence; preserve their original results.
 - [`docs/index.md`](docs/index.md): documentation entry point, including local desktop/MVP plans and the historical roadmap. `plan/` is ignored by Git and may be absent from other checkouts.
 
