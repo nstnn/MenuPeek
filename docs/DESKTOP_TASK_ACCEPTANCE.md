@@ -729,3 +729,31 @@ The exact installed process launched as PID 25543 with an on-screen 800×612 win
 ## Larger initial window — 2026-11-09
 
 Agent-operated isolated fixture `20261109-155751` with the `basic` seed: **Pass**. The initial task content is now 920 × 640 pt (previously 800 × 560); the measured native frame was 920 × 672 pt including title bar. Today, the Add task composer and Later remained usable, with category, Save/Cancel and navigation visible. Cancelling the empty composer and switching to Later left the SQLite snapshot unchanged. The shared MenuPocket scheme Debug build passed. Evidence: `build/verify-menupocket/evidence/20261109-155751/` (identity, actions and three snapshots). Minimum-size resizing and production-identity launch were **Not tested** in this focused check. Temporary build and fixture bundles were cleaned up; the existing user app was preserved.
+
+## 2026-11-09 — Persistent Today/Later sidebar
+
+Scoped UI correction: Later previously removed the date, Today progress and History from the rail, shifting navigation upward (user-supplied Later screenshot). The shared rail now retains the same content and geometry on Today and Later, with `Today:` explicitly naming the progress count. Only the main list content and selected destination change. History from Later selects Today before opening the existing child route; History still replaces the whole task surface as before.
+
+**Pass, agent-operated isolated native fixture**, run `20261109-160532`, seed `basic` (fictional Work/Errands categories, four Today and two Later tasks), production views and delegate with fake login/hotkey boundaries. Evidence: [`identity`](../build/verify-menupocket/evidence/20261109-160532/identity.json), [`actions`](../build/verify-menupocket/evidence/20261109-160532/actions.log), and [`snapshots`](../build/verify-menupocket/evidence/20261109-160532/snapshots/).
+
+- Today and Later retain date, Today progress (`1 of 4 complete`), History, Categories and Settings; Later main pane shows `2 tasks remaining`. Inspected normal 920 × 640 pt content in Dark and Light, plus both tabs at minimum 600 × 400 pt content by an actual CUA corner drag. Recorded compact outer bounds are 600 × 432 pt including title bar; screenshots are 2× pixels.
+- Later Add exposes native field, category, Save/Cancel at minimum size. Cancel works; list has an accessible scroll path.
+- A fictional Later draft survives Command-1 then Command-2; Escape cancels it. History from Later opens, and Back to Today returns to Today.
+- Menu bar remains `1/4`. SQLite snapshots before/after navigation and draft cancellation are identical (`diff` exit 0); no task writes were needed. Fixture appearance restored to System before cleanup.
+- Shared `MenuPocket` scheme Debug build passed (`build/LaterSidebarDerived`; log copied into evidence). First sandboxed fixture compile failed because the Observation macro plugin could not run; a fresh build outside the sandbox passed. Both fixture sessions and the temporary Xcode app were cleaned up; see run cleanup reports.
+
+Not tested: full XCTest suite, VoiceOver, unsupported OS versions, production sandbox/login/hotkey integration, and empty/error/long-content states in this increment. This was a focused presentation correction, with no persistence schema or task-command changes. The user's running main app was preserved; it has not been replaced by this build.
+
+## 2026-11-09 — Larger task window
+
+The task window now opens with 1000 × 700 pt content (previously 920 × 640) and has an 800 × 560 pt minimum (previously configured as 600 × 400). Both sizes retain the full-width Daybook rail. A native `windowWillResize` guard enforces the content floor converted into window-frame coordinates: the first fixture demonstrated that setting `contentMinSize` alone did not prevent a real drag below the requested minimum. That failed attempt is retained under `build/verify-menupocket/evidence/20261109-161207/` and was cleaned up before rebuilding.
+
+**Pass, agent-operated isolated native fixture**, final run `20261109-161420`, `basic` fictional seed, fake login/hotkey services. [`Identity`](../build/verify-menupocket/evidence/20261109-161420/identity.json), [`snapshots`](../build/verify-menupocket/evidence/20261109-161420/snapshots/), [`initial bounds`](../build/verify-menupocket/evidence/20261109-161420/initial-window-bounds.txt), [`minimum bounds`](../build/verify-menupocket/evidence/20261109-161420/minimum-window-bounds.txt).
+
+- Initial native bounds: 1000 × 732 pt including the 32 pt title bar, matching 1000 × 700 pt content.
+- CUA corner drag requested a size below the minimum; the final native bounds stopped at 800 × 592 pt, matching 800 × 560 pt content. A second inward drag left that size unchanged.
+- Today and Later retain full sidebar content at the minimum; task lists remain usable with scrolling where needed. Later composer field, Category, Save and Cancel are visible; Cancel returns to the list.
+- Shared `MenuPocket` scheme Debug build passed; log saved with the final run. No new task/persistence behavior was introduced. No task writes were required for this check; before/after database snapshots match.
+- The two fixture runs and temporary Xcode app were stopped/removed and unregistered. The user's existing main app and data were preserved and have not been replaced by this build.
+
+Not tested in this increment: full XCTest suite, Light appearance, VoiceOver, History geometry, other macOS versions or production system integrations. These scoped results supersede earlier size measurements for the current implementation; earlier dated evidence remains historical.
