@@ -17,3 +17,6 @@ xcuserdata/
 plan/
 
 .kiro/
+
+# Generated local diagrams and verification artifacts
+/.archify/
