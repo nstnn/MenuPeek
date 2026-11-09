@@ -14,24 +14,26 @@ struct TaskBrowserView: View {
 
     var body: some View {
         ZStack {
-            TaskWindowView(state: state, presentation: presentation)
+            TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
                 .opacity(presentation.route == .today ? 1 : 0)
                 .allowsHitTesting(presentation.route == .today)
                 .disabled(presentation.route != .today)
                 .accessibilityHidden(presentation.route != .today)
             if presentation.route != .today { browserContent }
         }
-        // Bridged into the window's unified title bar by TaskWindowController.
-        // Owned here so it stays active while History hides the task list.
+        // History replaces the list and its sidebar. Keep native escape routes
+        // in the title bar while that child screen is visible.
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                destinationControl
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
+                if presentation.route != .today {
+                    destinationControl
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Open Settings (⌘,)")
+                    .accessibilityLabel("Open Settings")
+                    .disabled(presentation.deletionTarget != nil)
                 }
-                .help("Open Settings (⌘,)")
-                .accessibilityLabel("Open Settings")
-                .disabled(presentation.deletionTarget != nil)
             }
         }
         .task(id: presentation.route) {

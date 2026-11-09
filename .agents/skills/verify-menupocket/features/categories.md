@@ -14,7 +14,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 
 ## How to get to it (user POV)
 
-- Choose `Manage categories` (the folder button beside Add task) in Today or Later.
+- Choose `Categories` (`Manage categories`, the folder control in the Daybook rail) in Today or Later.
 - Use the Category pop-up in the add or edit composer.
 - Click a group header to collapse or expand it.
 - Use a Today row's `…` menu > Move To > category.

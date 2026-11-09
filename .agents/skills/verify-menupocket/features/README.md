@@ -32,6 +32,7 @@ Each feature file starts with an H1 title and a paragraph describing the user-vi
 
 ## Features
 
+- [Daybook layout](./daybook.md): native date rail, flat groups, Light/Dark, window sizes and preserved interactions.
 - [Today tasks](./today-tasks.md): add, complete, edit, and delete Today tasks, the composer, and keyboard routes.
 - [Later list](./later-list.md): the undated Later tab, its remaining count, and Move to Today.
 - [Categories](./categories.md): Manage categories (create, rename, remove), the category picker, group collapse, and row Move To.

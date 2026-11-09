@@ -7,6 +7,7 @@ MenuPocket manages daily tasks in one desktop window, where Today tasks can be d
 - [Architecture](ARCHITECTURE.md) — app composition, data flow, persistence, and system boundaries.
 - Diagrams for new developers — [architecture](diagrams/architecture.html), [database schema](diagrams/database-schema.html), [write path](diagrams/write-path.html), [entry points](diagrams/entry-points.html), and [task window navigation](diagrams/task-window-navigation.html). Each is a self-contained HTML page; open it locally in a browser.
 - [Workflow](WORKFLOW.md) — build, verification, and local Release steps.
+- [Daybook UI handoff](DAYBOOK_UI_HANDOFF.md) — approved native redesign, preserved interactions, test/interface evidence and verification limits.
 - [Desktop regression](DESKTOP_TASK_REGRESSION.md) — dated automated regression, category storage/state/UI checks, History read/state/integration checks, task movement storage/state/routing checks and CI, local builds, and retained artifact identity.
 - [Later tasks regression](LATER_TASKS_REGRESSION.md) — integrated Today/Later tests, changed-data reopen, Debug/Release identity, preservation and cleanup.
 - [Later tasks acceptance](LATER_TASKS_ACCEPTANCE.md) — isolated native fixture identity and the Today/Later interface checklist; user-reported Pass on the isolated fixture, production/system checks not tested.

@@ -4,7 +4,7 @@ History replaces Today in the same window with a month calendar and grouped day 
 
 ## Sub-features
 
-- `history-open` opens on yesterday from the calendar button; Back to Today returns and keeps the Today draft.
+- `history-open` opens on yesterday from the History control; Back to Today returns and keeps the Today draft.
 - `history-calendar` uses Previous month, Next month, and This month, with per-day labels such as `0 of 1 complete`, `No tasks`, and `Not yet`.
 - `history-detail` shows the selected day's title, `N of M tasks complete`, and grouped historical rows.
 - `history-continue` selects one or more unfinished past tasks and explicitly continues them in Today; completed, continued, Today and future rows cannot be selected.
@@ -15,7 +15,7 @@ History replaces Today in the same window with a month calendar and grouped day 
 
 ## How to get to it (user POV)
 
-- Click the calendar button beside Today's date (`View task history`).
+- Click the History control in Today's Daybook rail (`View task history`).
 - Click the `N unfinished tasks from yesterday` reminder on Today.
 - Choose `Unfinished from previous days` inside History.
 

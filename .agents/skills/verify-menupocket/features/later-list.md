@@ -4,7 +4,7 @@ The Later tab holds undated tasks with only text and an optional category. It sh
 
 ## Sub-features
 
-- `later-switch` selects Later from the title-bar control, Command-2, or View > Later, and returns with Command-1.
+- `later-switch` selects Later from the Daybook rail (or the title-bar control on History), Command-2, or View > Later, and returns with Command-1.
 - `later-add` adds a Later task with its own draft and category choice.
 - `later-complete-edit-delete` works as in Today, inside Later.
 - `later-move-today` moves an unfinished task to the end of Today, keeps its text and category, and shows `Moved task to Today.`
