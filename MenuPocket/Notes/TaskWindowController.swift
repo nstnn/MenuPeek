@@ -570,7 +570,7 @@ final class TaskWindowPresentation {
 
 @MainActor
 final class TaskWindowController: NSWindowController, NSWindowDelegate {
-    static let initialContentSize = NSSize(width: 800, height: 560)
+    static let initialContentSize = NSSize(width: 920, height: 640)
     static let minimumContentSize = NSSize(width: 600, height: 400)
     let state: DailyNotesState
     let presentation: TaskWindowPresentation

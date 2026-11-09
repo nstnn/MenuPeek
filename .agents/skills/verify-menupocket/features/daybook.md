@@ -4,7 +4,7 @@ Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas,
 
 ## Sub-features
 
-- `daybook-layout`: normal 800 × 560 pt and minimum 600 × 400 pt; compact rail below 740 pt width or 480 pt height.
+- `daybook-layout`: normal 920 × 640 pt and minimum 600 × 400 pt; compact rail below 740 pt width or 480 pt height.
 - `daybook-navigation`: Today/Later in the rail; History and Categories below. History has native title-bar destinations and Settings while it replaces the rail.
 - `daybook-states`: empty, unavailable/Retry, long text, long category, completed, active editor and deletion confirmation.
 - `daybook-drafts`: native fields, category picker, Save/Cancel, Return/Escape, retained drafts and Undo across window reopen.
@@ -25,7 +25,7 @@ Preconditions:
 - **Add/edit/delete/move.** Follow [Today](today-tasks.md) and [Later](later-list.md) on this build. Snapshot before/after; compare SQLite rows and saved order as well as counts. Test Cancel before any confirmed deletion.
 - **Child routes.** `press id=taskHistoryEntry` opens History; its title-bar Today/Later controls remain available. Return with `press id=todayTab`. `press id=manageCategories` opens the existing sheet. Close with its Done action. `press "label=Open Settings"` opens the existing Settings window.
 - **Appearance.** Change Theme through Settings on the isolated fixture only, observing Light and Dark. Restore the fixture setting afterward. Capture both with `snapshot`.
-- **Window sizes.** Use actual window-corner dragging through an available native UI adapter to inspect 600 × 400 pt content and 800 × 560 pt. The AX driver has no resize command. Record measured window size; do not equate screenshot pixels with AppKit points. Verify draft/category/Save/Cancel and deletion buttons remain reachable, with usable task-list scrolling. Snapshot each size.
+- **Window sizes.** Use actual window-corner dragging through an available native UI adapter to inspect 600 × 400 pt content and 920 × 640 pt. The AX driver has no resize command. Record measured window size; do not equate screenshot pixels with AppKit points. Verify draft/category/Save/Cancel and deletion buttons remain reachable, with usable task-list scrolling. Snapshot each size.
 - **Persistence.** After intentional fictional task changes, `stop`, `snapshot stopped`, `launch` the same run without reseeding, `snapshot relaunched`. Compare `db.txt`, preferences, saved count and visible rows.
 - **Recovery.** Use `fail-open on`, stop/launch, observe Unavailable and disabled Add. Use `fail-open off`, press `id=retryTodayTasks`, and snapshot the recovered list. This is a simulated read failure.
 
