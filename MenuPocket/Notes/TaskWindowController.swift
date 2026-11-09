@@ -8,6 +8,7 @@ final class TaskWindowPresentation {
     enum Route { case today, history, unfinished, unfinishedDay }
     enum HistoryEntry { case calendar, yesterday }
 
+    private(set) var isShowingSettings = false
     private(set) var route: Route = .today
     private(set) var historyEntry: HistoryEntry = .calendar
     private(set) var historyState: TaskHistoryState?
@@ -21,15 +22,16 @@ final class TaskWindowPresentation {
 
     /// History is a child of the Today list; Later never browses history.
     func canBrowse(state: DailyNotesState) -> Bool {
-        !isTerminating && selectedDestination == .today && !hasGuardedInteraction(state: state)
+        !isTerminating && selectedDestination == .today && canNavigate(state: state)
     }
 
     /// Task-list commands act only on the visible Today/Later list.
-    private var isShowingList: Bool { !isTerminating && route == .today }
+    private var isShowingList: Bool { !isTerminating && route == .today && !isShowingSettings }
 
     @discardableResult
     func showHistory(state: DailyNotesState, entry: HistoryEntry = .calendar) -> Bool {
         guard canBrowse(state: state) else { return false }
+        leaveAuxiliaryPane()
         cancelMovement()
         historyEntry = entry
         route = .history
@@ -77,8 +79,9 @@ final class TaskWindowPresentation {
     @discardableResult
     func showToday(state: DailyNotesState) -> Bool {
         guard !isTerminating else { return false }
-        if route != .today {
-            guard canBrowse(state: state) else { return false }
+        if route != .today || isShowingSettings || isManagingCategories {
+            guard canNavigate(state: state) else { return false }
+            leaveAuxiliaryPane()
             // Keep the exact native offset when content survives. If the saved
             // anchor vanished, explicitly restore the first surviving group.
             if let anchor = todayScrollAnchor, !state.groups.contains(where: { $0.id == anchor }) {
@@ -264,10 +267,33 @@ final class TaskWindowPresentation {
             deletionTarget != nil || isManagingCategories
     }
 
+    /// Sidebar destinations remain available from an idle category pane.
+    /// Rename and removal confirmation must finish before leaving it.
+    func canNavigate(state: DailyNotesState) -> Bool {
+        !isTerminating && state.editingNoteID == nil && state.editingLaterTaskID == nil &&
+            deletionTarget == nil && managerRenamingID == nil && categoryRemovalTarget == nil
+    }
+
+    private func leaveAuxiliaryPane() {
+        if isManagingCategories { dismissCategoryManager() }
+        isShowingSettings = false
+    }
+
+    @discardableResult
+    func showSettings(state: DailyNotesState) -> Bool {
+        guard canNavigate(state: state) else { return false }
+        leaveAuxiliaryPane()
+        cancelMovement()
+        route = .today
+        isShowingSettings = true
+        updateBrowserVisibility()
+        return true
+    }
+
     @discardableResult
     func selectDestination(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
-        if destination == selectedDestination && route == .today { return true }
-        guard !isTerminating, !hasGuardedInteraction(state: state) else { return false }
+        if destination == selectedDestination && route == .today && !isShowingSettings && !isManagingCategories { return true }
+        guard canNavigate(state: state) else { return false }
         // Selecting either list leaves History, which only lives under Today.
         guard showToday(state: state) else { return false }
         if destination != selectedDestination {
@@ -281,7 +307,7 @@ final class TaskWindowPresentation {
     /// Matches `selectDestination`: the current list is always selectable;
     /// switching waits for any edit, deletion, or category manager to finish.
     func canSelectDestination(_ destination: TaskListDestination, state: DailyNotesState) -> Bool {
-        destination == selectedDestination || !hasGuardedInteraction(state: state)
+        canNavigate(state: state)
     }
 
     func isComposerVisible(in destination: TaskListDestination) -> Bool {
@@ -502,8 +528,7 @@ final class TaskWindowPresentation {
     /// The manager can open over a pending new-task draft, which it leaves
     /// alone, but not over an edit or a deletion confirmation.
     func canManageCategories(state: DailyNotesState) -> Bool {
-        isShowingList && state.availableCategories != nil && state.editingNoteID == nil &&
-            state.editingLaterTaskID == nil && deletionTarget == nil
+        canNavigate(state: state) && state.availableCategories != nil
     }
 
     @discardableResult
@@ -512,6 +537,9 @@ final class TaskWindowPresentation {
         guard canManageCategories(state: state) else { return false }
         // A reopened manager starts without the last session's messages.
         state.clearCategoryIssues()
+        isShowingSettings = false
+        route = .today
+        updateBrowserVisibility()
         cancelMovement()
         isManagingCategories = true
         return true
@@ -576,12 +604,12 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     let presentation: TaskWindowPresentation
     private var isTerminating = false
 
-    init(state: DailyNotesState, onSettings: @escaping () -> Void) {
+    init(state: DailyNotesState, model: AppModel? = nil, onSettings: @escaping () -> Void) {
         self.state = state
         let presentation = state.taskWindowPresentation
         self.presentation = presentation
         let hostingController = NSHostingController(
-            rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings)
+            rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings, model: model)
         )
         hostingController.sizingOptions = []
         hostingController.sceneBridgingOptions = [.toolbars]

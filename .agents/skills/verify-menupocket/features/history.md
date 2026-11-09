@@ -35,6 +35,8 @@ Preconditions:
 - **Back to Today keeps the draft.** Before opening History, start a draft (`press id=addTask`, `type "Keep me"`). After `press id=taskBrowserBack`, `value id=newTaskDraft` still shows `Keep me`.
 - **Read-only proof.** Run `$F snapshot <run> after-history`. Its `db.txt` is identical to `before-history`, apart from intentional Today changes. Capture the calendar with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/history.png`.
 
+- **Shared sidebar.** After opening History, `value id=daybookDate`, `value id=todayProgress`, `value id=manageCategories`, and `value "label=Open Settings"` remain reachable. Open Categories then Settings directly; `windows` lists one task window and no sheet. Use `press id=taskHistoryEntry` to return to History, or `press id=laterTab` to return to Later.
+
 ## Gotchas
 
 - Day identifiers use the fixture's local date. Use `--now … --tz …` at launch when a recipe needs fixed dates, or read today's key from the launch log (`today=YYYY-MM-DD`) in `runs/<run>/fixture.log`.

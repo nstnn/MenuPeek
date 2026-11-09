@@ -73,6 +73,7 @@ struct TaskWindowView: View {
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
     let onSettings: () -> Void
+    var detailContent: AnyView? = nil
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
@@ -92,7 +93,7 @@ struct TaskWindowView: View {
 
     // Split so older Swift type checkers can check each piece in reasonable time.
     var body: some View {
-        observingMovement(taskWindow)
+        observingMovement(observeWindow(taskWindow))
     }
 
     private var taskWindow: some View {
@@ -102,44 +103,13 @@ struct TaskWindowView: View {
                 daybookSidebar(compact: compact)
                     .frame(width: compact ? 164 : 218)
                 Rectangle().fill(daybookRule).frame(width: 1).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                        .padding(.horizontal, 28)
-                        .padding(.top, compact ? 20 : 30)
-                        .padding(.bottom, compact ? 16 : 24)
-                        .frame(maxWidth: .infinity)
-                        .background { focusClearingBackground }
-                    if hasTopInteractionContent {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if hasComposer { composer }
-                            if hasMoveNotice {
-                                Text("Moved task to Today.")
-                                    .font(.callout)
-                                    .accessibilityIdentifier("laterMoveNotice")
-                            }
-                            if let message = topWriteError { taskWriteError(message) }
-                            if let message = state.categoryReorderIssue?.message {
-                                Text(message)
-                                    .foregroundStyle(.red)
-                                    .accessibilityIdentifier("categoryReorderError")
-                            }
-                        }
-                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                        .padding(.horizontal, 28)
-                        .padding(.bottom, 16)
-                        .frame(maxWidth: .infinity)
-                    }
-                    taskList(geometry: geometry, horizontalPadding: 28)
-                    if hasFooterContent {
-                        Divider()
-                        footer
-                            .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: .infinity)
-                            .background { focusClearingBackground }
-                    }
+                ZStack {
+                    listContent(geometry: geometry, compact: compact)
+                        .opacity(detailContent == nil ? 1 : 0)
+                        .allowsHitTesting(detailContent == nil)
+                        .disabled(detailContent != nil)
+                        .accessibilityHidden(detailContent != nil)
+                    if let detailContent { detailContent }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -147,13 +117,52 @@ struct TaskWindowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { canvasBackground }
         .tint(daybookAccent)
-        // Attached to this window, so it blocks the rows and actions behind it.
-        .sheet(isPresented: Binding(
-            get: { presentation.isManagingCategories },
-            set: { if !$0 { presentation.dismissCategoryManager() } }
-        )) {
-            TaskCategoryManagerView(state: state, presentation: presentation)
+    }
+
+    private func listContent(geometry: GeometryProxy, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.top, compact ? 20 : 30)
+                .padding(.bottom, compact ? 16 : 24)
+                .frame(maxWidth: .infinity)
+                .background { focusClearingBackground }
+            if hasTopInteractionContent {
+                VStack(alignment: .leading, spacing: 10) {
+                    if hasComposer { composer }
+                    if hasMoveNotice {
+                        Text("Moved task to Today.")
+                            .font(.callout)
+                            .accessibilityIdentifier("laterMoveNotice")
+                    }
+                    if let message = topWriteError { taskWriteError(message) }
+                    if let message = state.categoryReorderIssue?.message {
+                        Text(message)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("categoryReorderError")
+                    }
+                }
+                .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity)
+            }
+            taskList(geometry: geometry, horizontalPadding: 28)
+            if hasFooterContent {
+                Divider()
+                footer
+                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background { focusClearingBackground }
+            }
         }
+    }
+
+    private func observeWindow(_ content: some View) -> some View {
+        content
         .onChange(of: presentation.route) { old, new in
             focusRequestID = UUID()
             if new != .today { focusedControl = nil }
@@ -161,7 +170,7 @@ struct TaskWindowView: View {
                 let requestID = focusRequestID
                 Task { @MainActor in
                     await Task.yield()
-                    guard presentation.route == .today, focusRequestID == requestID else { return }
+                    guard presentation.route == .today, detailContent == nil, focusRequestID == requestID else { return }
                     if isLater { focusSelectedList(); return }
                     focusedControl = state.availableProgress == nil ? .retry
                         : (presentation.historyEntry == .yesterday && state.yesterdayIncompleteCount > 0 ? .yesterday : .history)
@@ -169,7 +178,7 @@ struct TaskWindowView: View {
             }
         }
         .onChange(of: presentation.isManagingCategories) { wasManaging, isManaging in
-            if wasManaging, !isManaging { focusManageCategories() }
+            if wasManaging, !isManaging, detailContent == nil { focusManageCategories() }
         }
         .onChange(of: presentation.newTaskRequestID, initial: true) { _, request in
             if request != nil, presentation.newTaskRequest?.destination == destination {
@@ -468,7 +477,8 @@ struct TaskWindowView: View {
                 Button(action: onSettings) {
                     Label("Settings", systemImage: "slider.horizontal.3")
                 }
-                .disabled(presentation.deletionTarget != nil)
+                .disabled(!presentation.canNavigate(state: state))
+                .foregroundStyle(presentation.isShowingSettings ? daybookAccent : Color.secondary)
                 .help("Open Settings (⌘,)")
                 .accessibilityLabel("Open Settings")
             }
@@ -494,7 +504,7 @@ struct TaskWindowView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
-                  presentation.deletionTarget != nil || presentation.isManagingCategories)
+                  !presentation.canNavigate(state: state))
         .accessibilityLabel("Task list")
         .accessibilityValue(isLater ? "Later" : "Today")
         .accessibilityIdentifier("taskDestination")
@@ -594,6 +604,7 @@ struct TaskWindowView: View {
             return .handled
         }
         .disabled(!canOpenHistory)
+        .foregroundStyle(presentation.route != .today ? daybookAccent : Color.secondary)
         .help("View task history")
         .accessibilityLabel("View task history")
         .accessibilityIdentifier("taskHistoryEntry")
@@ -612,6 +623,7 @@ struct TaskWindowView: View {
         }
         .overlay { focusOutline(focusedControl == .manageCategories) }
         .disabled(!presentation.canManageCategories(state: state))
+        .foregroundStyle(presentation.isManagingCategories ? daybookAccent : Color.secondary)
         .help("Manage categories")
         .accessibilityLabel("Manage categories")
         .accessibilityIdentifier("manageCategories")
@@ -1164,10 +1176,11 @@ struct TaskWindowView: View {
         presentation.showCategoryManager(state: state)
     }
 
-    /// After the sheet closes: its entry button, or Retry if data became unavailable.
+    /// After the category pane closes: its entry button, or Retry if data became unavailable.
     private func focusManageCategories() {
         Task { @MainActor in
             await Task.yield()
+            guard detailContent == nil else { return }
             focusedControl = state.availableCategories == nil ? .retry : .manageCategories
         }
     }

@@ -24,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let dailyNotesState: DailyNotesState
     private(set) var taskWindowController: TaskWindowController?
     private(set) var taskStatusItemController: TaskStatusItemController?
-    private(set) var settingsWindowController: SettingsWindowController?
     private(set) var quickAddPanelController: QuickAddPanelController?
     private let onboardingStore: any OnboardingStoring
     private let launchContext: () -> AppLaunchContext
@@ -80,7 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         taskStatusItemController = nil
         model.cancelLoadsForTermination()
         taskWindowController?.close()
-        settingsWindowController?.close()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -105,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func makeTaskWindowController() -> TaskWindowController {
         if let taskWindowController { return taskWindowController }
-        let controller = TaskWindowController(state: dailyNotesState) { [weak self] in
+        let controller = TaskWindowController(state: dailyNotesState, model: model) { [weak self] in
             self?.showSettings()
         }
         taskWindowController = controller
@@ -141,8 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func showSettings() {
         guard !isTerminating else { return }
-        let controller = settingsWindowController ?? makeSettingsWindowController()
-        controller.showSettings()
+        let controller = makeTaskWindowController()
+        controller.showTasks()
+        if controller.presentation.showSettings(state: dailyNotesState) {
+            model.refreshLoginItemStatus()
+        }
         if controller.window?.isVisible == true { completeOnboardingAfterPresentation() }
     }
 
@@ -346,9 +347,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return controller
     }
 
-    private func makeSettingsWindowController() -> SettingsWindowController {
-        let controller = SettingsWindowController(model: model)
-        settingsWindowController = controller
-        return controller
-    }
+
 }

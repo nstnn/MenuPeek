@@ -1,11 +1,11 @@
 # Daybook task window
 
-Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas, serif date rail and heading, native destination control, flat task groups and subtle row rules. Existing add/edit/cancel, actions, movement, History and Settings behavior stays intact. The shared rail keeps today’s date, explicitly labeled Today progress, and navigation in the same positions on both lists. Later’s main content remains undated.
+Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas, serif date rail and heading, native destination control, flat task groups and subtle row rules. Existing add/edit/cancel, actions, movement, History and Settings behavior stays intact. The shared rail keeps today’s date, explicitly labeled Today progress, and navigation in the same positions on Today, Later, History, Categories, and Settings. Later’s main content remains undated.
 
 ## Sub-features
 
 - `daybook-layout`: initial 1000 × 700 pt and minimum 800 × 560 pt content; both retain the full 218 pt rail. The compact layout remains a defensive fallback below 740 pt width or 480 pt height.
-- `daybook-navigation`: Today/Later in the rail; History and Categories below. History has native title-bar destinations and Settings while it replaces the rail.
+- `daybook-navigation`: Today/Later in the rail; History and Categories below. History, Categories and Settings replace only the right detail column; the rail stays visible and interactive. Idle Categories allows navigation away; rename and removal confirmation block it. Settings entry points, including Command-comma, reuse the same task window.
 - `daybook-states`: empty, unavailable/Retry, long text, long category, completed, active editor and deletion confirmation.
 - `daybook-drafts`: native fields, category picker, Save/Cancel, Return/Escape, retained drafts and Undo across window reopen.
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Retains Today at the same size while child screens replace its visible
@@ -6,6 +7,7 @@ struct TaskBrowserView: View {
     let state: DailyNotesState
     let presentation: TaskWindowPresentation
     let onSettings: () -> Void
+    var model: AppModel? = nil
     @FocusState private var backFocused: Bool
     @FocusState private var unfinishedEntryFocused: Bool
     @FocusState private var unfinishedDayFocus: GregorianDay?
@@ -13,29 +15,8 @@ struct TaskBrowserView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack {
-            TaskWindowView(state: state, presentation: presentation, onSettings: onSettings)
-                .opacity(presentation.route == .today ? 1 : 0)
-                .allowsHitTesting(presentation.route == .today)
-                .disabled(presentation.route != .today)
-                .accessibilityHidden(presentation.route != .today)
-            if presentation.route != .today { browserContent }
-        }
-        // History replaces the list and its sidebar. Keep native escape routes
-        // in the title bar while that child screen is visible.
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if presentation.route != .today {
-                    destinationControl
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                    }
-                    .help("Open Settings (⌘,)")
-                    .accessibilityLabel("Open Settings")
-                    .disabled(presentation.deletionTarget != nil)
-                }
-            }
-        }
+        TaskWindowView(state: state, presentation: presentation, onSettings: onSettings,
+                       detailContent: detailContent)
         .task(id: presentation.route) {
             let previous = lastRoute
             let route = presentation.route
@@ -54,26 +35,21 @@ struct TaskBrowserView: View {
         }
     }
 
-    /// Selecting either list from History returns to that list.
-    private var destinationControl: some View {
-        let destination = presentation.selectedDestination
-        return Picker("Task list", selection: Binding(
-            get: { destination },
-            set: { _ = presentation.selectDestination($0, state: state) }
-        )) {
-            Text("Today").tag(TaskListDestination.today)
-                .accessibilityIdentifier("todayTab")
-            Text("Later").tag(TaskListDestination.later)
-                .accessibilityIdentifier("laterTab")
+    private var detailContent: AnyView? {
+        if presentation.isManagingCategories {
+            return AnyView(TaskCategoryManagerView(state: state, presentation: presentation))
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
-                  presentation.deletionTarget != nil || presentation.isManagingCategories)
-        .accessibilityLabel("Task list")
-        .accessibilityValue(destination == .later ? "Later" : "Today")
-        .accessibilityIdentifier("taskDestination")
+        if presentation.isShowingSettings, let model {
+            return AnyView(VStack(alignment: .leading, spacing: 0) {
+                Text("Settings")
+                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 30)
+                SettingsView(model: model, onQuit: { NSApplication.shared.terminate(nil) })
+            })
+        }
+        return presentation.route == .today ? nil : AnyView(browserContent)
     }
 
     private func goBack() {

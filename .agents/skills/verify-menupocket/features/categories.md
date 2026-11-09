@@ -1,6 +1,6 @@
 # Categories
 
-Categories are shared by Today, Later, and every saved day. Manage categories opens a sheet where a user creates, renames, and removes custom categories. General is built in and cannot be renamed or removed. Removing a category asks for confirmation, states how many tasks will move to General, and keeps every task. Tasks show in collapsible category groups whose `completed of total` counts include hidden rows.
+Categories are shared by Today, Later, and every saved day. Manage categories opens the right-hand pane where a user creates, renames, and removes custom categories. General is built in and cannot be renamed or removed. Removing a category asks for confirmation, states how many tasks will move to General, and keeps every task. Tasks show in collapsible category groups whose `completed of total` counts include hidden rows.
 
 ## Sub-features
 
@@ -14,7 +14,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 
 ## How to get to it (user POV)
 
-- Choose `Categories` (`Manage categories`, the folder control in the Daybook rail) in Today or Later.
+- Choose `Categories` (`Manage categories`, the folder control in the Daybook rail) from any sidebar destination.
 - Use the Category pop-up in the add or edit composer.
 - Click a group header to collapse or expand it.
 - Use a Today row's `…` menu > Move To > category.
@@ -34,11 +34,11 @@ Preconditions:
 - **Remove.** Reopen the manager and run `$F ax <run> press "label=Remove Work"`. `id=categoryRemovalConfirmation` appears with text `4 tasks, across all saved days and Later, use this category…` (two Today tasks, yesterday's report, and the Later offsite task) and the buttons `id=cancelCategoryRemoval` and `id=confirmCategoryRemoval`. Press confirm. In `db.txt`, `Work` is gone and those four tasks show category `General` with unchanged rowids, text, completion, and day.
 - **Collapse.** Run `$F ax <run> press id=taskGroup-general`. `value id=taskGroup-general` reads `Collapsed`, and its task rows are gone from `tree`, while `todayProgress` is unchanged. In `defaults.plist`, `local.menupocket.app.taskCategories.collapsedGroupIDs` contains `general`. Relaunch the run: the group is still collapsed.
 - **Move To.** Run `$F ax <run> press "label=Actions for task: Water the plants"`, then `$F ax <run> press "role=AXMenuItem,label=Errands"` (the Move To submenu items are searched too, and the current category is `[disabled]`). The Errands header's count rises by one, for example `find "label~=Errands\, 0 of 2"`, and the snapshot shows the same rowid with category `Errands`.
-- **Proof.** Screenshot the sheet with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/categories-sheet.png role=AXSheet` while it is open, plus before and after snapshots.
+- **Proof.** Screenshot the pane with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/categories-pane.png role=AXWindow` while it is open, plus before and after snapshots.
 
 ## Gotchas
 
-- While the sheet is open, the window's other controls are disabled and Command-N does nothing. Press `doneManagingCategories` before driving Today again.
+- While the pane is open, task commands including Command-N are disabled. Idle sidebar navigation returns to Today/Later or opens History/Settings. During rename or removal confirmation these destinations are disabled until Save/Cancel. `doneManagingCategories` also returns to the retained list.
 - The Move To submenu's items are titled by category name only, and the row menu also has items named like categories. Open the right row's menu immediately before pressing.
 - A `Work` menu item title can also match the composer's Category pop-up items if a pop-up is open. Close other menus with `key escape` first.
 - Reordering categories by drag in the manager is pointer-only and cannot be driven here. Report it as Not tested, or give the user manual steps, and check `categories.creation_order` in `db.txt` for the stored order.
@@ -46,7 +46,7 @@ Preconditions:
 
 ## Category drag sources (TASK-006; immediate-drag revision)
 
-Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer drags after at least 4 pt movement, without a hold delay or source highlight. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-sheet guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
+Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer drags after at least 4 pt movement, without a hold delay or source highlight. There is no category handle. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-pane guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
 
 On an isolated fixture, use actual pointer input with the window active:
 
