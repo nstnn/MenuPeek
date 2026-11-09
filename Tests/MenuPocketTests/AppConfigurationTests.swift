@@ -50,9 +50,10 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertFalse(presentation.showHistory(state: fixture.state, entry: .yesterday))
         presentation.cancelDeletion()
         XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        presentation.setManagerRenaming(UUID())
         XCTAssertFalse(presentation.showHistory(state: fixture.state))
         XCTAssertFalse(presentation.showHistory(state: fixture.state, entry: .yesterday))
-        presentation.dismissCategoryManager()
+        presentation.setManagerRenaming(nil)
         XCTAssertTrue(presentation.showHistory(state: fixture.state, entry: .yesterday))
         XCTAssertEqual(presentation.historyState?.selectedDay, try fixture.state.yesterdayForHistory())
         XCTAssertEqual(presentation.historyState?.filter, .unfinished)
@@ -132,7 +133,7 @@ final class AppConfigurationTests: XCTestCase {
 
         XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
         XCTAssertTrue(presentation.showHistory(state: fixture.state))
-        XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
         XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
         XCTAssertEqual(presentation.route, .today)
         XCTAssertEqual(presentation.selectedDestination, .later)
@@ -162,7 +163,8 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(presentation.showHistory(state: fixture.state))
         XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
         fixture.delegate.showSettings()
-        XCTAssertEqual(presentation.route, .unfinished)
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertTrue(presentation.isShowingSettings)
         window.close()
         fixture.delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true)
         XCTAssertEqual(presentation.route, .today)
@@ -280,7 +282,7 @@ final class AppConfigurationTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         defer {
             window.close()
-            delegate.settingsWindowController?.window?.close()
+            delegate.taskWindowController?.window?.close()
         }
         let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskBrowserView>)
         XCTAssertTrue(host.rootView.state === state)
@@ -441,7 +443,7 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testTabGuardsPreserveEditsConfirmationsAndCategorySheetUntilResolved() throws {
+    func testTabGuardsPreserveEditsAndCategoryConfirmationsUntilResolved() throws {
         let store = TaskWindowReadFixture()
         let state = makeTabState(store)
         let note = Note(id: UUID(), text: "Today", dayKey: try XCTUnwrap(state.todayKey),
@@ -473,10 +475,13 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(presentation.deletionTarget, .later(id: later.id))
         presentation.cancelDeletion()
         XCTAssertTrue(presentation.showCategoryManager(state: state))
+        presentation.setManagerRenaming(UUID())
         XCTAssertFalse(presentation.selectDestination(.today, state: state))
+        XCTAssertFalse(presentation.showSettings(state: state))
         XCTAssertTrue(presentation.isManagingCategories)
-        presentation.dismissCategoryManager()
+        presentation.setManagerRenaming(nil)
         XCTAssertTrue(presentation.selectDestination(.today, state: state))
+        XCTAssertFalse(presentation.isManagingCategories)
         XCTAssertFalse(presentation.requestDeletion(.later(id: later.id), state: state))
         XCTAssertEqual(store.deleteAttempts, 0)
     }
@@ -871,7 +876,7 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testCategoryManagerSheetBlocksTaskCommandsAndKeepsTheNewTaskDraft() async throws {
+    func testCategoryManagerPaneBlocksTaskCommandsAndKeepsTheNewTaskDraft() async throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }
         let work = try TaskCategory(name: "Work", creationOrder: 0)
@@ -893,19 +898,20 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
         presentation.cancelDeletion()
 
-        // Over a pending new-task draft, the attached sheet blocks task commands.
+        // Over a pending new-task draft, the category pane blocks task commands.
         fixture.state.draft = "Pending task"
         fixture.state.draftCategoryID = work.id
         XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
-        await waitUntil { window.attachedSheet != nil }
-        let sheet = try XCTUnwrap(window.attachedSheet)
+        await waitUntil { window.firstResponder is NSTextView }
+        XCTAssertNil(window.attachedSheet)
+        let sheet = window
         XCTAssertFalse(fixture.delegate.validateMenuItem(item))
         fixture.delegate.addTask()
         XCTAssertNil(presentation.newTaskRequestID)
         presentation.requestDeletion(id: note.id, state: fixture.state)
         XCTAssertNil(presentation.deletionTarget)
 
-        // Escape in the sheet's name field closes the sheet and nothing else.
+        // Escape in the pane's name field closes the pane and nothing else.
         let editor = try await focusedEditor(in: sheet)
         editor.insertText("Unsaved name", replacementRange: NSRange(location: 0, length: 0))
         editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
@@ -914,11 +920,16 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.state.draftCategoryID, work.id)
         XCTAssertTrue(fixture.delegate.validateMenuItem(item))
 
-        // A reopened sheet starts without the discarded name; closing Today
+        // Wait for the pane to unmount before reopening, as separate user events do.
+        await waitUntil { window.firstResponder !== editor }
+
+        // A reopened pane starts without the discarded name; closing Today
         // dismisses it and its pending removal.
         XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
-        await waitUntil { window.attachedSheet != nil }
-        let reopened = try await focusedEditor(in: XCTUnwrap(window.attachedSheet))
+        await waitUntil { window.firstResponder is NSTextView }
+        XCTAssertNil(window.attachedSheet)
+        let reopened = try await focusedEditor(in: window)
+        await waitUntil { reopened.string == "" }
         XCTAssertEqual(reopened.string, "")
         XCTAssertTrue(presentation.requestCategoryRemoval(id: work.id, state: fixture.state))
         window.close()
@@ -970,15 +981,16 @@ final class AppConfigurationTests: XCTestCase {
         let presentation = controller.presentation
         let window = try XCTUnwrap(controller.window)
         XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
-        await waitUntil { window.attachedSheet != nil }
-        let sheet = try XCTUnwrap(window.attachedSheet)
+        await waitUntil { window.firstResponder is NSTextView }
+        XCTAssertNil(window.attachedSheet)
+        let sheet = window
         let editor = try await focusedEditor(in: sheet)
         editor.insertText("Pending category", replacementRange: NSRange(location: 0, length: 0))
         func assertDraft() async {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(30))
             await waitUntil { editor.string == "Pending category" }
-            XCTAssertTrue(window.attachedSheet === sheet)
+            XCTAssertNil(window.attachedSheet)
             XCTAssertTrue(sheet.firstResponder === editor, "Reordering does not steal native field focus")
             XCTAssertTrue(presentation.isManagingCategories)
         }
@@ -1019,15 +1031,16 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testCategoryManagerSheetCreatesCategoriesAndKeepsInvalidNamesForCorrection() async throws {
+    func testCategoryManagerPaneCreatesCategoriesAndKeepsInvalidNamesForCorrection() async throws {
         let fixture = try AppLifecycleFixture(context: .manual)
         defer { fixture.cleanup() }
         fixture.launch()
         let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
         let window = try XCTUnwrap(controller.window)
         XCTAssertTrue(controller.presentation.showCategoryManager(state: fixture.state))
-        await waitUntil { window.attachedSheet != nil }
-        let sheet = try XCTUnwrap(window.attachedSheet)
+        await waitUntil { window.firstResponder is NSTextView }
+        XCTAssertNil(window.attachedSheet)
+        let sheet = window
 
         let editor = try await focusedEditor(in: sheet)
         editor.insertText("School", replacementRange: NSRange(location: 0, length: 0))
@@ -1049,49 +1062,23 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testAppDelegateReusesItsSettingsWindow() throws {
-        let suiteName = "local.menupocket.tests.AppConfigurationTests.\(UUID().uuidString)"
-        let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-        let model = AppModel(store: PreferencesStore(userDefaults: userDefaults))
-        let delegate = AppDelegate(model: model,
-                                   onboardingStore: UserDefaultsOnboardingStore(userDefaults: userDefaults))
-
-        XCTAssertNil(delegate.settingsWindowController)
-        delegate.showSettings()
-
-        let controller = try XCTUnwrap(delegate.settingsWindowController)
+    func testAppDelegateShowsSettingsInRetainedTaskWindow() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
         let window = try XCTUnwrap(controller.window)
-        let hostingController = try XCTUnwrap(
-            window.contentViewController as? NSHostingController<SettingsView>
-        )
-
-        XCTAssertTrue(delegate.model === model)
-        XCTAssertTrue(hostingController.rootView.model === model)
-        XCTAssertEqual(
-            hostingController.rootView.appVersion,
-            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        )
-
-        XCTAssertEqual(window.contentView?.frame.size, SettingsWindowController.initialContentSize)
-        XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
-        XCTAssertTrue(window.styleMask.contains(.resizable))
-        XCTAssertFalse(window.isReleasedWhenClosed)
-
-        delegate.showSettings()
-        XCTAssertTrue(controller === delegate.settingsWindowController)
-        XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
-
+        fixture.delegate.showSettings()
+        XCTAssertTrue(controller.presentation.isShowingSettings)
+        XCTAssertNil(window.attachedSheet)
+        XCTAssertTrue(controller === fixture.delegate.taskWindowController)
         window.close()
-        XCTAssertFalse(window.isVisible)
-
-        delegate.showSettings()
-        XCTAssertTrue(controller === delegate.settingsWindowController)
-        XCTAssertTrue(window === controller.window)
+        fixture.delegate.showSettings()
+        XCTAssertTrue(controller === fixture.delegate.taskWindowController)
         XCTAssertTrue(window.isVisible)
-        XCTAssertEqual(window.minSize, SettingsWindowController.minimumWindowSize)
-
-        window.close()
+        XCTAssertTrue(controller.presentation.isShowingSettings)
+        fixture.delegate.showTasks()
+        XCTAssertFalse(controller.presentation.isShowingSettings)
     }
 
     func testLaunchContextDecodesOnlyLoginOpenApplicationEvents() {
@@ -1119,7 +1106,7 @@ final class AppConfigurationTests: XCTestCase {
         fixture.launch()
         let firstWindow = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
         XCTAssertTrue(firstWindow.isVisible)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertTrue(fixture.onboarding.hasCompletedOnboarding)
         XCTAssertTrue(UserDefaultsOnboardingStore(userDefaults: fixture.defaults).hasCompletedOnboarding)
         XCTAssertEqual(fixture.defaults.data(forKey: PreferencesStore.storageKey), preferences)
@@ -1137,7 +1124,7 @@ final class AppConfigurationTests: XCTestCase {
         defer { second.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
         second.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
         XCTAssertTrue(second.taskWindowController?.window?.isVisible == true)
-        XCTAssertNil(second.settingsWindowController)
+        XCTAssertFalse(second.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertTrue(fixture.onboarding.hasCompletedOnboarding)
         XCTAssertEqual(fixture.defaults.data(forKey: PreferencesStore.storageKey), preferences)
     }
@@ -1156,7 +1143,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.state.availableProgress, NoteProgress(completed: 1, total: 1))
         XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, "1/1")
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertTrue(NSApplication.shared.keyWindow === keyWindow)
         XCTAssertEqual(NSApplication.shared.isActive, active)
         XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
@@ -1177,7 +1164,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertNil(fixture.state.availableProgress)
         XCTAssertEqual(fixture.delegate.taskStatusItemController?.statusItem?.button?.title, "—")
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
         fixture.repository.failRead = false
         fixture.delegate.showTasks()
@@ -1197,7 +1184,7 @@ final class AppConfigurationTests: XCTestCase {
         await waitForStatusTitle("0/1", fixture: fixture)
         XCTAssertEqual(fixture.state.notes, [note])
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)
         XCTAssertEqual(fixture.loginService.registrationAttempts, 0)
     }
@@ -1488,12 +1475,12 @@ final class AppConfigurationTests: XCTestCase {
         let menu = try XCTUnwrap(NSApplication.shared.mainMenu)
         let taskWindow = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
         fixture.delegate.showSettings()
-        let settings = try XCTUnwrap(fixture.delegate.settingsWindowController)
+        let settings = try XCTUnwrap(fixture.delegate.taskWindowController)
         XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent(",", keyCode: 43)))
-        XCTAssertTrue(fixture.delegate.settingsWindowController === settings)
+        XCTAssertTrue(fixture.delegate.taskWindowController === settings)
         XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("w", keyCode: 13)))
         XCTAssertFalse(settings.window?.isVisible == true)
-        XCTAssertTrue(taskWindow.isVisible)
+        XCTAssertFalse(taskWindow.isVisible)
         fixture.delegate.showTasks()
         XCTAssertTrue(menu.performKeyEquivalent(with: commandEvent("w", keyCode: 13)))
         XCTAssertFalse(taskWindow.isVisible)
@@ -1509,7 +1496,7 @@ final class AppConfigurationTests: XCTestCase {
         fixture.delegate.showSettings()
         let status = try XCTUnwrap(fixture.delegate.taskStatusItemController)
         let tasks = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
-        let settings = try XCTUnwrap(fixture.delegate.settingsWindowController?.window)
+        let settings = try XCTUnwrap(fixture.delegate.taskWindowController?.window)
         let reads = fixture.repository.readAttempts
         fixture.notifications.post(name: .NSCalendarDayChanged, object: nil)
         fixture.delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
@@ -1545,7 +1532,7 @@ final class AppConfigurationTests: XCTestCase {
         defer { delegate.taskWindowController?.close() }
         delegate.showTasks()
         XCTAssertTrue(delegate.taskWindowController?.window?.isVisible == true)
-        XCTAssertNil(delegate.settingsWindowController)
+        XCTAssertFalse(delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertTrue(onboarding.hasCompletedOnboarding)
         XCTAssertEqual(delegate.model.preferenceWarning, .corruptData)
         XCTAssertTrue(delegate.model.isPreferenceEditingAllowed)
@@ -1575,7 +1562,7 @@ final class AppConfigurationTests: XCTestCase {
 
         XCTAssertEqual(NSApplication.shared.appearance?.name, .aqua)
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
     }
 
     @MainActor
@@ -1587,7 +1574,7 @@ final class AppConfigurationTests: XCTestCase {
         let model = fixture.delegate.model
         let windows = [
             try XCTUnwrap(fixture.delegate.taskWindowController?.window),
-            try XCTUnwrap(fixture.delegate.settingsWindowController?.window),
+            try XCTUnwrap(fixture.delegate.taskWindowController?.window),
         ]
         XCTAssertNil(NSApplication.shared.appearance)
 
@@ -1699,9 +1686,10 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(presentation.deletionTarget, .later(id: task.id))
         presentation.cancelDeletion()
         XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        presentation.setManagerRenaming(UUID())
         button.performClick(nil)
         XCTAssertEqual(presentation.selectedDestination, .later)
-        presentation.dismissCategoryManager()
+        presentation.setManagerRenaming(nil)
         button.performClick(nil)
         XCTAssertEqual(presentation.selectedDestination, .today)
         XCTAssertEqual(fixture.state.laterDraft, "Retained Later draft")
@@ -1850,7 +1838,7 @@ final class AppConfigurationTests: XCTestCase {
         }
         XCTAssertNil(fixture.state.availableProgress, "Retry must not refresh after termination begins")
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertEqual(fixture.repository.readAttempts, reads)
     }
 
@@ -1958,7 +1946,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(fixture.hotKeys.registeredCombination, .quickAdd)
         XCTAssertTrue(fixture.delegate.model.isQuickAddRegistered)
         XCTAssertNil(fixture.delegate.taskWindowController)
-        XCTAssertNil(fixture.delegate.settingsWindowController)
+        XCTAssertFalse(fixture.delegate.taskWindowController?.presentation.isShowingSettings == true)
         XCTAssertNil(fixture.delegate.quickAddPanelController)
         XCTAssertTrue(NSApplication.shared.keyWindow === keyWindow)
         XCTAssertFalse(fixture.onboarding.hasCompletedOnboarding)

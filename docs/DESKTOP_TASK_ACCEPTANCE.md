@@ -757,3 +757,19 @@ The task window now opens with 1000 × 700 pt content (previously 920 × 640) an
 - The two fixture runs and temporary Xcode app were stopped/removed and unregistered. The user's existing main app and data were preserved and have not been replaced by this build.
 
 Not tested in this increment: full XCTest suite, Light appearance, VoiceOver, History geometry, other macOS versions or production system integrations. These scoped results supersede earlier size measurements for the current implementation; earlier dated evidence remains historical.
+
+## Persistent sidebar across History, Categories and Settings — 2026-11-09
+
+Agent-operated isolated fixture, `basic` seed, on branch `fix/persistent-task-sidebar` at base `13ae096b58e973f7517e7aec2d44658b0b412ff2` plus the navigation changes. Final run `20261109-162637`: app-source SHA-256 `f5d44bd2c6df7eb835562a62e2f7ee3e3a2087345bb89310345f70866ebddbc3`, executable SHA-256 `df3c9973d68a14816cd76c4c8992b2521c8f4a8160add180be92e1be636168a3`; bundle `local.menupocket.verify.r20261109-162637`, isolated SQLite/defaults per `build/verify-menupocket/evidence/20261109-162637/identity.json`. PID 52330, relaunch PID 53459. No production data was opened. Login and global hotkey services were fake.
+
+| Check | Result and evidence |
+| --- | --- |
+| Persistent sidebar and one shared window | **Pass.** AX trees/screenshots retain date, Today progress, Today/Later, History, Categories and Settings. History, Unfinished, Categories and Settings occupy the right column; no AXSheet or separate Settings window. `snapshots/01-baseline` through `09-relaunched` and `actions.log`. |
+| Window sizes and appearance | **Pass (scoped).** Initial 1000 × 700 content in Dark; CUA dragged the lower-right corner from screenshot coordinates (1996,1460) to (1596,1180), reaching 800 × 560 content. History stacks calendar/day detail and scrolls at this size; Categories and Settings remain usable. `03-history-small`, `04-categories-small`, `06-settings-small-light`. Light was selected through Settings and applied to the shared window. |
+| Hidden draft and navigation | **Pass.** Typed `Retained sidebar draft`, opened Settings, typed `HIDDEN_SENTINEL` with no field selected, returned to Today: draft still exactly `Retained sidebar draft`. Hidden task fields are absent from Settings AX tree. Later → History, History → Categories → Settings, Command-comma, and Unfinished retain the rail. |
+| Category write and guarded navigation | **Pass.** Created `Sidebar verification` through the visible field/Create action. Rename disables History/Settings; cancellation restores navigation. Removal confirmation disables History; Cancel preserves the category. Task edit/deletion guards also remain covered by hosted tests. |
+| Changed-data persistence | **Pass.** Quit/relaunch without reseeding preserves the created category and Light theme. `08-stopped/db.txt` and `09-relaunched/db.txt` are identical. All original daily/historical/Later task rows stay unchanged across the session; count remains 1/4. Unsaved task drafts are process-local. |
+| Cleanup | **Pass.** Final fixture and earlier build/probe runs `20261109-162256` and `20261109-162319` were stopped and cleaned; their evidence remains. Final `cleanup.txt` confirms original app path gone, no LaunchServices entry, defaults removed, no process. |
+| Production/system acceptance | **Not tested.** Installed production app, real login/global hotkey, VoiceOver and pointer category dragging were outside this navigation change. |
+
+Earlier fixture `162319` established layout before a focus correction and is historical only. Raw evidence is ignored; the hashes and scoped results above identify the final source/artifact.

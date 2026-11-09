@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Sheet attached to the task window for creating, renaming, and removing
+/// Detail pane in the task window for creating, renaming, and removing
 /// custom categories. Saved categories come only from shared state. Name drafts
-/// stay in this sheet, apart from task drafts, and are discarded when it closes.
+/// stay in this pane, apart from task drafts, and are discarded when it closes.
 struct TaskCategoryManagerView: View {
     private enum Field: Hashable {
         case newName, create, done, retry
@@ -35,8 +35,9 @@ struct TaskCategoryManagerView: View {
                 manager
             }
         }
-        .padding(20)
-        .frame(width: 480, height: 360, alignment: .topLeading)
+        .padding(28)
+        .frame(maxWidth: 660, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .font(.system(size: 14))
         .background {
             Color(nsColor: .windowBackgroundColor)
@@ -63,8 +64,8 @@ struct TaskCategoryManagerView: View {
     private var manager: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Manage categories")
-                    .font(.system(size: 18, weight: .semibold))
+                Text("Categories")
+                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
                     .accessibilityAddTraits(.isHeader)
                 Text("Categories are shared by Today, Later, and all saved days. Tasks without a category appear in General.")
                     .font(.system(size: 12))
