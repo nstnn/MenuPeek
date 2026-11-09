@@ -1,9 +1,10 @@
 # Today tasks
 
-The Today tab of the task window lists the current local day's tasks in category groups, with a date heading, a progress bar, and `N/M complete`. A user adds a task with text and a category, checks it off, edits its text or category, and deletes it after an inline confirmation. Each write is saved to SQLite at once and updates the menu bar count.
+The Today tab of the task window lists the current local day's tasks in category groups, with a Daybook date rail, progress ring, and `N/M complete`. A user adds a task with text and a category, checks it off, edits its text or category, and deletes it after an inline confirmation. Each write is saved to SQLite at once and updates the menu bar count.
 
 ## Sub-features
 
+- `daybook-layout` keeps the serif date rail, flat sections, row separators, and all controls usable in Light/Dark and at 600 × 400 pt. See [Daybook](daybook.md).
 - `today-add` opens the composer, saves trimmed text with the chosen category, and appends the task to its group.
 - `today-add-cancel` discards a draft with Escape or Cancel.
 - `today-complete` toggles completion and updates progress and the menu bar count.
@@ -28,10 +29,10 @@ Preconditions:
 
 - **Open composer.** Choose Add task. Run `$F ax <run> press id=addTask` and `$F ax <run> wait id=newTaskDraft`. A focused `New task` field, an `id=newTaskCategory` pop-up showing `General`, and a disabled `id=saveTask` appear.
 - **Enter text and category.** Type the text, then choose Work. Run `$F ax <run> type "Book flights"`, `$F ax <run> press id=newTaskCategory`, and `$F ax <run> press "role=AXMenuItem,label=Work"`. Then `$F ax <run> wait "id=newTaskCategory,label=Work" 3` succeeds, and `value id=saveTask` is no longer `[disabled]`.
-- **Save with Return.** Run `$F ax <run> focus id=newTaskDraft`, `$F ax <run> key return`, and `$F ax <run> gone id=newTaskDraft`. The composer closes. `find "role=AXCheckBox,label=Book flights"` matches under the Work group, `value id=todayProgress` reads `1/5 complete`, and `value status-item` has `title="1/5"`.
+- **Save with Return.** Run `$F ax <run> focus id=newTaskDraft`, `$F ax <run> key return`, and `$F ax <run> gone id=newTaskDraft`. The composer closes. `find "role=AXCheckBox,label=Book flights"` matches under the Work group, `value id=todayProgress` exposes `1 of 5 complete` (visible text `1/5 complete`), and `value status-item` has `title="1/5"`.
 - **Stored row.** Run `$F snapshot <run> after-add`. In `db.txt`, `Book flights` is a new row with today's `day_key`, the next `display_order` for the day, `done` 0, and category `Work`.
 - **Cancel a draft.** Run `$F ax <run> press id=addTask`, `$F ax <run> type "Discard me"`, `$F ax <run> key escape`, and `$F ax <run> gone id=newTaskDraft`. `find "label=Discard me"` returns nothing, and no row is added.
-- **Complete.** Run `$F ax <run> press "role=AXCheckBox,label=Book flights"`. The checkbox value becomes `1`, `todayProgress` reads `2/5 complete`, and the status item reads `2/5`. In a new snapshot, `done` is 1.
+- **Complete.** Run `$F ax <run> press "role=AXCheckBox,label=Book flights"`. The checkbox value becomes `1`, `todayProgress` exposes `2 of 5 complete` (visible text `2/5 complete`), and the status item reads `2/5`. In a new snapshot, `done` is 1.
 - **Edit.** Run `$F ax <run> press "label=Actions for task: Book flights"`, then `$F ax <run> press "role=AXMenuItem,label=Edit"`. An `id=editTaskDraft` field and an `id=editTaskCategory` pop-up appear. Run `$F ax <run> focus id=editTaskDraft`, `$F ax <run> key cmd+a`, `$F ax <run> type "Book train"`, and `$F ax <run> key return`. The row reads `Book train`, and in the snapshot the same rowid has the new text.
 - **Delete.** Run `$F ax <run> press "label=Actions for task: Book train"` and `$F ax <run> press "role=AXMenuItem,label=Delete…"`. An `id=taskDeletionConfirmation` group appears with `id=cancelTaskDeletion` and `id=confirmTaskDeletion`. Run `$F ax <run> press id=confirmTaskDeletion` and `$F ax <run> gone "label=Book train"`. Progress returns to `1/4`, and the row is gone from `db.txt`.
 - **Keyboard routes.** Run `$F ax <run> key cmd+2`: `value id=laterTab` has value `1`. Run `$F ax <run> key cmd+1`: `todayTab` has value `1`. Run `$F ax <run> key cmd+n`: `id=newTaskDraft` appears. Run `$F ax <run> key escape` to close it.

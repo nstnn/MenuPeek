@@ -72,6 +72,7 @@ struct TaskWindowView: View {
 
     @Bindable var state: DailyNotesState
     let presentation: TaskWindowPresentation
+    let onSettings: () -> Void
     @State private var rowActionOrigin: (id: UUID, groupID: TaskGroupID)?
     @State private var focusRequestID = UUID()
     @State private var editFocusRequestID: UUID?
@@ -96,51 +97,56 @@ struct TaskWindowView: View {
 
     private var taskWindow: some View {
         GeometryReader { geometry in
-            let horizontalPadding: CGFloat = geometry.size.width < 700 ? 24 : 32
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.top, horizontalPadding)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: .infinity)
-                    .background { focusClearingBackground }
-                if hasTopInteractionContent {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if hasComposer { composer }
-                        if hasMoveNotice {
-                            Text("Moved task to Today.")
-                                .font(.callout)
-                                .accessibilityIdentifier("laterMoveNotice")
-                        }
-                        if let message = topWriteError { taskWriteError(message) }
-                        if let message = state.categoryReorderIssue?.message {
-                            Text(message)
-                                .foregroundStyle(.red)
-                                .accessibilityIdentifier("categoryReorderError")
-                        }
-                    }
-                    .padding(16)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                    .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: .infinity)
-                }
-                taskList(geometry: geometry, horizontalPadding: horizontalPadding)
-                if hasFooterContent {
-                    Divider()
-                    footer
+            let compact = geometry.size.width < 740 || geometry.size.height < 480
+            HStack(spacing: 0) {
+                daybookSidebar(compact: compact)
+                    .frame(width: compact ? 164 : 218)
+                Rectangle().fill(daybookRule).frame(width: 1).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    header
                         .frame(maxWidth: Self.contentWidth, alignment: .leading)
-                        .padding(.horizontal, horizontalPadding)
-                        .padding(.vertical, 16)
+                        .padding(.horizontal, 28)
+                        .padding(.top, compact ? 20 : 30)
+                        .padding(.bottom, compact ? 16 : 24)
                         .frame(maxWidth: .infinity)
                         .background { focusClearingBackground }
+                    if hasTopInteractionContent {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if hasComposer { composer }
+                            if hasMoveNotice {
+                                Text("Moved task to Today.")
+                                    .font(.callout)
+                                    .accessibilityIdentifier("laterMoveNotice")
+                            }
+                            if let message = topWriteError { taskWriteError(message) }
+                            if let message = state.categoryReorderIssue?.message {
+                                Text(message)
+                                    .foregroundStyle(.red)
+                                    .accessibilityIdentifier("categoryReorderError")
+                            }
+                        }
+                        .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 16)
+                        .frame(maxWidth: .infinity)
+                    }
+                    taskList(geometry: geometry, horizontalPadding: 28)
+                    if hasFooterContent {
+                        Divider()
+                        footer
+                            .frame(maxWidth: Self.contentWidth, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity)
+                            .background { focusClearingBackground }
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { canvasBackground }
+        .tint(daybookAccent)
         // Attached to this window, so it blocks the rows and actions behind it.
         .sheet(isPresented: Binding(
             get: { presentation.isManagingCategories },
@@ -431,132 +437,189 @@ struct TaskWindowView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 24) {
-                    listHeading
-                    Spacer(minLength: 16)
-                    topActions
-                }
-                VStack(alignment: .leading, spacing: 16) {
-                    listHeading
-                    topActions
-                }
-            }
+    // Presentation only: every control still uses the existing guarded command.
+    private func daybookSidebar(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 18 : 28) {
+            Label("MENUPOCKET", systemImage: "book.closed")
+                .font(.system(size: 11, weight: .medium))
+                .tracking(1.4)
+                .foregroundStyle(.secondary)
             if !isLater {
-                HStack(spacing: 12) {
-                    if let progress = state.availableProgress {
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.quaternary)
-                            Capsule().fill(Color.accentColor)
-                                .frame(width: 160 * Double(progress.completed) / Double(max(progress.total, 1)))
-                        }
-                        .frame(width: 160, height: 4)
-                        .accessibilityElement(children: .ignore)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dayLabels.weekday.uppercased())
+                        .font(.system(size: 10, weight: .medium))
+                        .tracking(1.5)
+                        .foregroundStyle(.secondary)
+                    Text(daybookDate.day)
+                        .font(.custom("Georgia", size: compact ? 52 : 76, relativeTo: .largeTitle))
+                        .tracking(-3)
+                    Text(daybookDate.month)
+                        .font(.custom("Georgia", size: compact ? 16 : 20, relativeTo: .title3))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(dayLabels.weekday), \(dayLabels.date)")
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("daybookDate")
+            }
+            destinationControl
+            if !isLater { daybookProgress }
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 10) {
+                if !isLater { historyButton }
+                categoryManagerButton
+                Button(action: onSettings) {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                }
+                .disabled(presentation.deletionTarget != nil)
+                .help("Open Settings (⌘,)")
+                .accessibilityLabel("Open Settings")
+            }
+            .font(.system(size: 12))
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, compact ? 16 : 24)
+        .padding(.top, compact ? 20 : 30)
+        .padding(.bottom, 24)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(daybookRail)
+    }
+
+    private var destinationControl: some View {
+        Picker("Task list", selection: Binding(
+            get: { destination },
+            set: { _ = presentation.selectDestination($0, state: state) }
+        )) {
+            Text("Today").tag(TaskListDestination.today).accessibilityIdentifier("todayTab")
+            Text("Later").tag(TaskListDestination.later).accessibilityIdentifier("laterTab")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
+                  presentation.deletionTarget != nil || presentation.isManagingCategories)
+        .accessibilityLabel("Task list")
+        .accessibilityValue(isLater ? "Later" : "Today")
+        .accessibilityIdentifier("taskDestination")
+    }
+
+    private var daybookProgress: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Rectangle().fill(daybookRule).frame(height: 1).accessibilityHidden(true)
+            if let progress = state.availableProgress {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle().stroke(daybookRule, lineWidth: 2)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(progress.completed) / CGFloat(max(progress.total, 1)))
+                            .stroke(daybookAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+                    Text("\(progress.completed)/\(progress.total) complete")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel("Today's task progress")
                         .accessibilityValue("\(progress.completed) of \(progress.total) complete")
-                        Text("\(progress.completed)/\(progress.total) complete")
-                            .font(.system(size: 12).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("todayProgress")
-                    } else {
-                        Text("—")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("Task progress unavailable")
-                            .accessibilityIdentifier("todayProgress")
-                    }
+                        .accessibilityIdentifier("todayProgress")
                 }
+            } else {
+                Text("—")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Task progress unavailable")
+                    .accessibilityIdentifier("todayProgress")
             }
         }
     }
 
-    @ViewBuilder
-    private var listHeading: some View {
-        if isLater {
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Later")
-                    .font(.system(size: 24, weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text(state.availableLaterRemainingCount.map { "\($0) \($0 == 1 ? "task" : "tasks") remaining" } ?? "Tasks unavailable")
-                    .font(.system(size: 13))
+                Text(isLater ? "FOR ANOTHER DAY" : "YOUR DAILY PAGE")
+                    .font(.system(size: 10, weight: .medium))
+                    .tracking(1.5)
                     .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("laterRemainingCount")
-            }
-        } else { dateHeading }
-    }
-
-    private var dateHeading: some View {
-        let labels = dayLabels
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Text(labels.date)
-                    .font(.system(size: 24, weight: .semibold))
+                Text(isLater ? "Later" : "Make room for today.")
+                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
-                Button { openHistory(.calendar) } label: {
-                    Image(systemName: "calendar").frame(width: 28, height: 28)
+                if isLater {
+                    Text(state.availableLaterRemainingCount.map { "\($0) \($0 == 1 ? "task" : "tasks") remaining" } ?? "Tasks unavailable")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("laterRemainingCount")
                 }
+            }
+            if !hasComposer {
+                Button(action: showComposer) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus")
+                        Text("Add task")
+                        Spacer(minLength: 4)
+                        Text("⌘N").font(.caption).accessibilityHidden(true)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .focusable()
                 .keyboardFocusAppearance()
-                .focused($focusedControl, equals: .history)
+                .focused($focusedControl, equals: .add)
                 .onKeyPress(keys: [.space, .return]) { _ in
-                    openHistory(.calendar)
+                    showComposer()
                     return .handled
                 }
-                .disabled(!presentation.canBrowse(state: state))
-                .help("View task history")
-                .accessibilityLabel("View task history")
-                .accessibilityIdentifier("taskHistoryEntry")
+                .overlay { focusOutline(focusedControl == .add) }
+                .disabled(!presentation.canAddTask(state: state))
+                .help("Add task (⌘N)")
+                .accessibilityIdentifier("addTask")
+                Rectangle().fill(daybookRule).frame(height: 1).accessibilityHidden(true)
             }
-            Text(labels.weekday)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var topActions: some View {
-        HStack(spacing: 8) {
-            Button(action: showComposer) {
-                HStack(spacing: 12) {
-                    Label("Add task", systemImage: "plus")
-                    Text("⌘N")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-            }
-            .focusable()
-            .keyboardFocusAppearance()
-            .focused($focusedControl, equals: .add)
-            .onKeyPress(keys: [.space, .return]) { _ in
-                showComposer()
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .add) }
-            .disabled(!presentation.canAddTask(state: state))
-            .help("Add task (⌘N)")
-            .accessibilityIdentifier("addTask")
-            Button(action: showCategoryManager) {
-                Image(systemName: "folder.badge.gearshape")
-            }
-            .focusable()
-            .keyboardFocusAppearance()
-            .focused($focusedControl, equals: .manageCategories)
-            .onKeyPress(keys: [.space, .return]) { _ in
-                showCategoryManager()
-                return .handled
-            }
-            .overlay { focusOutline(focusedControl == .manageCategories) }
-            .disabled(!presentation.canManageCategories(state: state))
-            .help("Manage categories")
-            .accessibilityLabel("Manage categories")
-            .accessibilityIdentifier("manageCategories")
+    private var historyButton: some View {
+        Button { openHistory(.calendar) } label: {
+            Label("History", systemImage: "calendar")
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .fixedSize()
+        .focusable()
+        .keyboardFocusAppearance()
+        .focused($focusedControl, equals: .history)
+        .onKeyPress(keys: [.space, .return]) { _ in
+            openHistory(.calendar)
+            return .handled
+        }
+        .disabled(!presentation.canBrowse(state: state))
+        .help("View task history")
+        .accessibilityLabel("View task history")
+        .accessibilityIdentifier("taskHistoryEntry")
+    }
+
+    private var categoryManagerButton: some View {
+        Button(action: showCategoryManager) {
+            Label("Categories", systemImage: "folder")
+        }
+        .focusable()
+        .keyboardFocusAppearance()
+        .focused($focusedControl, equals: .manageCategories)
+        .onKeyPress(keys: [.space, .return]) { _ in
+            showCategoryManager()
+            return .handled
+        }
+        .overlay { focusOutline(focusedControl == .manageCategories) }
+        .disabled(!presentation.canManageCategories(state: state))
+        .help("Manage categories")
+        .accessibilityLabel("Manage categories")
+        .accessibilityIdentifier("manageCategories")
+    }
+
+    private var daybookDate: (day: String, month: String) {
+        // These are components of the saved civil date, never a new time-zone conversion.
+        let parts = (state.todayKey ?? NoteDay().keys().today).split(separator: "-")
+        let month = dayLabels.date.split(separator: " ").first.map(String.init) ?? ""
+        return (parts.last.map(String.init) ?? "", "\(month), \(parts.first.map(String.init) ?? "")")
     }
 
     private var hasComposer: Bool {
@@ -720,14 +783,6 @@ struct TaskWindowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.06 : 0))
-                }
-        }
         .overlay(alignment: .top) { categorySource(group).frame(height: 12) }
         .overlay(alignment: .bottom) { categorySource(group).frame(height: 12) }
         .overlay(alignment: .leading) { categorySource(group).frame(width: 16) }
@@ -757,7 +812,8 @@ struct TaskWindowView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: Self.groupRowIndent - 8)
                 Text(group.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(isLater ? "\(progress.total - progress.completed) remaining" : "\(progress.completed)/\(progress.total)")
@@ -850,6 +906,7 @@ struct TaskWindowView: View {
                 .accessibilityLabel(note.text)
                 .accessibilityIdentifier("\(isLater ? "laterTaskCompletion" : "taskCompletion")-\(note.id)")
             Text(note.text)
+                .strikethrough(note.isCompleted, color: .secondary.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -873,7 +930,8 @@ struct TaskWindowView: View {
         .help(note.continuedOn.map { "Continued on \($0)" } ?? "")
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
-        .frame(minHeight: 44)
+        .frame(minHeight: 48)
+        .overlay(alignment: .bottom) { daybookRule.frame(height: 1).allowsHitTesting(false) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(isLater ? "laterTaskRow" : "taskRow")-\(note.id)")
     }
@@ -1145,14 +1203,25 @@ struct TaskWindowView: View {
         .accessibilityHidden(true)
     }
 
-    /// Native background colors can coincide; a semantic tint keeps inset
-    /// groups distinct without introducing a fixed Light/Dark palette.
     private var canvasBackground: some View {
-        Color(nsColor: .windowBackgroundColor)
-            .overlay {
-                Color.primary.opacity(colorScheme == .light ? 0.04 : 0)
-            }
+        colorScheme == .dark
+            ? Color(red: 0.145, green: 0.137, blue: 0.122)
+            : Color(red: 0.980, green: 0.969, blue: 0.941)
     }
+
+    private var daybookRail: Color {
+        colorScheme == .dark
+            ? Color(red: 0.188, green: 0.173, blue: 0.145)
+            : Color(red: 0.941, green: 0.922, blue: 0.878)
+    }
+
+    private var daybookAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.894, green: 0.667, blue: 0.514)
+            : Color(red: 0.608, green: 0.310, blue: 0.196)
+    }
+
+    private var daybookRule: Color { Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.12) }
 
     private func focusOutline(_ focused: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)

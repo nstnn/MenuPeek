@@ -4,7 +4,7 @@ Settings is one reusable window with Open at Login, Theme (System, Light, Dark),
 
 ## Sub-features
 
-- `settings-open` opens or reuses one Settings window from the gear button, Command-comma, the app menu, or the glance.
+- `settings-open` opens or reuses one Settings window from the Daybook Settings control, Command-comma, the app menu, or the glance.
 - `settings-theme` applies Light or Dark app-wide at once and keeps the choice across relaunch.
 - `settings-login` shows the Open at Login status (faked as disabled in the fixture).
 - `settings-shortcuts` shows the shortcut reference and the More keyboard controls disclosure.
@@ -14,7 +14,7 @@ Settings is one reusable window with Open at Login, Theme (System, Light, Dark),
 
 ## How to get to it (user POV)
 
-- Click the gear (`Open Settings`) in the task window's title bar, press Command-comma, or choose MenuPocket > Settings….
+- Click Settings (`Open Settings`) in the Daybook rail, or the gear in the title bar while viewing History, press Command-comma, or choose MenuPocket > Settings….
 - Choose `Settings…` from the menu bar quick look.
 - With Quick Add on, press Control-Option-N in any app.
 
