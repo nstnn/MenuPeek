@@ -570,8 +570,8 @@ final class TaskWindowPresentation {
 
 @MainActor
 final class TaskWindowController: NSWindowController, NSWindowDelegate {
-    static let initialContentSize = NSSize(width: 920, height: 640)
-    static let minimumContentSize = NSSize(width: 600, height: 400)
+    static let initialContentSize = NSSize(width: 1000, height: 700)
+    static let minimumContentSize = NSSize(width: 800, height: 560)
     let state: DailyNotesState
     let presentation: TaskWindowPresentation
     private var isTerminating = false
@@ -646,6 +646,16 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     func stopForTermination() {
         isTerminating = true
         presentation.stopForTermination()
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        // Hosting layout can revise contentMinSize after presentation. Enforce
+        // the usable content floor for native corner/edge resizing as well.
+        let minimumFrame = sender.frameRect(forContentRect: NSRect(
+            origin: .zero, size: Self.minimumContentSize
+        )).size
+        return NSSize(width: max(frameSize.width, minimumFrame.width),
+                      height: max(frameSize.height, minimumFrame.height))
     }
 
     func windowWillClose(_ notification: Notification) {

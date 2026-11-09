@@ -444,28 +444,26 @@ struct TaskWindowView: View {
                 .font(.system(size: 11, weight: .medium))
                 .tracking(1.4)
                 .foregroundStyle(.secondary)
-            if !isLater {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(dayLabels.weekday.uppercased())
-                        .font(.system(size: 10, weight: .medium))
-                        .tracking(1.5)
-                        .foregroundStyle(.secondary)
-                    Text(daybookDate.day)
-                        .font(.custom("Georgia", size: compact ? 52 : 76, relativeTo: .largeTitle))
-                        .tracking(-3)
-                    Text(daybookDate.month)
-                        .font(.custom("Georgia", size: compact ? 16 : 20, relativeTo: .title3))
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(dayLabels.weekday), \(dayLabels.date)")
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("daybookDate")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(dayLabels.weekday.uppercased())
+                    .font(.system(size: 10, weight: .medium))
+                    .tracking(1.5)
+                    .foregroundStyle(.secondary)
+                Text(daybookDate.day)
+                    .font(.custom("Georgia", size: compact ? 52 : 76, relativeTo: .largeTitle))
+                    .tracking(-3)
+                Text(daybookDate.month)
+                    .font(.custom("Georgia", size: compact ? 16 : 20, relativeTo: .title3))
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(dayLabels.weekday), \(dayLabels.date)")
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("daybookDate")
             destinationControl
-            if !isLater { daybookProgress }
+            daybookProgress
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 10) {
-                if !isLater { historyButton }
+                historyButton
                 categoryManagerButton
                 Button(action: onSettings) {
                     Label("Settings", systemImage: "slider.horizontal.3")
@@ -516,7 +514,7 @@ struct TaskWindowView: View {
                     }
                     .frame(width: 28, height: 28)
                     .accessibilityHidden(true)
-                    Text("\(progress.completed)/\(progress.total) complete")
+                    Text("Today: \(progress.completed)/\(progress.total) complete")
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -580,6 +578,10 @@ struct TaskWindowView: View {
         }
     }
 
+    private var canOpenHistory: Bool {
+        isLater ? presentation.canSelectDestination(.today, state: state) : presentation.canBrowse(state: state)
+    }
+
     private var historyButton: some View {
         Button { openHistory(.calendar) } label: {
             Label("History", systemImage: "calendar")
@@ -591,7 +593,7 @@ struct TaskWindowView: View {
             openHistory(.calendar)
             return .handled
         }
-        .disabled(!presentation.canBrowse(state: state))
+        .disabled(!canOpenHistory)
         .help("View task history")
         .accessibilityLabel("View task history")
         .accessibilityIdentifier("taskHistoryEntry")
@@ -1144,7 +1146,9 @@ struct TaskWindowView: View {
     }
 
     private func openHistory(_ entry: TaskWindowPresentation.HistoryEntry) {
-        guard presentation.showHistory(state: state, entry: entry) else { return }
+        // History always belongs to Today; the shared rail offers it from either list.
+        guard presentation.selectDestination(.today, state: state),
+              presentation.showHistory(state: state, entry: entry) else { return }
         focusRequestID = UUID()
         focusedControl = nil
         NSApp.keyWindow?.makeFirstResponder(nil)

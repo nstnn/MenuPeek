@@ -1,6 +1,6 @@
 # Later list
 
-The Later tab holds undated tasks with only text and an optional category. It shows `N tasks remaining`, not a date or progress bar, and groups tasks by category. An unfinished Later task can be moved once to Today. Later-only changes never change the menu bar count; Move to Today raises Today's total by one.
+The Later tab holds undated tasks with only text and an optional category. Its main pane shows `N tasks remaining` and groups undated tasks by category. The persistent left rail retains today’s date, explicitly labeled Today progress, History, Categories and Settings at the same positions as Today. An unfinished Later task can be moved once to Today. Later-only changes never change the menu bar count; Move to Today raises Today's total by one.
 
 ## Sub-features
 
@@ -23,7 +23,7 @@ Preconditions:
 - A fresh run launched with `--seed basic`. Later holds `Plan the team offsite` (Work) and `Read the SQLite docs` (General), and the status item reads `1/4`.
 - `$F snapshot <run> before` has been taken.
 
-- **Switch to Later.** Run `$F ax <run> press id=laterTab` and `$F ax <run> wait id=laterTaskList`. The heading reads `Later`, and `value id=laterRemainingCount` reads `2 tasks remaining`. Group headers are `id=laterTaskGroup-general` and `id^=laterTaskGroup-`.
+- **Switch to Later.** Run `$F ax <run> press id=laterTab` and `$F ax <run> wait id=laterTaskList`. The heading reads `Later`, and `value id=laterRemainingCount` reads `2 tasks remaining`. The shared rail still exposes `daybookDate`, `todayProgress` (`1 of 4 complete`) and `taskHistoryEntry`. Group headers are `id=laterTaskGroup-general` and `id^=laterTaskGroup-`.
 - **Menu route.** Run `$F ax <run> press id=todayTab`, then `$F ax <run> menu-path View Later`. `laterTab` has value `1` again.
 - **Add.** Run `$F ax <run> press id=addTask`, `$F ax <run> wait id=newLaterTaskDraft`, `$F ax <run> type "Renew passport"`, `$F ax <run> focus id=newLaterTaskDraft`, and `$F ax <run> key return`. The count reads `3 tasks remaining`, and the status item still reads `1/4`. In the snapshot, `Renew passport` is a new `later_tasks` row.
 - **Move to Today.** Run `$F ax <run> press "label=Actions for task: Read the SQLite docs"`, then `$F ax <run> press "role=AXMenuItem,label=Move to Today"`. `value id=laterMoveNotice` reads `Moved task to Today.`, Later shows one fewer remaining, the status item reads `1/5`, and the tab stays on Later.
