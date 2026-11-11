@@ -14,7 +14,7 @@ Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas,
 
 - Open the task window from the menu bar count or app launch.
 - Use the rail for Today, Later, History, Categories and Settings.
-- Choose Add task or Command-N; use the row ellipsis for Edit, Move and Delete.
+- Choose Add task or Command-N; use the row ellipsis for Edit, Move and Delete. It opens a Daybook popover (paper card, terracotta hover/keyboard highlight, Delete in red) instead of a system menu.
 
 ## Driving it with fixture.sh + mpax
 
@@ -34,7 +34,7 @@ Preconditions:
 ## Gotchas
 
 - The date rail uses the saved civil day key, not a second time-zone conversion. The shared rail always describes Today; Later tasks remain undated and never contribute to Today progress.
-- Native checkboxes, text fields and menus remain native. The serif heading and color palette do not replace keyboard/focus or persistence contracts.
+- Native checkboxes, text fields and pop-up menus remain native; only the row `…` actions use the custom Daybook popover. The serif heading and color palette do not replace keyboard/focus or persistence contracts.
 - Add task is replaced by the composer while it is open. Finish or cancel it before locating `id=addTask` again.
 - While editing, confirming deletion, or managing categories, destination switches and conflicting actions remain guarded.
 - Browser concept screenshots are design references, not evidence for this native build. Pointer drag behavior, VoiceOver and real system integrations require their own observations.
