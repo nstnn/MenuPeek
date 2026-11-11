@@ -451,10 +451,6 @@ struct TaskWindowView: View {
     // Presentation only: every control still uses the existing guarded command.
     private func daybookSidebar(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 18 : 28) {
-            Label("MENUPOCKET", systemImage: "book.closed")
-                .font(.system(size: 11, weight: .medium))
-                .tracking(1.4)
-                .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(dayLabels.weekday.uppercased())
                     .font(.system(size: 10, weight: .medium))
@@ -473,7 +469,7 @@ struct TaskWindowView: View {
             destinationControl
             daybookProgress
             Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
                 historyButton
                 categoryManagerButton
                 Button(action: onSettings) {
@@ -484,7 +480,8 @@ struct TaskWindowView: View {
                 .help("Open Settings (⌘,)")
                 .accessibilityLabel("Open Settings")
             }
-            .font(.system(size: 12))
+            .font(.system(size: 14))
+            .labelStyle(DaybookNavLabelStyle())
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
         }
@@ -526,7 +523,7 @@ struct TaskWindowView: View {
                     }
                     .frame(width: 28, height: 28)
                     .accessibilityHidden(true)
-                    Text("Today: \(progress.completed)/\(progress.total) complete")
+                    Text("\(progress.completed)/\(progress.total) done today")
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -546,11 +543,7 @@ struct TaskWindowView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(isLater ? "FOR ANOTHER DAY" : "YOUR DAILY PAGE")
-                    .font(.system(size: 10, weight: .medium))
-                    .tracking(1.5)
-                    .foregroundStyle(.secondary)
-                Text(isLater ? "Later" : "Make room for today.")
+                Text(isLater ? "Later" : "Today")
                     .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
@@ -635,7 +628,7 @@ struct TaskWindowView: View {
         // These are components of the saved civil date, never a new time-zone conversion.
         let parts = (state.todayKey ?? NoteDay().keys().today).split(separator: "-")
         let month = dayLabels.date.split(separator: " ").first.map(String.init) ?? ""
-        return (parts.last.map(String.init) ?? "", "\(month), \(parts.first.map(String.init) ?? "")")
+        return (parts.last.map(String.init) ?? "", "\(month) \(parts.first.map(String.init) ?? "")")
     }
 
     private var hasComposer: Bool {
@@ -1367,4 +1360,19 @@ private struct TaskMenuAnchor: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Sidebar footer rows: a fixed icon column so labels align, and a full-width hit area.
+private struct DaybookNavLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 10) {
+            configuration.icon
+                .font(.system(size: 16))
+                .frame(width: 22, alignment: .center)
+            configuration.title
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
 }
