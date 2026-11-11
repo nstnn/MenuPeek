@@ -69,6 +69,7 @@ struct HistoryDayDetailView: View {
                     Button(selection.isEmpty ? "Continue today" : "Continue today (\(selection.count))") {
                         continueSelection(state)
                     }
+                    .buttonStyle(.daybookProminent)
                     .historyKeyAction { continueSelection(state) }
                     .disabled(selection.isEmpty || !state.hasLoadedToday)
                     .accessibilityIdentifier("continueHistoryTasks")

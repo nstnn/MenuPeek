@@ -77,8 +77,6 @@ struct TaskHistoryView: View {
                 .historyKeyAction { try? history.thisMonth() }
                 .accessibilityIdentifier("historyThisMonth")
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
         .frame(minHeight: 30)
     }
 }
