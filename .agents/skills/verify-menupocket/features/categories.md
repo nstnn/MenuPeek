@@ -7,7 +7,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 - `cat-create` adds a unique, nonblank, single-line name; duplicates (ignoring case) are rejected inline.
 - `cat-rename` renames in place, and every group and picker shows the new name.
 - `cat-remove` confirms with a usage count, then moves those tasks to General.
-- `cat-picker` lists every saved category in the composer and edit pop-ups.
+- `cat-picker` lists General and every saved category in the composer and edit Category popover (`id=categoryPopover`), with the current choice checked.
 - `cat-collapse` collapses or expands a group; the state survives relaunch.
 - `cat-move-to` moves a Today task to another category from its row menu (Move To).
 - `cat-manager-reorder` saves the shared custom-category order with a mouse drag/drop, including unused categories; General stays first.
@@ -15,7 +15,7 @@ Categories are shared by Today, Later, and every saved day. Manage categories op
 ## How to get to it (user POV)
 
 - Choose `Categories` (`Manage categories`, the folder control in the Daybook rail) from any sidebar destination.
-- Use the Category pop-up in the add or edit composer.
+- Use the Category capsule in the add or edit composer.
 - Click a group header to collapse or expand it.
 - Use a Today row's `…` menu > Move To > category.
 
@@ -40,7 +40,7 @@ Preconditions:
 
 - While the pane is open, task commands including Command-N are disabled. Idle sidebar navigation returns to Today/Later or opens History/Settings. During rename or removal confirmation these destinations are disabled until Save/Cancel. `doneManagingCategories` also returns to the retained list.
 - The popover's Move To items show the category name and are labeled `Move to <name>` for Accessibility. Open the right row's popover immediately before pressing.
-- A `Work` menu item title can also match the composer's Category pop-up items if a pop-up is open. Close other menus with `key escape` first.
+- A `Work` label can also match the Category popover's items, the Work group header, or a row popover's `Move to Work`. Use `id^=categoryOption-,label=Work` and close other popovers with `key escape` first.
 - Reordering categories by drag in the manager is pointer-only and cannot be driven here. Report it as Not tested, or give the user manual steps, and check `categories.creation_order` in `db.txt` for the stored order.
 - Removing a category changes saved data on every day. Use a fresh run when another recipe needs the seeded categories.
 

@@ -1,12 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// What a task row's actions popover returns when it closes.
+/// What a Daybook popover returns when it closes: a task row action, or a
+/// composer category (nil is General).
 enum TaskActionSelection {
     case edit
     case delete
     case moveToToday
     case move(TaskMoveRequest)
+    case category(UUID?)
 }
 
 /// One line of the actions popover.
@@ -56,8 +58,19 @@ final class TaskActionsModel: ObservableObject {
 
     private var actionableIDs: [String] { rows.compactMap { $0.actionable?.id } }
 
-    func highlightFirst() {
-        highlighted = actionableIDs.first
+    /// Which item a keyboard-opened popover highlights first.
+    enum InitialHighlight {
+        case none
+        case first
+        case item(String)
+    }
+
+    func highlight(_ start: InitialHighlight) {
+        switch start {
+        case .none: highlighted = nil
+        case .first: highlighted = actionableIDs.first
+        case let .item(id): highlighted = actionableIDs.contains(id) ? id : actionableIDs.first
+        }
     }
 
     func step(_ offset: Int) {
@@ -82,10 +95,17 @@ final class TaskActionsModel: ObservableObject {
     }
 }
 
-/// The Daybook-styled replacement for the native row menu: a paper card with
-/// soft accent highlights, an inline Move To list, and Delete in the danger color.
+/// The Daybook-styled replacement for native menus: a paper card with soft
+/// accent highlights. Row actions add an inline Move To list and Delete in the
+/// danger color; the composer uses it to choose a category.
 struct TaskActionsPopoverView: View {
     @ObservedObject var model: TaskActionsModel
+    var accessibilityLabel = "Task actions"
+    var accessibilityIdentifier = "taskActionsPopover"
+    /// Prefix for item identifiers, followed by the item ID.
+    var itemIdentifierPrefix = "taskAction-"
+    /// Accessibility value of the checked item.
+    var currentValue = "Current group"
     @Environment(\.colorScheme) private var colorScheme
 
     static let width: CGFloat = 224
@@ -123,8 +143,8 @@ struct TaskActionsPopoverView: View {
                 .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.10), lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Task actions")
-        .accessibilityIdentifier("taskActionsPopover")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private func itemView(_ item: TaskActionRow.Item) -> some View {
@@ -173,9 +193,9 @@ struct TaskActionsPopoverView: View {
             }
         }
         .accessibilityLabel(item.accessibilityLabel)
-        .accessibilityValue(item.isCurrent ? "Current group" : "")
+        .accessibilityValue(item.isCurrent ? currentValue : "")
         .accessibilityAddTraits(item.isCurrent ? .isSelected : [])
-        .accessibilityIdentifier("taskAction-\(item.id)")
+        .accessibilityIdentifier(itemIdentifierPrefix + item.id)
     }
 }
 
@@ -215,14 +235,28 @@ final class TaskActionsPresenter {
 
     var isOpen: Bool { panel != nil }
 
-    func present(rows: [TaskActionRow], from view: NSView, highlightFirst: Bool,
+    /// Which trigger edge the popover lines up with.
+    enum Alignment { case leading, trailing }
+
+    struct Labels {
+        var popover = "Task actions"
+        var identifier = "taskActionsPopover"
+        var itemPrefix = "taskAction-"
+        var currentValue = "Current group"
+    }
+
+    func present(rows: [TaskActionRow], from view: NSView,
+                 highlight: TaskActionsModel.InitialHighlight, alignment: Alignment = .trailing,
+                 labels: Labels = Labels(),
                  completion: @escaping (TaskActionSelection?) -> Void) {
         guard panel == nil, let parent = view.window else { return }
         let model = TaskActionsModel(rows: rows)
-        if highlightFirst { model.highlightFirst() }
+        model.highlight(highlight)
         model.onChoose = { [weak self] selection in self?.close(with: selection) }
 
-        let host = NSHostingView(rootView: TaskActionsPopoverView(model: model))
+        let host = NSHostingView(rootView: TaskActionsPopoverView(
+            model: model, accessibilityLabel: labels.popover, accessibilityIdentifier: labels.identifier,
+            itemIdentifierPrefix: labels.itemPrefix, currentValue: labels.currentValue))
         host.appearance = parent.effectiveAppearance
         let size = host.fittingSize
 
@@ -237,8 +271,8 @@ final class TaskActionsPresenter {
         panel.animationBehavior = .utilityWindow
         panel.appearance = parent.effectiveAppearance
         panel.contentView = host
-        panel.setAccessibilityLabel("Task actions")
-        panel.setFrameOrigin(Self.origin(for: size, below: view, in: parent))
+        panel.setAccessibilityLabel(labels.popover)
+        panel.setFrameOrigin(Self.origin(for: size, below: view, in: parent, alignment: alignment))
         panel.onKey = { [weak self, weak model] event in
             guard let self, let model else { return false }
             return self.handle(event, model: model)
@@ -304,12 +338,14 @@ final class TaskActionsPresenter {
         return trigger.bounds.insetBy(dx: -2, dy: -2).contains(point)
     }
 
-    /// Below the trigger with trailing edges aligned; above it when the
+    /// Below the trigger with the chosen edges aligned; above it when the
     /// screen has no room below, and always inside the visible frame.
-    private static func origin(for size: NSSize, below view: NSView, in window: NSWindow) -> NSPoint {
+    private static func origin(for size: NSSize, below view: NSView, in window: NSWindow,
+                               alignment: Alignment) -> NSPoint {
         let anchor = window.convertToScreen(view.convert(view.bounds, to: nil))
         let gap: CGFloat = 4
-        var origin = NSPoint(x: anchor.maxX - size.width, y: anchor.minY - gap - size.height)
+        let x = alignment == .trailing ? anchor.maxX - size.width : anchor.minX
+        var origin = NSPoint(x: x, y: anchor.minY - gap - size.height)
         if let screen = (window.screen ?? NSScreen.main)?.visibleFrame {
             if origin.y < screen.minY { origin.y = anchor.maxY + gap }
             origin.y = min(max(origin.y, screen.minY), screen.maxY - size.height)
