@@ -4,7 +4,7 @@ The Today tab of the task window lists the current local day's tasks in category
 
 ## Sub-features
 
-- `daybook-layout` keeps the serif date rail, flat sections, row separators, and all controls usable in Light/Dark and at 600 × 400 pt. See [Daybook](daybook.md).
+- `daybook-layout` keeps the serif date rail, flat sections, row separators, and all controls usable in Light/Dark and at the 800 × 560 pt minimum. See [Daybook](daybook.md).
 - `today-add` opens the composer, saves trimmed text with the chosen category, and appends the task to its group.
 - `today-add-cancel` discards a draft with Escape or Cancel.
 - `today-complete` toggles completion and updates progress and the menu bar count.
@@ -18,7 +18,7 @@ The Today tab of the task window lists the current local day's tasks in category
 
 - Launch the app, which opens the task window on Today, or click the menu bar count.
 - Choose `Add task` (`⌘N`) in the window, or File > Add Task.
-- Use each row's checkbox, and its `…` menu for Edit and Delete….
+- Use each row's checkbox, and its `…` popover for Edit, Move, and Delete….
 - Press Command-1 from anywhere in the app to return to Today.
 
 ## Driving it with fixture.sh + mpax

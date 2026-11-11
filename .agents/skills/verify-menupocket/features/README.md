@@ -38,4 +38,4 @@ Each feature file starts with an H1 title and a paragraph describing the user-vi
 - [Categories](./categories.md): Manage categories (create, rename, remove), the category picker, group collapse, and row Move To.
 - [History](./history.md): the calendar, day detail and filters, Unfinished from previous days, yesterday entry, and explicit Continue today.
 - [Menu bar count and glance](./menu-bar.md): the status item's saved progress, click to Today, the right-click quick look, and Unavailable/Retry.
-- [Settings and Quick Add](./settings-quick-add.md): the Settings window, Theme, Open at Login (faked), the Quick Add switch, and the capture panel.
+- [Settings and Quick Add](./settings-quick-add.md): the Settings pane, Theme, Open at Login (faked), the Quick Add switch, and the capture panel.

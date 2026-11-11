@@ -4,8 +4,8 @@ History replaces Today in the same window with a month calendar and grouped day 
 
 ## Sub-features
 
-- `history-open` opens on yesterday from the History control; Back to Today returns and keeps the Today draft.
-- `history-calendar` uses Previous month, Next month, and This month, with per-day labels such as `0 of 1 complete`, `No tasks`, and `Not yet`.
+- `history-open` opens on yesterday the first time from the History control (later visits in the same run keep the last day and filter); Back to Today returns and keeps the Today draft.
+- `history-calendar` uses Previous month, Next month, and This month, with per-day labels ending in a status such as `0 of 1 complete`, `No tasks`, or `Not yet` (for example `Monday, October 19, 2026, 0 of 1 complete`; match with `label~=`). This month selects Today with the All filter.
 - `history-detail` shows the selected day's title, `N of M tasks complete`, and grouped historical rows.
 - `history-continue` selects one or more unfinished past tasks and explicitly continues them in Today; completed, continued, Today and future rows cannot be selected.
 - `history-filter` changes the rows shown (All, Unfinished, Completed), not the count.
@@ -16,7 +16,7 @@ History replaces Today in the same window with a month calendar and grouped day 
 ## How to get to it (user POV)
 
 - Click the History control in Today's Daybook rail (`View task history`).
-- Click the `N unfinished tasks from yesterday` reminder on Today.
+- Click the yesterday reminder on Today (`1 unfinished task from yesterday` with the `basic` seed; plural for more).
 - Choose `Unfinished from previous days` inside History.
 
 ## Driving it with fixture.sh + mpax
@@ -26,11 +26,11 @@ Preconditions:
 - A fresh run launched with `--seed basic`. Yesterday has 1 of 2 complete; three days ago has 0 of 1.
 - Take `$F snapshot <run> before-history` now; it is the read-only baseline.
 
-- **Open History.** Run `$F ax <run> press id=taskHistoryEntry` and `$F ax <run> wait id=historyCalendar`. `value id=taskBrowserHeading` reads `History`, `id=historyMonth` names the current month, and yesterday's `id=historyCalendarDay-<yyyy-mm-dd>` is `[selected]`. `value id=historyDayProgress` reads `1 of 2 tasks complete`.
+- **Open History.** Run `$F ax <run> press id=taskHistoryEntry` and `$F ax <run> wait id=historyCalendar`. `value id=taskBrowserHeading` reads `History`, `id=historyMonth` names the current month, and yesterday's `id=historyCalendarDay-<yyyy-mm-dd>` is `[selected]`. `value id=historyDayProgress` reads `1 of 2 tasks complete`. Do this first: History keeps its last day and filter for the rest of the run, so after the yesterday reminder or an Unfinished day it reopens with Unfinished selected.
 - **Pick a day.** Run `$F ax <run> press id=historyCalendarDay-<three days ago>`. `value id=historyDayTitle` names that date, and one row `label~=Unfinished: Renew library books` (an `id^=historyTaskRow-` element) is listed.
 - **Filter.** Select yesterday again, then run `$F ax <run> press "role=AXRadioButton,label=Completed"`. Only `Completed: Send weekly report` remains, and `historyDayProgress` still reads `1 of 2 tasks complete`. Press `label=All` to restore.
-- **Months.** Run `$F ax <run> press id=historyPreviousMonth`; `historyMonth` changes to the previous month. `press id=historyThisMonth` returns.
-- **Unfinished.** Run `$F ax <run> press id=unfinishedHistoryEntry` and `$F ax <run> wait id=unfinishedDayList`. The rows `id=unfinishedDay-<yesterday>` and `id=unfinishedDay-<three days ago>` appear, newest first. Press one: its detail opens with the Unfinished filter, and `id=taskBrowserBack` returns to the list. `id=taskBrowserToday` (Go to Today) returns to Today.
+- **Months.** Run `$F ax <run> press id=historyPreviousMonth`; `historyMonth` changes to the previous month. `press id=historyThisMonth` returns and selects Today (`label~=Today\,`).
+- **Unfinished.** Run `$F ax <run> press id=unfinishedHistoryEntry` and `$F ax <run> wait id=unfinishedDayList`. The rows `id=unfinishedDay-<yesterday>` and `id=unfinishedDay-<three days ago>` appear, newest first. `id=taskBrowserBack` reads `Back to History` here. Press a day: its detail opens with the Unfinished filter, and `id=taskBrowserBack` (`Back to Unfinished`) returns to the list. `id=taskBrowserToday` (Go to Today) returns to Today.
 - **Yesterday reminder.** From Today, run `$F ax <run> press id=yesterdayHistoryEntry`. History opens on yesterday with the Unfinished segment selected.
 - **Back to Today keeps the draft.** Before opening History, start a draft (`press id=addTask`, `type "Keep me"`). After `press id=taskBrowserBack`, `value id=newTaskDraft` still shows `Keep me`.
 - **Read-only proof.** Run `$F snapshot <run> after-history`. Its `db.txt` is identical to `before-history`, apart from intentional Today changes. Capture the calendar with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/history.png`.
@@ -40,8 +40,8 @@ Preconditions:
 ## Gotchas
 
 - Day identifiers use the fixture's local date. Use `--now … --tz …` at launch when a recipe needs fixed dates, or read today's key from the launch log (`today=YYYY-MM-DD`) in `runs/<run>/fixture.log`.
-- Future days are `AXUnknown` elements labeled `Not yet` and cannot be pressed.
-- History, Unfinished, and the yesterday reminder are disabled while editing, confirming a deletion, or managing categories.
+- Future days are `AXUnknown` elements whose label ends in `Not yet` (for example `Thursday, October 29, 2026, Not yet`), so query them with `label~=Not yet`. They cannot be pressed unless the day already has saved rows.
+- History, Unfinished, and the yesterday reminder are disabled while editing, confirming a deletion, renaming a category, or confirming a category removal. They stay available from the idle Categories pane.
 - The Unfinished list pages 31 days at a time. Testing `id=unfinishedLoadMore` needs a seed with more than 31 earlier unfinished days, which the `basic` seed does not have. Add a named seed in `FixtureMain.swift` rather than writing rows by hand, and until then report Load more as Not tested.
 - `fixture.sh next-day` moves Today forward one day, so yesterday becomes the seeded Today. This is a simulated day change, not a real midnight.
 
