@@ -206,6 +206,7 @@ struct TaskCategoryManagerView: View {
                     .accessibilityLabel("New name for \(category.name)")
                     .accessibilityIdentifier("renameCategoryName")
                 Button("Save") { saveRename(category.id) }
+                    .buttonStyle(.daybookProminent)
                     .modifier(keyboard(.saveRename) { saveRename(category.id) })
                     .fixedSize()
                     .disabled(isBlank(renameDraft))
@@ -247,6 +248,7 @@ struct TaskCategoryManagerView: View {
                     .accessibilityLabel("New category name")
                     .accessibilityIdentifier("newCategoryName")
                 Button("Create", action: create)
+                    .buttonStyle(.daybookProminent)
                     .modifier(keyboard(.create, create))
                     .fixedSize()
                     .disabled(isBlank(newName))
@@ -319,6 +321,7 @@ struct TaskCategoryManagerView: View {
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("cancelCategoryRemoval")
                 Button("Remove Category", role: .destructive, action: confirmRemoval)
+                    .buttonStyle(.daybookProminent)
                     .modifier(keyboard(.confirmRemoval, confirmRemoval))
                     .accessibilityIdentifier("confirmCategoryRemoval")
             }

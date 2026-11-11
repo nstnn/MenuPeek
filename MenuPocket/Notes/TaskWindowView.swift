@@ -117,6 +117,8 @@ struct TaskWindowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { canvasBackground }
         .tint(daybookAccent)
+        // Buttons without their own style (Save, Cancel, Retry, pane actions) use Daybook's.
+        .buttonStyle(.daybook)
     }
 
     private func listContent(geometry: GeometryProxy, compact: Bool) -> some View {
@@ -966,6 +968,7 @@ struct TaskWindowView: View {
                 categoryPicker(editing: editingID != nil)
                 Spacer(minLength: 0)
                 Button("Save", action: saveDraft)
+                    .buttonStyle(.daybookProminent)
                     .focusable()
                     .keyboardFocusAppearance()
                     .focused($focusedControl, equals: .save)
@@ -1040,6 +1043,7 @@ struct TaskWindowView: View {
                 Button("Delete", role: .destructive) {
                     confirmDeletion()
                 }
+                .buttonStyle(.daybookProminent)
                 .focusable()
                 .keyboardFocusAppearance()
                 .focused($focusedControl, equals: .confirmDelete)
@@ -1220,25 +1224,13 @@ struct TaskWindowView: View {
         .accessibilityHidden(true)
     }
 
-    private var canvasBackground: some View {
-        colorScheme == .dark
-            ? Color(red: 0.145, green: 0.137, blue: 0.122)
-            : Color(red: 0.980, green: 0.969, blue: 0.941)
-    }
+    private var canvasBackground: some View { DaybookPalette.canvas(colorScheme) }
 
-    private var daybookRail: Color {
-        colorScheme == .dark
-            ? Color(red: 0.188, green: 0.173, blue: 0.145)
-            : Color(red: 0.941, green: 0.922, blue: 0.878)
-    }
+    private var daybookRail: Color { DaybookPalette.rail(colorScheme) }
 
-    private var daybookAccent: Color {
-        colorScheme == .dark
-            ? Color(red: 0.894, green: 0.667, blue: 0.514)
-            : Color(red: 0.608, green: 0.310, blue: 0.196)
-    }
+    private var daybookAccent: Color { DaybookPalette.accent(colorScheme) }
 
-    private var daybookRule: Color { Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.12) }
+    private var daybookRule: Color { DaybookPalette.rule(colorScheme) }
 
     private func focusOutline(_ focused: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
