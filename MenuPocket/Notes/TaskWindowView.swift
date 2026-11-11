@@ -981,27 +981,26 @@ struct TaskWindowView: View {
     }
 
     /// Binds the visible draft's selection in state; nil is General, listed
-    /// first as in Today. With keyboard focus, Up and Down step the selection.
-    /// Return does nothing here, so choosing a category never saves the draft.
+    /// first as in Today. The capsule opens the same Daybook popover as row
+    /// actions. With keyboard focus, Up and Down step the selection and
+    /// Space/Return open the popover; choosing a category never saves the draft.
     private func categoryPicker(editing: Bool) -> some View {
-        Picker("Category", selection: categoryBinding(editing: editing)) {
-            ForEach(TaskCategoryOption.ordered(categories: state.categories)) { option in
-                Text(option.name).tag(option.categoryID)
-            }
+        HStack(spacing: 8) {
+            Text("Category")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TaskCategoryPicker(options: TaskCategoryOption.ordered(categories: state.categories),
+                               selection: categoryBinding(editing: editing),
+                               onStep: { stepCategory(by: $0, editing: editing) })
+                .focused($focusedControl, equals: .category)
+                .overlay { focusOutline(focusedControl == .category) }
+                .disabled(state.availableCategories == nil)
+                .help(editing ? "Category for this task" : "Category for the new task")
+                .accessibilityIdentifier(isLater ? (editing ? "editLaterTaskCategory" : "newLaterTaskCategory") : (editing ? "editTaskCategory" : "newTaskCategory"))
         }
-        .focusable()
-        .keyboardFocusAppearance()
-        .focused($focusedControl, equals: .category)
-        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
-            stepCategory(by: press.key == .downArrow ? 1 : -1, editing: editing)
-            return .handled
-        }
-        .overlay { focusOutline(focusedControl == .category) }
         // A long name truncates in the control instead of crowding Save and Cancel.
         .frame(maxWidth: 280, alignment: .leading)
-        .disabled(state.availableCategories == nil)
-        .help(editing ? "Category for this task" : "Category for the new task")
-        .accessibilityIdentifier(isLater ? (editing ? "editLaterTaskCategory" : "newLaterTaskCategory") : (editing ? "editTaskCategory" : "newTaskCategory"))
     }
 
     private func stepCategory(by offset: Int, editing: Bool) {
@@ -1296,7 +1295,7 @@ private struct TaskActionsMenu: View {
         guard !anchor.presenter.isOpen, let view = anchor.view, view.window != nil else { return }
         onOpen()
         isOpen = true
-        anchor.presenter.present(rows: rows(), from: view, highlightFirst: fromKeyboard) { selection in
+        anchor.presenter.present(rows: rows(), from: view, highlight: fromKeyboard ? .first : .none) { selection in
             isOpen = false
             // Finish closing the popover before changing the SwiftUI hierarchy, so
             // the task window's restored key status cannot override draft/Cancel focus.
@@ -1305,7 +1304,7 @@ private struct TaskActionsMenu: View {
             case .edit: DispatchQueue.main.async { onEdit() }
             case .delete: DispatchQueue.main.async { onDelete() }
             case let .move(request): DispatchQueue.main.async { onMove(request) }
-            case nil: break
+            case .category, nil: break
             }
         }
     }
@@ -1339,6 +1338,109 @@ private struct TaskActionsMenu: View {
         rows.append(.item(.init(id: "delete", title: "Delete…", accessibilityLabel: "Delete…",
                                 symbol: "trash", isDestructive: true, selection: .delete)))
         return rows
+    }
+}
+
+/// The composer's category control: a Daybook capsule showing the selected
+/// category that opens a popover listing General and every custom category,
+/// with the current one checked.
+private struct TaskCategoryPicker: View {
+    let options: [TaskCategoryOption]
+    @Binding var selection: UUID?
+    let onStep: (Int) -> Void
+    @State private var anchor = TaskMenuAnchor.Reference()
+    @State private var isHovered = false
+    @State private var isOpen = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var selectedName: String {
+        options.first(where: { $0.categoryID == selection })?.name ?? "General"
+    }
+
+    var body: some View {
+        let isActive = isEnabled && (isHovered || isOpen)
+        let accent = DaybookPalette.accent(colorScheme)
+        Button { open(fromKeyboard: false) } label: {
+            HStack(spacing: 6) {
+                Text(selectedName)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(isActive ? accent : Color.primary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(isActive ? accent : Color.secondary)
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 26)
+            .background {
+                Capsule().fill(accent.opacity(isOpen ? (colorScheme == .dark ? 0.20 : 0.14)
+                                                     : isActive ? (colorScheme == .dark ? 0.12 : 0.08) : 0))
+            }
+            .overlay {
+                Capsule().strokeBorder(isActive ? accent.opacity(0.5) : DaybookPalette.rule(colorScheme),
+                                       lineWidth: 1)
+            }
+            .contentShape(Capsule())
+            .opacity(isEnabled ? 1 : 0.4)
+            .animation(.easeOut(duration: 0.12), value: isActive)
+            .animation(.easeOut(duration: 0.15), value: isOpen)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .focusable()
+        .keyboardFocusAppearance()
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            if anchor.presenter.isOpen { return .ignored }
+            onStep(press.key == .downArrow ? 1 : -1)
+            return .handled
+        }
+        .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
+            // Open on key release so the opening key never reaches the popover.
+            if anchor.presenter.isOpen { return .ignored }
+            if press.phase == .down {
+                anchor.opensOnKeyUp = true
+            } else if press.phase == .up {
+                guard anchor.opensOnKeyUp else { return .ignored }
+                anchor.opensOnKeyUp = false
+                open(fromKeyboard: true)
+            }
+            return .handled
+        }
+        .background {
+            TaskMenuAnchor(reference: anchor)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .onDisappear { anchor.presenter.close(with: nil) }
+        .accessibilityLabel("Category")
+        .accessibilityValue(selectedName)
+        .accessibilityHint("Opens the category list")
+    }
+
+    private func optionID(_ option: TaskCategoryOption) -> String { option.id.storageKey }
+
+    private func open(fromKeyboard: Bool) {
+        guard isEnabled, !anchor.presenter.isOpen, let view = anchor.view, view.window != nil else { return }
+        let rows: [TaskActionRow] = options.map { option in
+            .item(.init(id: optionID(option), title: option.name, accessibilityLabel: option.name,
+                        symbol: nil, isCurrent: option.categoryID == selection,
+                        selection: .category(option.categoryID)))
+        }
+        let current = options.first(where: { $0.categoryID == selection }).map(optionID)
+        isOpen = true
+        anchor.presenter.present(
+            rows: rows, from: view,
+            highlight: fromKeyboard ? current.map { .item($0) } ?? .first : .none,
+            alignment: .leading,
+            labels: .init(popover: "Categories", identifier: "categoryPopover", itemPrefix: "categoryOption-",
+                          currentValue: "Selected")
+        ) { choice in
+            isOpen = false
+            if case let .category(id) = choice { selection = id }
+        }
     }
 }
 
