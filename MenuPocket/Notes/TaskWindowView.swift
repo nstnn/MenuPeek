@@ -1240,47 +1240,54 @@ struct TaskWindowView: View {
     }
 }
 
-/// A focusable SwiftUI trigger with one native menu for mouse and keyboard.
-/// A separate focus wrapper around SwiftUI's Menu does not reliably open it
-/// with Space/Return; use the same button key handling as other row controls.
+/// A focusable SwiftUI trigger for the row's Daybook actions popover, opened
+/// the same way by mouse and keyboard. A separate focus wrapper around SwiftUI's
+/// Menu does not reliably open it with Space/Return; use the same button key
+/// handling as other row controls.
 private struct TaskActionsMenu: View {
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
     var onMoveToToday: (() -> Void)? = nil
-    /// Read when the menu opens, so entries reflect the current saved order.
+    /// Read when the popover opens, so entries reflect the current saved order.
     /// Nil omits the Today movement items.
     var moves: () -> TaskWindowPresentation.MenuMoves? = { nil }
     var onMove: (TaskMoveRequest) -> Void = { _ in }
     @State private var anchor = TaskMenuAnchor.Reference()
     @State private var isHovered = false
+    @State private var isOpen = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(action: showMenu) {
+        let isActive = isEnabled && (isHovered || isOpen)
+        let accent = DaybookPalette.accent(colorScheme)
+        Button { showMenu(fromKeyboard: false) } label: {
             Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
                 .frame(width: 28, height: 28)
-                .foregroundStyle(isHovered && isEnabled ? Color.primary : Color.secondary)
+                .foregroundStyle(isActive ? accent : Color.secondary)
                 .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.primary.opacity(isHovered && isEnabled ? 0.06 : 0))
+                    Circle().fill(accent.opacity(isOpen ? (colorScheme == .dark ? 0.22 : 0.16)
+                                                        : isActive ? (colorScheme == .dark ? 0.14 : 0.10) : 0))
                 }
-                .contentShape(Rectangle())
+                .contentShape(Circle())
+                .animation(.easeOut(duration: 0.12), value: isActive)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .focusable()
         .keyboardFocusAppearance()
         .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
-            // Let the initiating key finish before native menu tracking starts;
-            // subsequent Return/Space belong to the menu, not its trigger.
-            if anchor.isTrackingMenu { return .ignored }
+            // Let the initiating key finish before the popover takes the keyboard;
+            // subsequent Return/Space belong to the popover, not its trigger.
+            if anchor.presenter.isOpen { return .ignored }
             if press.phase == .down {
                 anchor.opensOnKeyUp = true
             } else if press.phase == .up {
                 guard anchor.opensOnKeyUp else { return .ignored }
                 anchor.opensOnKeyUp = false
-                showMenu()
+                showMenu(fromKeyboard: true)
             }
             return .handled
         }
@@ -1289,75 +1296,56 @@ private struct TaskActionsMenu: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+        .onDisappear { anchor.presenter.close(with: nil) }
     }
 
-    private func showMenu() {
-        guard !anchor.isTrackingMenu, let view = anchor.view, view.window != nil else { return }
+    private func showMenu(fromKeyboard: Bool) {
+        guard !anchor.presenter.isOpen, let view = anchor.view, view.window != nil else { return }
         onOpen()
-        anchor.isTrackingMenu = true
-        defer { anchor.isTrackingMenu = false }
-        let actions = Actions()
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        if onMoveToToday != nil {
-            let move = menu.addItem(withTitle: "Move to Today", action: #selector(Actions.moveToToday), keyEquivalent: "")
-            move.target = actions
-            menu.addItem(.separator())
-        }
-        let edit = menu.addItem(withTitle: "Edit", action: #selector(Actions.edit), keyEquivalent: "")
-        edit.target = actions
-        if let moves = moves() {
-            menu.addItem(.separator())
-            menu.addItem(actions.item("Move Up", moves.moveUp))
-            menu.addItem(actions.item("Move Down", moves.moveDown))
-            let moveTo = NSMenuItem(title: "Move To", action: nil, keyEquivalent: "")
-            let destinations = NSMenu(title: "Move To")
-            destinations.autoenablesItems = false
-            for destination in moves.destinations {
-                let item = actions.item(destination.title, destination.request)
-                item.state = destination.isCurrent ? .on : .off
-                destinations.addItem(item)
+        isOpen = true
+        anchor.presenter.present(rows: rows(), from: view, highlightFirst: fromKeyboard) { selection in
+            isOpen = false
+            // Finish closing the popover before changing the SwiftUI hierarchy, so
+            // the task window's restored key status cannot override draft/Cancel focus.
+            switch selection {
+            case .moveToToday: DispatchQueue.main.async { onMoveToToday?() }
+            case .edit: DispatchQueue.main.async { onEdit() }
+            case .delete: DispatchQueue.main.async { onDelete() }
+            case let .move(request): DispatchQueue.main.async { onMove(request) }
+            case nil: break
             }
-            moveTo.submenu = destinations
-            menu.addItem(moveTo)
-            menu.addItem(.separator())
-        }
-        let delete = menu.addItem(withTitle: "Delete…", action: #selector(Actions.delete), keyEquivalent: "")
-        delete.target = actions
-        withExtendedLifetime(actions) {
-            _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.maxY), in: view)
-        }
-        // Finish native menu tracking before changing the SwiftUI hierarchy.
-        // Otherwise AppKit can restore the old responder after draft/Cancel focus.
-        switch actions.selection {
-        case .moveToToday: DispatchQueue.main.async { onMoveToToday?() }
-        case .edit: DispatchQueue.main.async { onEdit() }
-        case .delete: DispatchQueue.main.async { onDelete() }
-        case let .move(request): DispatchQueue.main.async { onMove(request) }
-        case nil: break
         }
     }
 
-    @MainActor private final class Actions: NSObject {
-        enum Selection { case edit, delete, moveToToday, move(TaskMoveRequest) }
-        var selection: Selection?
-        private var requests: [TaskMoveRequest] = []
-        @objc func moveToToday() { selection = .moveToToday }
-        @objc func edit() { selection = .edit }
-        @objc func delete() { selection = .delete }
-        @objc func move(_ sender: NSMenuItem) { selection = .move(requests[sender.tag]) }
-
-        /// A nil request is an unavailable boundary or guarded state.
-        func item(_ title: String, _ request: TaskMoveRequest?) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: #selector(move(_:)), keyEquivalent: "")
-            item.target = self
-            item.isEnabled = request != nil
-            if let request {
-                item.tag = requests.count
-                requests.append(request)
-            }
-            return item
+    private func rows() -> [TaskActionRow] {
+        var rows: [TaskActionRow] = []
+        if onMoveToToday != nil {
+            rows.append(.item(.init(id: "moveToToday", title: "Move to Today", accessibilityLabel: "Move to Today",
+                                    symbol: "sun.max", selection: .moveToToday)))
+            rows.append(.separator("today"))
         }
+        rows.append(.item(.init(id: "edit", title: "Edit", accessibilityLabel: "Edit",
+                                symbol: "pencil", selection: .edit)))
+        if let moves = moves() {
+            rows.append(.separator("moves"))
+            rows.append(.item(.init(id: "moveUp", title: "Move Up", accessibilityLabel: "Move Up",
+                                    symbol: "arrow.up", isEnabled: moves.moveUp != nil,
+                                    selection: moves.moveUp.map(TaskActionSelection.move))))
+            rows.append(.item(.init(id: "moveDown", title: "Move Down", accessibilityLabel: "Move Down",
+                                    symbol: "arrow.down", isEnabled: moves.moveDown != nil,
+                                    selection: moves.moveDown.map(TaskActionSelection.move))))
+            rows.append(.header("Move To"))
+            for destination in moves.destinations {
+                rows.append(.item(.init(id: "moveTo-\(destination.group.storageKey)", title: destination.title,
+                                        accessibilityLabel: "Move to \(destination.title)", symbol: nil,
+                                        isEnabled: destination.request != nil, isCurrent: destination.isCurrent,
+                                        selection: destination.request.map(TaskActionSelection.move))))
+            }
+        }
+        rows.append(.separator("delete"))
+        rows.append(.item(.init(id: "delete", title: "Delete…", accessibilityLabel: "Delete…",
+                                symbol: "trash", isDestructive: true, selection: .delete)))
+        return rows
     }
 }
 
@@ -1366,7 +1354,7 @@ private struct TaskMenuAnchor: NSViewRepresentable {
     // when it mounts can interrupt the parent window's sheet dismissal.
     @MainActor final class Reference {
         weak var view: NSView?
-        var isTrackingMenu = false
+        let presenter = TaskActionsPresenter()
         var opensOnKeyUp = false
     }
 

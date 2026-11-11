@@ -76,7 +76,7 @@ It also lists other MenuPocket processes, for information only. Exit code 1 mean
 | `screenshot <file.png> [query]` | Capture the frontmost fixture window, a window matched by query (captured by window ID), or any element's screen rectangle (menus, the glance, the status item). |
 | `windows` / `activate` | List the fixture's windows, or bring the fixture to the front. Activating is rarely needed. |
 
-**Queries** are comma-separated terms that must all match: `id=X` (AXIdentifier), `id^=X` (identifier prefix), `label=X` (exact title, description, or value), `label~=X` (case-insensitive substring), `role=AXButton`, `subrole=AXCloseButton`, and `status-item`. Write a literal comma in a value as `\,` (group headers are labeled like `Work\, 1 of 2 complete`). An unknown term is an error (exit 64). Add `#N` to pick the Nth match. Prefer `id=`. SwiftUI menu items have generic identifiers, so match them with `role=AXMenuItem,label=<title>`. Task UUIDs change on every run, so reach rows through their visible text, for example `label=Actions for task: Buy coffee beans` or `role=AXCheckBox,label=Buy coffee beans`.
+**Queries** are comma-separated terms that must all match: `id=X` (AXIdentifier), `id^=X` (identifier prefix), `label=X` (exact title, description, or value), `label~=X` (case-insensitive substring), `role=AXButton`, `subrole=AXCloseButton`, and `status-item`. Write a literal comma in a value as `\,` (group headers are labeled like `Work\, 1 of 2 complete`). An unknown term is an error (exit 64). Add `#N` to pick the Nth match. Prefer `id=`. SwiftUI menu items have generic identifiers, so match them with `role=AXMenuItem,label=<title>`. The row `…` actions are a Daybook popover, not a menu: its items are buttons with `id=taskAction-<action>` (see the [Today recipe](features/today-tasks.md)). Task UUIDs change on every run, so reach rows through their visible text, for example `label=Actions for task: Buy coffee beans` or `role=AXCheckBox,label=Buy coffee beans`.
 
 Stable handles in the task window: `todayTab`, `laterTab`, `taskDestination`, `addTask`, `manageCategories`, `taskHistoryEntry`, `yesterdayHistoryEntry`, `todayProgress`, `laterRemainingCount`, `todayTaskList`/`laterTaskList`, `newTaskDraft`/`newLaterTaskDraft`, `newTaskCategory`/`newLaterTaskCategory`, `saveTask`/`saveLaterTask`, `cancelNewTask`, `editTaskDraft`, `cancelTaskEdit`, `taskDeletionConfirmation`, `confirmTaskDeletion`, `cancelTaskDeletion`, `todayEmptyState`, `todayUnavailableState`, `retryTodayTasks`, and `laterMoveNotice`. Group headers are `taskGroup-general` or `taskGroup-<category UUID>`, and their value is `Expanded`/`Collapsed`. The Settings window opens from `label=Open Settings`. The [feature map](features/README.md) has the handles for each feature.
 
@@ -89,8 +89,8 @@ $F ax <run> type "Book flights"                                     # the new fi
 $F ax <run> press id=newTaskCategory                                # open the Category pop-up
 $F ax <run> press "role=AXMenuItem,label=Work"                      # choose Work
 $F ax <run> focus id=newTaskDraft && $F ax <run> key return         # save with Return
-$F ax <run> press "label=Actions for task: Book flights"            # open the row "…" menu
-$F ax <run> press "role=AXMenuItem,label=Delete…"                   # Delete…, then id=confirmTaskDeletion
+$F ax <run> press "label=Actions for task: Book flights"            # open the row "…" popover
+$F ax <run> press id=taskAction-delete                              # Delete…, then id=confirmTaskDeletion
 $F ax <run> press status-item                                       # primary click on the count
 $F ax <run> action status-item "Show quick look"                    # right-click glance
 ```
@@ -108,7 +108,7 @@ Driving gotchas:
 - **Waiting:** `find` does not wait, while `press` and `value` retry for 3 s. After an action that changes the view, use `wait`/`gone` instead of `sleep`. Values can lag the action: a pop-up keeps showing its old choice for a moment, so assert with `wait "id=newTaskCategory,label=Work"`, not an immediate `value`.
 - **Closing windows:** key events reach the fixture's key window, which may not be the window you want while the fixture is in the background. To close a specific window, press its close button (`press subrole=AXCloseButton`, adding `#N` when several windows are open), or `activate` first and then send `key cmd+w`.
 - **Disabled controls:** `AXPress` on a disabled control returns without acting. Read `value <query>` first when enablement is part of the check (look for `[disabled]`).
-- **Drags:** drag and drop (task reordering by the six-dot handle, category drags in the manager) cannot be driven with this harness. Use the keyboard path (row menu `Move Up`/`Move Down`/`Move To`) and report pointer drags as Not tested, or give the user exact manual steps. `docs/WORKFLOW.md` explains why synthetic drags are inconclusive.
+- **Drags:** drag and drop (task reordering by the six-dot handle, category drags in the manager) cannot be driven with this harness. Use the keyboard path (row popover `Move Up`/`Move Down`/`Move To`) and report pointer drags as Not tested, or give the user exact manual steps. `docs/WORKFLOW.md` explains why synthetic drags are inconclusive.
 - **Screenshots:** an element screenshot is a screen rectangle, so whatever overlaps it is captured too. A window screenshot (no query, or a `role=AXWindow` query) is captured by window ID. Menu bar items hidden behind the notch still work through Accessibility but may not show in a screenshot.
 
 ## Evidence

@@ -13,9 +13,9 @@ This directory is the maintained source for verifying what a MenuPocket user can
 ## Driving conventions
 
 - Start each recipe from a freshly launched run with the named seed, unless its preconditions say otherwise. Recipes that mutate data leave it changed, so build or launch a new run for a clean baseline.
-- Prefer `id=` handles. Use `label=` for rows (`label=Actions for task: <text>`, `role=AXCheckBox,label=<text>`) and for menu items (`role=AXMenuItem,label=<title>`), whose identifiers are generic or change per run.
+- Prefer `id=` handles. Use `label=` for rows (`label=Actions for task: <text>`, `role=AXCheckBox,label=<text>`) and for menu items (`role=AXMenuItem,label=<title>`), whose identifiers are generic or change per run. The row `…` popover's items are buttons with stable `id=taskAction-<action>` handles.
 - Run every action through `$F ax <run> …` so it is logged to `actions.log`.
-- Open a menu and press its item in consecutive calls (menus close if the fixture deactivates).
+- Open a menu or the row popover and press its item in consecutive calls (both close if the fixture deactivates).
 - Use `wait`/`gone` after view changes instead of fixed sleeps.
 
 ## Proof and skip reporting
