@@ -7,7 +7,7 @@ Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas,
 - `daybook-layout`: initial 1000 × 700 pt and minimum 800 × 560 pt content; both retain the full 218 pt rail. The compact layout remains a defensive fallback below 740 pt width or 480 pt height.
 - `daybook-navigation`: Today/Later in the rail; History and Categories below. History, Categories and Settings replace only the right detail column; the rail stays visible and interactive. Idle Categories allows navigation away; rename and removal confirmation block it. Settings entry points, including Command-comma, reuse the same task window.
 - `daybook-states`: empty, unavailable/Retry, long text, long category, completed, active editor and deletion confirmation.
-- `daybook-drafts`: native fields, category picker, Save/Cancel, Return/Escape, retained drafts and Undo across window reopen.
+- `daybook-drafts`: native fields, the Daybook Category capsule and popover, Save/Cancel, Return/Escape, retained drafts and Undo across window reopen.
 - `daybook-buttons`: buttons without their own style use `DaybookButtonStyle`. Every button is a capsule. Quiet actions (Cancel, Retry, This month, Go to Today, Load more, Done, Rename, Settings actions) have a hairline outline and secondary text; on hover the text turns primary and the outline darkens. One prominent action per view sits on a soft terracotta tint with accent text and fills solid terracotta on hover: composer Save, category Create and rename Save, and History Continue today. Destructive roles swap the accent for red: quiet Remove… is outlined red text, and the confirming Delete and Remove Category sit on a red tint that fills red on hover. Disabled buttons fade to 40%.
 
 ## How to get to it (user POV)
@@ -34,7 +34,7 @@ Preconditions:
 ## Gotchas
 
 - The date rail uses the saved civil day key, not a second time-zone conversion. The shared rail always describes Today; Later tasks remain undated and never contribute to Today progress.
-- Native checkboxes, text fields and pop-up menus remain native; only the row `…` actions use the custom Daybook popover. The serif heading and color palette do not replace keyboard/focus or persistence contracts.
+- Native checkboxes, text fields and pop-up menus remain native; only the row `…` actions and the composer Category control use the custom Daybook popover. The serif heading and color palette do not replace keyboard/focus or persistence contracts.
 - Add task is replaced by the composer while it is open. Finish or cancel it before locating `id=addTask` again.
 - While editing, confirming deletion, or managing categories, destination switches and conflicting actions remain guarded.
 - Browser concept screenshots are design references, not evidence for this native build. Pointer drag behavior, VoiceOver and real system integrations require their own observations.
