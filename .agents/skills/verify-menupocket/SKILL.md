@@ -68,9 +68,10 @@ It also lists other MenuPocket processes, for information only. Exit code 1 mean
 | `tree [depth]` | Print the status item, every window, sheet, and open menu as an indented AX tree. |
 | `find <query>` | List every match once (no waiting). Exit code 2 when nothing matches. |
 | `value <query>` | Print one element's role, label, value, identifier, and state. Waits up to 3 s. |
+| `frame <query>` | Print one element's screen frame in points (`frame x=… y=… w=… h=…`). |
 | `press <query>` | `AXPress` the element: buttons, checkboxes, segments, menu items, pop-ups, and the status item (a primary click). |
 | `action <query> <name>` | Perform a named action, such as `action status-item "Show quick look"` (the right-click glance). `actions <query>` lists names. |
-| `focus <query>` / `type <text>` / `key <combo>` | Focus a field, type Unicode text, or send `return`, `escape`, `tab`, `space`, `up`/`down`/`left`/`right`, `cmd+n`, `cmd+1`, `cmd+2`, `cmd+comma`, `cmd+w`, `cmd+q`, `cmd+a`/`c`/`v`/`x`/`z`. |
+| `focus <query>` / `type <text>` / `key <combo>` | Focus a field, type Unicode text, or send `return`, `escape`, `tab`, `space`, `up`/`down`/`left`/`right`, `cmd+n`, `cmd+1`, `cmd+2`, `cmd+comma`, `cmd+equal`, `cmd+shift+equal`, `cmd+minus`, `cmd+0`, `cmd+w`, `cmd+q`, `cmd+a`/`c`/`v`/`x`/`z`. |
 | `wait <query> [s]` / `gone <query> [s]` | Wait (default 10 s) for an element to appear or disappear. |
 | `menu-path <top> <item>…` | Choose from the main menu bar, for example `menu-path View Later`. Exit code 4 if the item is disabled. |
 | `screenshot <file.png> [query]` | Capture the frontmost fixture window, a window matched by query (captured by window ID), or any element's screen rectangle (menus, the glance, the status item). |

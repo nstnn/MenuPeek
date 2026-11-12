@@ -70,6 +70,7 @@ Settings provides Open at Login, a Theme choice, a Quick Add switch, a Keyboard 
 | Shortcut | Action |
 | --- | --- |
 | Command-1 / Command-2 | Restore the task window and select Today or Later (View menu), leaving History; unavailable while editing, confirming a deletion, or managing categories. |
+| Command-plus / Command-minus / Command-0 | Zoom the task window's content in, out, or back to Actual Size (View menu, 80–150 %). The zoom is saved on this Mac, and the window's minimum size grows with it. |
 | Command-N | Restore the task window, leaving History, and focus Add task in the selected tab (Today when no window exists); unavailable during editing, deletion confirmation, while Manage categories is open, or with unavailable data. |
 | Command-comma | Open the reusable Settings window. |
 | Command-W | Close the active window while the app keeps running. |

@@ -160,6 +160,7 @@ private func seedCategoryReordering(_ repository: SQLiteNoteRepository, day: Not
         let model = AppModel(store: PreferencesStore(userDefaults: defaults),
                              loginItemService: FixtureLogin(), hotKeyService: hotKey)
         let delegate = AppDelegate(model: model, dailyNotesState: state,
+                                   taskWindowZoom: TaskWindowZoom(userDefaults: defaults),
                                    onboardingStore: UserDefaultsOnboardingStore(userDefaults: defaults),
                                    launchContext: { .manual })
 

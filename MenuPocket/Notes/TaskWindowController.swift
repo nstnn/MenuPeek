@@ -602,14 +602,19 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     static let minimumContentSize = NSSize(width: 800, height: 560)
     let state: DailyNotesState
     let presentation: TaskWindowPresentation
+    let zoom: TaskWindowZoom
     private var isTerminating = false
 
-    init(state: DailyNotesState, model: AppModel? = nil, onSettings: @escaping () -> Void) {
+    init(state: DailyNotesState, model: AppModel? = nil, zoom: TaskWindowZoom = TaskWindowZoom(),
+         onSettings: @escaping () -> Void) {
         self.state = state
         let presentation = state.taskWindowPresentation
         self.presentation = presentation
+        self.zoom = zoom
         let hostingController = NSHostingController(
-            rootView: TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings, model: model)
+            rootView: TaskWindowZoomContainer(zoom: zoom) {
+                TaskBrowserView(state: state, presentation: presentation, onSettings: onSettings, model: model)
+            }
         )
         hostingController.sizingOptions = []
         hostingController.sceneBridgingOptions = [.toolbars]
@@ -623,8 +628,11 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         window.contentViewController = hostingController
         // Installing the hosting view can replace the frame with its fitting size.
         // Restore the intended size before centering and presenting the window.
-        window.setContentSize(Self.initialContentSize)
-        window.contentMinSize = Self.minimumContentSize
+        // A saved zoom raises the content floor, so the window may start larger.
+        let minimum = Self.scaled(Self.minimumContentSize, by: zoom.scale)
+        window.setContentSize(NSSize(width: max(Self.initialContentSize.width, minimum.width),
+                                     height: max(Self.initialContentSize.height, minimum.height)))
+        window.contentMinSize = minimum
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -649,7 +657,68 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.contentMinSize = Self.minimumContentSize
+        window.contentMinSize = minimumContentSize
+    }
+
+    // MARK: Zoom
+
+    /// The content floor at the current zoom: the layout keeps at least the
+    /// Actual Size minimum in logical points.
+    var minimumContentSize: NSSize { Self.scaled(Self.minimumContentSize, by: zoom.scale) }
+
+    var canZoomIn: Bool { zoom.nextLarger.map(fitsOnScreen) ?? false }
+    var canZoomOut: Bool { zoom.nextSmaller != nil }
+    var canResetZoom: Bool { !zoom.isActualSize && fitsOnScreen(TaskWindowZoom.actualSize) }
+
+    func zoomIn() {
+        guard !isTerminating, zoom.zoomIn(fits: fitsOnScreen) else { return }
+        applyZoomToWindow()
+    }
+
+    func zoomOut() {
+        guard !isTerminating, zoom.zoomOut() else { return }
+        applyZoomToWindow()
+    }
+
+    func resetZoom() {
+        guard !isTerminating, canResetZoom, zoom.resetToActualSize() else { return }
+        applyZoomToWindow()
+    }
+
+    static func scaled(_ size: NSSize, by scale: Double) -> NSSize {
+        // Whole points, ignoring floating-point noise: 800 × 1.1 is 880, not 881.
+        NSSize(width: (size.width * scale - 0.001).rounded(.up),
+               height: (size.height * scale - 0.001).rounded(.up))
+    }
+
+    /// A level fits when the window's frame at that level's minimum content
+    /// size fits the visible area of the window's screen.
+    private func fitsOnScreen(_ scale: Double) -> Bool {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return true }
+        let frame = window.frameRect(forContentRect: NSRect(
+            origin: .zero, size: Self.scaled(Self.minimumContentSize, by: scale)
+        ))
+        return frame.width <= screen.visibleFrame.width && frame.height <= screen.visibleFrame.height
+    }
+
+    /// Raises the window's minimum to the new zoom and grows the window,
+    /// keeping its top-left corner, when it is now smaller than that.
+    private func applyZoomToWindow() {
+        guard let window else { return }
+        let minimum = minimumContentSize
+        window.contentMinSize = minimum
+        let content = window.contentRect(forFrameRect: window.frame)
+        guard content.width < minimum.width || content.height < minimum.height else { return }
+        let grown = NSSize(width: max(content.width, minimum.width), height: max(content.height, minimum.height))
+        var frame = window.frameRect(forContentRect: NSRect(origin: content.origin, size: grown))
+        frame.origin.y = window.frame.maxY - frame.height
+        if let screen = window.screen {
+            let visible = screen.visibleFrame
+            frame.origin.x = min(frame.origin.x, visible.maxX - frame.width)
+            frame.origin.x = max(frame.origin.x, visible.minX)
+            frame.origin.y = max(frame.origin.y, visible.minY)
+        }
+        window.setFrame(frame, display: true, animate: false)
     }
 
     /// Bring the retained window forward even when active work prevents Today
@@ -680,7 +749,7 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         // Hosting layout can revise contentMinSize after presentation. Enforce
         // the usable content floor for native corner/edge resizing as well.
         let minimumFrame = sender.frameRect(forContentRect: NSRect(
-            origin: .zero, size: Self.minimumContentSize
+            origin: .zero, size: minimumContentSize
         )).size
         return NSSize(width: max(frameSize.width, minimumFrame.width),
                       height: max(frameSize.height, minimumFrame.height))

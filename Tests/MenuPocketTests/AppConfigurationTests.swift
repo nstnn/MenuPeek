@@ -284,8 +284,9 @@ final class AppConfigurationTests: XCTestCase {
             window.close()
             delegate.taskWindowController?.window?.close()
         }
-        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<TaskBrowserView>)
-        XCTAssertTrue(host.rootView.state === state)
+        let host = try XCTUnwrap(window.contentViewController
+            as? NSHostingController<TaskWindowZoomContainer<TaskBrowserView>>)
+        XCTAssertTrue(host.rootView.content.state === state)
         XCTAssertTrue(controller.state === state)
         XCTAssertFalse(window.isReleasedWhenClosed)
         XCTAssertTrue(window.styleMask.contains(.resizable))

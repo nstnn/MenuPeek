@@ -200,7 +200,7 @@ let keyCodes: [String: CGKeyCode] = [
     "return": 36, "enter": 76, "escape": 53, "tab": 48, "space": 49, "delete": 51,
     "up": 126, "down": 125, "left": 123, "right": 124, "home": 115, "end": 119,
     "a": 0, "c": 8, "e": 14, "n": 45, "q": 12, "v": 9, "w": 13, "x": 7, "z": 6,
-    "1": 18, "2": 19, "comma": 43,
+    "1": 18, "2": 19, "0": 29, "comma": 43, "equal": 24, "minus": 27,
 ]
 
 func post(_ code: CGKeyCode, flags: CGEventFlags = [], text: String? = nil) {
@@ -281,6 +281,10 @@ case "wait", "gone":
         usleep(200_000)
     } while Date() < deadline
     fail("\(command) timed out: \(raw)", code: 2)
+case "frame":
+    guard let raw = rest.first else { fail("frame <query>", code: 64) }
+    guard let rect = frame(element(raw)) else { fail("no frame for \(raw)") }
+    print("frame x=\(Int(rect.minX)) y=\(Int(rect.minY)) w=\(Int(rect.width)) h=\(Int(rect.height))")
 case "value":
     guard let raw = rest.first else { fail("value <query>", code: 64) }
     print(describe(element(raw)))
