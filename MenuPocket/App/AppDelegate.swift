@@ -22,6 +22,7 @@ enum AppLaunchContext: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let model: AppModel
     let dailyNotesState: DailyNotesState
+    let taskWindowZoom: TaskWindowZoom
     private(set) var taskWindowController: TaskWindowController?
     private(set) var taskStatusItemController: TaskStatusItemController?
     private(set) var quickAddPanelController: QuickAddPanelController?
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     init(
         model: AppModel,
         dailyNotesState: DailyNotesState = DailyNotesState(),
+        taskWindowZoom: TaskWindowZoom = TaskWindowZoom(),
         onboardingStore: any OnboardingStoring = UserDefaultsOnboardingStore(),
         launchContext: @escaping () -> AppLaunchContext = {
             AppLaunchContext(appleEvent: NSAppleEventManager.shared().currentAppleEvent)
@@ -40,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     ) {
         self.model = model
         self.dailyNotesState = dailyNotesState
+        self.taskWindowZoom = taskWindowZoom
         self.onboardingStore = onboardingStore
         self.launchContext = launchContext
         super.init()
@@ -103,7 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func makeTaskWindowController() -> TaskWindowController {
         if let taskWindowController { return taskWindowController }
-        let controller = TaskWindowController(state: dailyNotesState, model: model) { [weak self] in
+        let controller = TaskWindowController(state: dailyNotesState, model: model,
+                                              zoom: taskWindowZoom) { [weak self] in
             self?.showSettings()
         }
         taskWindowController = controller
@@ -127,6 +131,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !isTerminating else { return }
         showTasks()
         taskWindowController?.presentation.selectDestination(destination, state: dailyNotesState)
+    }
+
+    /// View > Zoom In (⌘+), Zoom Out (⌘−), Actual Size (⌘0). They scale the
+    /// task window's content and act only while that window has the keyboard.
+    @objc func zoomIn(_ sender: Any?) {
+        guard !isTerminating, isTaskWindowKey else { return }
+        taskWindowController?.zoomIn()
+    }
+
+    @objc func zoomOut(_ sender: Any?) {
+        guard !isTerminating, isTaskWindowKey else { return }
+        taskWindowController?.zoomOut()
+    }
+
+    @objc func resetZoom(_ sender: Any?) {
+        guard !isTerminating, isTaskWindowKey else { return }
+        taskWindowController?.resetZoom()
+    }
+
+    /// The task window is on screen and no other window (the Quick Add panel,
+    /// a row popover) holds the keyboard. While MenuPocket is inactive there is
+    /// no key window at all, so a visible task window still counts.
+    private var isTaskWindowKey: Bool {
+        guard let window = taskWindowController?.window, window.isVisible, !window.isMiniaturized else {
+            return false
+        }
+        let keyWindow = NSApplication.shared.keyWindow
+        return keyWindow == nil || keyWindow === window
     }
 
     private static func destination(forMenuTag tag: Int) -> TaskListDestination? {
@@ -181,6 +213,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !isTerminating else { return false }
         if menuItem.action == #selector(addTask) {
             return canAddTask
+        }
+        if let controller = taskWindowController, isTaskWindowKey {
+            switch menuItem.action {
+            case #selector(zoomIn(_:)): return controller.canZoomIn
+            case #selector(zoomOut(_:)): return controller.canZoomOut
+            case #selector(resetZoom(_:)): return controller.canResetZoom
+            default: break
+            }
+        } else if [#selector(zoomIn(_:)), #selector(zoomOut(_:)), #selector(resetZoom(_:))]
+            .contains(menuItem.action) {
+            return false
         }
         if menuItem.action == #selector(showDestination(_:)),
            let destination = Self.destination(forMenuTag: menuItem.tag) {
@@ -317,6 +360,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.tag = tag
             item.target = self
         }
+        viewMenu.addItem(.separator())
+        let actualSize = viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom(_:)), keyEquivalent: "0")
+        actualSize.target = self
+        let zoomIn = viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn(_:)), keyEquivalent: "+")
+        zoomIn.target = self
+        // ⌘= is the unshifted key that carries + on most layouts.
+        let zoomInEquals = viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn(_:)), keyEquivalent: "=")
+        zoomInEquals.target = self
+        zoomInEquals.isHidden = true
+        zoomInEquals.allowsKeyEquivalentWhenHidden = true
+        let zoomOut = viewMenu.addItem(withTitle: "Zoom Out", action: #selector(zoomOut(_:)), keyEquivalent: "-")
+        zoomOut.target = self
         viewItem.submenu = viewMenu
         menu.addItem(viewItem)
         let windowItem = NSMenuItem()
