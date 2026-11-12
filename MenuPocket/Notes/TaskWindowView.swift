@@ -493,20 +493,12 @@ struct TaskWindowView: View {
     }
 
     private var destinationControl: some View {
-        Picker("Task list", selection: Binding(
+        DaybookDestinationControl(selection: Binding(
             get: { destination },
             set: { _ = presentation.selectDestination($0, state: state) }
-        )) {
-            Text("Today").tag(TaskListDestination.today).accessibilityIdentifier("todayTab")
-            Text("Later").tag(TaskListDestination.later).accessibilityIdentifier("laterTab")
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        ))
         .disabled(state.editingNoteID != nil || state.editingLaterTaskID != nil ||
                   !presentation.canNavigate(state: state))
-        .accessibilityLabel("Task list")
-        .accessibilityValue(isLater ? "Later" : "Today")
-        .accessibilityIdentifier("taskDestination")
     }
 
     private var daybookProgress: some View {
@@ -1462,6 +1454,77 @@ private struct TaskMenuAnchor: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Today/Later switch on a quiet paper track: the selected segment is a raised
+/// canvas-colored thumb with accent text, the other is secondary text. Assistive
+/// technologies and the fixture driver still see the native segmented picker
+/// (`taskDestination`, `todayTab`, `laterTab`) through its representation.
+private struct DaybookDestinationControl: View {
+    @Binding var selection: TaskListDestination
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @Namespace private var thumb
+    @State private var hovered: TaskListDestination?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment(.today, "Today")
+            segment(.later, "Later")
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.07 : 0.06))
+        )
+        .opacity(isEnabled ? 1 : 0.5)
+        .animation(.snappy(duration: 0.18), value: selection)
+        .accessibilityRepresentation {
+            Picker("Task list", selection: $selection) {
+                Text("Today").tag(TaskListDestination.today).accessibilityIdentifier("todayTab")
+                Text("Later").tag(TaskListDestination.later).accessibilityIdentifier("laterTab")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityValue(selection == .later ? "Later" : "Today")
+            .accessibilityIdentifier("taskDestination")
+        }
+    }
+
+    /// Light: the canvas paper raised off the rail. Dark: a lighter wash, so the
+    /// thumb still reads as raised rather than recessed.
+    private var thumbFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : DaybookPalette.canvas(colorScheme)
+    }
+
+    private func segment(_ option: TaskListDestination, _ title: String) -> some View {
+        let isSelected = selection == option
+        return Button { selection = option } label: {
+            Text(title)
+                .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? DaybookPalette.accent(colorScheme)
+                                 : hovered == option && isEnabled ? Color.primary : Color.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(thumbFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(DaybookPalette.rule(colorScheme), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.06), radius: 1, y: 0.5)
+                            .matchedGeometryEffect(id: "thumb", in: thumb)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { hovered = option } else if hovered == option { hovered = nil }
+        }
+    }
 }
 
 /// Sidebar footer rows: a fixed icon column so labels align, and a full-width hit area.
