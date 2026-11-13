@@ -11,7 +11,7 @@ struct UnfinishedTasksView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Days with unfinished tasks")
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.semibold).monospaced())
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.bottom, 4)
@@ -72,11 +72,11 @@ struct UnfinishedTasksView: View {
                 Text(summary.day.label("EEE, MMM d, yyyy"))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("\(summary.incomplete) unfinished · \(progress.completed)/\(progress.total) complete")
-                    .font(.system(size: 12).monospacedDigit())
+                    .font(.system(size: 12, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .fixedSize()
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.semibold).monospaced())
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 8)

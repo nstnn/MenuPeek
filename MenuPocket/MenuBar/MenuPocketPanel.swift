@@ -36,6 +36,8 @@ struct MenuPocketPanel: View {
         // the selected child's natural height.
         .fixedSize(horizontal: false, vertical: true)
         .keyboardFocusAppearance()
+        .font(.system(.body, design: .monospaced))
+        .fontDesign(.monospaced)
         .onAppear { model.panelDidOpen() }
     }
 
@@ -53,12 +55,12 @@ struct MenuPocketPanel: View {
     private var header: some View {
         HStack {
             Text("MenuPocket")
-                .font(.headline)
+                .font(.headline.monospaced())
 
             Spacer()
 
             Text("DEMO")
-                .font(.caption)
+                .font(.caption.monospaced())
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Demo data")
@@ -187,12 +189,12 @@ private struct ModulePanelRow: View {
     @ViewBuilder
     private func snapshotContent(_ snapshot: ModuleSnapshot) -> some View {
         Text(snapshot.primaryValue)
-            .font(.title3)
+            .font(.title3.monospaced())
             .fontWeight(.semibold)
         Text(snapshot.description)
             .foregroundStyle(.secondary)
         Text("Updated at \(snapshot.updatedAt.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(Locale(identifier: "en"))))")
-            .font(.caption)
+            .font(.caption.monospaced())
             .foregroundStyle(.secondary)
     }
 

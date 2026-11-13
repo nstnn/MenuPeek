@@ -1,10 +1,11 @@
 # Daybook task window
 
-Today and Later use the approved Daybook layout: a warm Light/Dark paper canvas, serif date rail and heading, a quiet paper Today/Later switch, flat task groups and subtle row rules. Existing add/edit/cancel, actions, movement, History and Settings behavior stays intact. The shared rail keeps today’s date, explicitly labeled Today progress, and navigation in the same positions on Today, Later, History, Categories, and Settings. Later’s main content remains undated.
+Today and Later use the Daybook layout: a warm Light/Dark paper canvas, System Monospace date rail and heading, a quiet paper Today/Later switch, flat task groups and subtle row rules. All app-owned text uses System Monospace, including task text, placeholders, popovers, History, Categories, Settings, Quick Add, menu bar count, menus and drag previews. Font sizes, weights and italic emphasis are retained. Existing add/edit/cancel, actions, movement, History and Settings behavior stays intact. The shared rail keeps today’s date, explicitly labeled Today progress, and navigation in the same positions on Today, Later, History, Categories, and Settings. Later’s main content remains undated.
 
 ## Sub-features
 
 - `daybook-layout`: initial 1000 × 700 pt and minimum 800 × 560 pt content; both retain the full 218 pt rail. The compact layout remains a defensive fallback below 740 pt width or 480 pt height.
+- `system-monospace`: check Today/Later date and headings, draft/placeholder and saved task text, category/action popovers, History, Categories, Settings, Quick Add, count and glance in Light/Dark. Capture screenshots and confirm wider glyphs do not obscure controls; save a fictional task and compare SQLite before/after relaunch. Window chrome and system-owned UI remain managed by macOS.
 - `daybook-navigation`: Today/Later in the rail as a quiet paper switch: a faint track, the selected segment a raised thumb (canvas paper in Light, a light wash in Dark) with medium-weight terracotta text, the other segment secondary text that turns primary on hover; the switch fades to 50% while guarded. Accessibility still exposes the native segmented picker (`taskDestination` labeled `Task list`, `todayTab`/`laterTab` radio buttons); History and Categories below. History, Categories and Settings replace only the right detail column; the rail stays visible and interactive. Idle Categories allows navigation away; rename and removal confirmation block it. Settings entry points, including Command-comma, reuse the same task window.
 - `daybook-states`: empty, unavailable/Retry, long text, long category, completed, active editor and deletion confirmation.
 - `daybook-drafts`: native fields, the Daybook Category capsule and popover, Save/Cancel, Return/Escape, retained drafts and Undo across window reopen.
@@ -34,7 +35,7 @@ Preconditions:
 ## Gotchas
 
 - The date rail uses the saved civil day key, not a second time-zone conversion. The shared rail always describes Today; Later tasks remain undated and never contribute to Today progress.
-- Native checkboxes, text fields and pop-up menus remain native; only the row `…` actions and the composer Category control use the custom Daybook popover. The serif heading and color palette do not replace keyboard/focus or persistence contracts.
+- Native checkboxes, text fields and pop-up menus remain native; only the row `…` actions and the composer Category control use the custom Daybook popover. The monospaced heading and color palette do not replace keyboard/focus or persistence contracts.
 - Add task is replaced by the composer while it is open. Finish or cancel it before locating `id=addTask` again.
 - While editing, confirming deletion, or managing categories, destination switches and conflicting actions remain guarded. `value id=todayTab` and `id=laterTab` then report `[disabled]`, and a press leaves the selection unchanged.
 - The Today/Later switch is drawn by `DaybookDestinationControl`; its AX tree comes from `accessibilityRepresentation`, so `frame id=todayTab` is the representation's segment frame, not the drawn thumb. Judge the look from screenshots.

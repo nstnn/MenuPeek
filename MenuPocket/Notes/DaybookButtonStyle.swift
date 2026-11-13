@@ -67,7 +67,7 @@ private struct DaybookButton: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: 12.5, weight: isProminent ? .medium : .regular))
+            .font(.system(size: 12.5, weight: isProminent ? .medium : .regular, design: .monospaced))
             .lineLimit(1)
             .foregroundStyle(foreground)
             .padding(.horizontal, 12)

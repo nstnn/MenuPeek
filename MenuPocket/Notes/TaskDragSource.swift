@@ -286,7 +286,7 @@ final class TaskDragHandleView: NSView, NSDraggingSource {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14),
+            .font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular),
             .foregroundColor: note.isCompleted ? NSColor.secondaryLabelColor : NSColor.labelColor,
             .paragraphStyle: paragraph
         ]

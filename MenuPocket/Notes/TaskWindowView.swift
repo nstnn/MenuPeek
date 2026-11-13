@@ -135,7 +135,7 @@ struct TaskWindowView: View {
                     if hasComposer { composer }
                     if hasMoveNotice {
                         Text("Moved task to Today.")
-                            .font(.callout)
+                            .font(.callout.monospaced())
                             .accessibilityIdentifier("laterMoveNotice")
                     }
                     if let message = topWriteError { taskWriteError(message) }
@@ -259,7 +259,7 @@ struct TaskWindowView: View {
                                 openHistory(.yesterday)
                             } label: {
                                 Text("\(state.yesterdayIncompleteCount) unfinished \(state.yesterdayIncompleteCount == 1 ? "task" : "tasks") from yesterday")
-                                    .font(.callout.weight(.semibold))
+                                    .font(.callout.weight(.semibold).monospaced())
                                     .foregroundStyle(.red)
                             }
                             .focusable()
@@ -453,14 +453,14 @@ struct TaskWindowView: View {
         VStack(alignment: .leading, spacing: compact ? 18 : 28) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(dayLabels.weekday.uppercased())
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .tracking(1.5)
                     .foregroundStyle(.secondary)
                 Text(daybookDate.day)
-                    .font(.custom("Georgia", size: compact ? 52 : 76, relativeTo: .largeTitle))
+                    .font(.system(size: compact ? 52 : 76, design: .monospaced))
                     .tracking(-3)
                 Text(daybookDate.month)
-                    .font(.custom("Georgia", size: compact ? 16 : 20, relativeTo: .title3))
+                    .font(.system(size: compact ? 16 : 20, design: .monospaced))
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(dayLabels.weekday), \(dayLabels.date)")
@@ -480,7 +480,7 @@ struct TaskWindowView: View {
                 .help("Open Settings (⌘,)")
                 .accessibilityLabel("Open Settings")
             }
-            .font(.system(size: 14))
+            .font(.system(size: 14, design: .monospaced))
             .labelStyle(DaybookNavLabelStyle())
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -516,7 +516,7 @@ struct TaskWindowView: View {
                     .frame(width: 28, height: 28)
                     .accessibilityHidden(true)
                     Text("\(progress.completed)/\(progress.total) done today")
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(.system(size: 11, design: .monospaced).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel("Today's task progress")
@@ -536,12 +536,12 @@ struct TaskWindowView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(isLater ? "Later" : "Today")
-                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
+                    .font(.system(size: 32, design: .monospaced))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 if isLater {
                     Text(state.availableLaterRemainingCount.map { "\($0) \($0 == 1 ? "task" : "tasks") remaining" } ?? "Tasks unavailable")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("laterRemainingCount")
                 }
@@ -552,7 +552,7 @@ struct TaskWindowView: View {
                         Image(systemName: "plus")
                         Text("Add task")
                         Spacer(minLength: 4)
-                        Text("⌘N").font(.caption).accessibilityHidden(true)
+                        Text("⌘N").font(.caption.monospaced()).accessibilityHidden(true)
                     }
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
@@ -681,7 +681,7 @@ struct TaskWindowView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("No tasks yet")
-                .font(.title3.weight(.semibold))
+                .font(.title3.weight(.semibold).monospaced())
             Text(isLater ? "Tasks saved for later will appear here." : "Today's tasks will appear here.")
                 .foregroundStyle(.secondary)
         }
@@ -692,7 +692,7 @@ struct TaskWindowView: View {
     private var unavailableState: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tasks are unavailable")
-                .font(.title3.weight(.semibold))
+                .font(.title3.weight(.semibold).monospaced())
                 .accessibilityIdentifier(identifier("todayUnavailableState", "laterUnavailableState"))
             Text(isLater ? "Could not load Later tasks. Try again." : "Could not load today's tasks. Try again.")
                 .foregroundStyle(.secondary)
@@ -716,17 +716,17 @@ struct TaskWindowView: View {
            notice != "Moved task to Today." {
             VStack(alignment: .leading, spacing: 8) {
                 Text(notice)
-                    .font(.callout)
+                    .font(.callout.monospaced())
                 if let recovered = isLater ? state.laterRecoveredEdit : state.recoveredEdit {
                     Text("Unsaved edit")
-                        .font(.callout.weight(.semibold))
+                        .font(.callout.weight(.semibold).monospaced())
                     Text(recovered.text)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     // The name captured at cancellation, so a removed category still shows.
                     if let name = recovered.categoryID == nil ? TaskCategoryName.general : recovered.categoryName {
                         Text("Category: \(name)")
-                            .font(.callout)
+                            .font(.callout.monospaced())
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -774,7 +774,7 @@ struct TaskWindowView: View {
                 .padding(.leading, Self.groupRowIndent)
                 if hasValidDrag {
                     Text(group.notes.isEmpty ? "Drop task here" : "Move to end of group")
-                        .font(.caption)
+                        .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
                         .padding(.leading, Self.groupRowIndent)
@@ -809,16 +809,16 @@ struct TaskWindowView: View {
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.semibold).monospaced())
                     .foregroundStyle(.secondary)
                     .frame(width: Self.groupRowIndent - 8)
                 Text(group.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .tracking(0.6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(isLater ? "\(progress.total - progress.completed) remaining" : "\(progress.completed)/\(progress.total)")
-                    .font(.system(size: 12).monospacedDigit())
+                    .font(.system(size: 12, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
@@ -869,7 +869,7 @@ struct TaskWindowView: View {
                     taskWriteError(message)
                 }
             }
-            .font(.system(size: 14))
+            .font(.system(size: 14, design: .monospaced))
             .foregroundStyle(.primary)
             .padding(.vertical, 10)
             .accessibilityElement(children: .contain)
@@ -926,7 +926,7 @@ struct TaskWindowView: View {
                                        : "Opens Edit, Move, and Delete actions")
             .accessibilityIdentifier("\(isLater ? "laterTaskActions" : "taskActions")-\(note.id)")
         }
-        .font(.system(size: 14))
+        .font(.system(size: 14, design: .monospaced))
         .disabled(note.continuedOn != nil)
         .help(note.continuedOn.map { "Continued on \($0)" } ?? "")
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
@@ -1005,7 +1005,7 @@ struct TaskWindowView: View {
 
     private func deletionConfirmation(_ note: Row) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Delete task?").font(.headline)
+            Text("Delete task?").font(.headline.monospaced())
             Text(note.text)
                 .lineLimit(2)
                 .foregroundStyle(.secondary)
@@ -1248,7 +1248,7 @@ private struct TaskActionsMenu: View {
         let accent = DaybookPalette.accent(colorScheme)
         Button { showMenu(fromKeyboard: false) } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .frame(width: 28, height: 28)
                 .foregroundStyle(isActive ? accent : Color.secondary)
                 .background {
@@ -1360,11 +1360,11 @@ private struct TaskCategoryPicker: View {
                     .truncationMode(.tail)
                     .foregroundStyle(isActive ? accent : Color.primary)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(isActive ? accent : Color.secondary)
                     .rotationEffect(.degrees(isOpen ? 180 : 0))
             }
-            .font(.system(size: 13))
+            .font(.system(size: 13, design: .monospaced))
             .padding(.horizontal, 12)
             .frame(minHeight: 26)
             .background {
@@ -1501,7 +1501,7 @@ private struct DaybookDestinationControl: View {
         let isSelected = selection == option
         return Button { selection = option } label: {
             Text(title)
-                .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                .font(.system(size: 13, weight: isSelected ? .medium : .regular, design: .monospaced))
                 .foregroundStyle(isSelected ? DaybookPalette.accent(colorScheme)
                                  : hovered == option && isEnabled ? Color.primary : Color.secondary)
                 .frame(maxWidth: .infinity)
@@ -1532,7 +1532,7 @@ private struct DaybookNavLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 10) {
             configuration.icon
-                .font(.system(size: 16))
+                .font(.system(size: 16, design: .monospaced))
                 .frame(width: 22, alignment: .center)
             configuration.title
             Spacer(minLength: 0)

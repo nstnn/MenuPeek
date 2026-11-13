@@ -164,10 +164,10 @@ final class CategoryDragSourceView: NSView, NSDraggingSource {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         (name as NSString).draw(in: NSRect(x: 12, y: 27, width: 236, height: 18), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph
+            .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph
         ])
         ("\(total) tasks" as NSString).draw(in: NSRect(x: 12, y: 9, width: 236, height: 16), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor
         ])
         return image
     }

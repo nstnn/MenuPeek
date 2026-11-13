@@ -4,7 +4,7 @@ The Today tab of the task window lists the current local day's tasks in category
 
 ## Sub-features
 
-- `daybook-layout` keeps the serif date rail, flat sections, row separators, and all controls usable in Light/Dark and at the 800 × 560 pt minimum. See [Daybook](daybook.md).
+- `daybook-layout` keeps the System Monospace date rail, flat sections, row separators, and all controls usable in Light/Dark and at the 800 × 560 pt minimum. See [Daybook](daybook.md).
 - `today-add` opens the composer, saves trimmed text with the chosen category, and appends the task to its group.
 - `today-add-cancel` discards a draft with Escape or Cancel.
 - `today-complete` toggles completion and updates progress and the menu bar count.

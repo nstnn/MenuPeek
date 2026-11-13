@@ -382,6 +382,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         windowItem.submenu = windowMenu
         menu.addItem(windowItem)
+        for appMenu in [menu, appMenu, fileMenu, editMenu, viewMenu, windowMenu] {
+            appMenu.font = .monospacedSystemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .regular)
+        }
         NSApplication.shared.mainMenu = menu
         NSApplication.shared.windowsMenu = windowMenu
     }

@@ -38,7 +38,7 @@ struct TaskCategoryManagerView: View {
         .padding(28)
         .frame(maxWidth: 660, maxHeight: .infinity, alignment: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .font(.system(size: 14))
+        .font(.system(size: 14, design: .monospaced))
         .background {
             Color(nsColor: .windowBackgroundColor)
                 .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
@@ -65,10 +65,10 @@ struct TaskCategoryManagerView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Categories")
-                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
+                    .font(.system(size: 32, design: .monospaced))
                     .accessibilityAddTraits(.isHeader)
                 Text("Categories are shared by Today, Later, and all saved days. Tasks without a category appear in General.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -227,7 +227,7 @@ struct TaskCategoryManagerView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(TaskCategoryName.general)
             Text("Built in. Tasks without a category appear here. It can't be renamed or removed.")
-                .font(.system(size: 12))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -261,7 +261,7 @@ struct TaskCategoryManagerView: View {
     private var unavailableState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Categories are unavailable")
-                .font(.headline)
+                .font(.headline.monospaced())
             Text("Could not load saved categories. Try again.")
                 .foregroundStyle(.secondary)
             Button("Retry") { state.refresh() }
@@ -275,7 +275,7 @@ struct TaskCategoryManagerView: View {
     private func nameIssue(for field: NameField) -> some View {
         if nameIssueField == field, let message = state.categoryNameIssue?.message {
             Text(message)
-                .font(.system(size: 12))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("categoryNameError")
@@ -285,13 +285,13 @@ struct TaskCategoryManagerView: View {
     private func removalConfirmation(_ target: TaskWindowPresentation.CategoryRemovalTarget) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Remove category?")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .accessibilityAddTraits(.isHeader)
             // Names have no length limit. Scroll the full name independently
             // so the all-days notice and actions stay visible in this sheet.
             ScrollView {
                 Text(target.name)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
@@ -301,11 +301,11 @@ struct TaskCategoryManagerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityIdentifier("categoryRemovalName")
             Text(Self.removalMessage(usageCount: target.usageCount))
-                .font(.system(size: 13))
+                .font(.system(size: 13, design: .monospaced))
                 .fixedSize(horizontal: false, vertical: true)
             if target.countChanged {
                 Text("The number of tasks changed. Review it and confirm again.")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = state.categoryIssue?.message {
