@@ -31,6 +31,7 @@ struct SystemMonospaceSegmentedPicker<Selection: Equatable>: NSViewRepresentable
                height: nsView.intrinsicContentSize.height)
     }
 
+    @MainActor
     final class Coordinator: NSObject {
         var picker: SystemMonospaceSegmentedPicker
 
