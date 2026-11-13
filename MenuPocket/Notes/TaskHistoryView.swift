@@ -45,7 +45,7 @@ struct TaskHistoryView: View {
                 }
                 Text("Completed / total")
             }
-            .font(.system(size: 11))
+            .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
             .accessibilityElement(children: .combine)
         }
@@ -54,7 +54,7 @@ struct TaskHistoryView: View {
     private var monthControls: some View {
         HStack(spacing: 8) {
             Text(history.month.start.label("MMMM yyyy"))
-                .font(.headline)
+                .font(.headline.monospaced())
                 .fixedSize()
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("historyMonth")

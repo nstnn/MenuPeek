@@ -27,6 +27,7 @@ final class TaskStatusItemController: NSObject {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         if let button = item.button {
+            button.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             button.target = self
             button.action = #selector(openTasks)
             if makeGlanceMenu != nil {

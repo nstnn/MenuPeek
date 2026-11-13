@@ -117,7 +117,7 @@ struct TaskActionsPopoverView: View {
                 case let .item(item): itemView(item)
                 case let .header(title):
                     Text(title)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
                         .padding(.top, 5)
@@ -164,10 +164,10 @@ struct TaskActionsPopoverView: View {
                         Color.clear.frame(height: 1)
                     }
                 }
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .frame(width: 16)
                 Text(item.title)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(foreground)

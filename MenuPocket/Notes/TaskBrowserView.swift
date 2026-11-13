@@ -17,6 +17,8 @@ struct TaskBrowserView: View {
     var body: some View {
         TaskWindowView(state: state, presentation: presentation, onSettings: onSettings,
                        detailContent: detailContent)
+        .font(.system(.body, design: .monospaced))
+        .fontDesign(.monospaced)
         .task(id: presentation.route) {
             let previous = lastRoute
             let route = presentation.route
@@ -42,7 +44,7 @@ struct TaskBrowserView: View {
         if presentation.isShowingSettings, let model {
             return AnyView(VStack(alignment: .leading, spacing: 0) {
                 Text("Settings")
-                    .font(.custom("Georgia", size: 32, relativeTo: .largeTitle))
+                    .font(.system(size: 32, design: .monospaced))
                     .accessibilityAddTraits(.isHeader)
                     .padding(.horizontal, 24)
                     .padding(.top, 30)
@@ -107,7 +109,7 @@ struct TaskBrowserView: View {
                     backButton.buttonStyle(.plain)
                     Divider().frame(height: 20).accessibilityHidden(true)
                     Text("History")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("taskBrowserHeading")
                     Spacer(minLength: 12)
@@ -131,7 +133,7 @@ struct TaskBrowserView: View {
                         .accessibilityIdentifier("taskBrowserToday")
                 }
                 Text("Unfinished")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("taskBrowserHeading")
             }

@@ -60,15 +60,10 @@ struct SettingsView: View {
                     }
 
                     settingsSection("Appearance") {
-                        Picker("Theme", selection: Binding(
+                        SystemMonospaceSegmentedPicker(label: "Theme", selection: Binding(
                             get: { model.preferences.theme },
                             set: { model.setTheme($0) }
-                        )) {
-                            ForEach(AppTheme.allCases, id: \.self) { theme in
-                                Text(theme.title).tag(theme)
-                            }
-                        }
-                        .pickerStyle(.segmented)
+                        ), options: AppTheme.allCases.map { ($0, $0.title) })
                         .disabled(!model.isPreferenceEditingAllowed)
                         .accessibilityIdentifier("themePicker")
                     }
@@ -105,7 +100,7 @@ struct SettingsView: View {
                         shortcutGroup("In MenuPocket", shortcuts: SettingsShortcut.appCommands)
 
                         Text("Adding tasks and switching lists are unavailable while editing, confirming deletion, or managing categories.")
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -115,7 +110,7 @@ struct SettingsView: View {
                                 shortcutGroup("Task editor", shortcuts: SettingsShortcut.taskEditor)
                                 shortcutGroup("Quick Add panel", shortcuts: SettingsShortcut.quickAddPanel)
                                 Text("Command-N, Command-1, Command-2, Command-comma, and Command-Q do nothing in the Quick Add panel.")
-                                    .font(.system(size: 12))
+                                    .font(.system(size: 12, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 shortcutGroup("Keyboard navigation", shortcuts: SettingsShortcut.navigation)
@@ -132,7 +127,7 @@ struct SettingsView: View {
                         .accessibilityIdentifier("keyboardControlsDisclosure")
 
                         Text("⌘ Command · ⌥ Option · ⌃ Control · ⇧ Shift")
-                            .font(.system(size: 11))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityLabel("Key symbols: Command, Option, Control, and Shift.")
@@ -166,7 +161,8 @@ struct SettingsView: View {
         }
         // Settings contains no editable fields, so all its controls share this treatment.
         .keyboardFocusAppearance()
-        .font(.system(size: 13))
+        .font(.system(size: 13, design: .monospaced))
+        .fontDesign(.monospaced)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             Color(nsColor: .windowBackgroundColor)
@@ -190,7 +186,7 @@ struct SettingsView: View {
     private func shortcutGroup(_ title: String, shortcuts: [SettingsShortcut]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
@@ -208,7 +204,7 @@ struct SettingsView: View {
                 Text(shortcut.title)
                 if let note = shortcut.note {
                     Text(note)
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -219,10 +215,10 @@ struct SettingsView: View {
                 ForEach(shortcut.keys.indices, id: \.self) { index in
                     let key = shortcut.keys[index]
                     if key == "or" {
-                        Text(key).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(key).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                     } else {
                         Text(key)
-                            .font(.system(size: key.count > 1 ? 12 : 13))
+                            .font(.system(size: key.count > 1 ? 12 : 13, design: .monospaced))
                             .padding(.horizontal, 6)
                             .frame(minWidth: 25, minHeight: 24)
                             .background {
@@ -251,7 +247,7 @@ struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
             content()

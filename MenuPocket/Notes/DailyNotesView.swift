@@ -94,18 +94,20 @@ struct DailyNotesView: View {
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.caption)
+                    .font(.caption.monospaced())
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("dailyNotesError")
             }
 
             if yesterdayIncompleteCount > 0 {
                 Text("\(yesterdayIncompleteCount) unfinished \(yesterdayIncompleteCount == 1 ? "item" : "items") from yesterday")
-                    .font(.caption)
+                    .font(.caption.monospaced())
                     .foregroundStyle(.red)
             }
         }
         .padding(16)
+        .font(.system(.body, design: .monospaced))
+        .fontDesign(.monospaced)
         .frame(maxWidth: 360)
         .frame(maxHeight: 480)
         .fixedSize(horizontal: false, vertical: true)
@@ -122,11 +124,11 @@ struct DailyNotesView: View {
     private var header: some View {
         HStack {
             Text("MenuPocket")
-                .font(.headline)
+                .font(.headline.monospaced())
             Spacer()
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -142,7 +144,7 @@ struct DailyNotesView: View {
     private func deleteConfirmation(for note: Note) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Delete note?")
-                .font(.headline)
+                .font(.headline.monospaced())
             Text(note.text)
                 .lineLimit(3)
                 .foregroundStyle(.secondary)
@@ -192,7 +194,7 @@ struct DailyNotesView: View {
             Text("\(progress.completed)/\(progress.total) complete")
                 .foregroundStyle(.secondary)
         }
-        .font(.subheadline)
+        .font(.subheadline.monospaced())
     }
 
     private var noteList: some View {
@@ -266,7 +268,7 @@ struct DailyNotesView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.medium).monospaced())
                 .frame(height: 32)
                 .focusable()
                 .keyboardFocusAppearance()
@@ -290,7 +292,7 @@ struct DailyNotesView: View {
 
             Button("Save", action: saveDraft)
                 .buttonStyle(.plain)
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.medium).monospaced())
                 .foregroundStyle(Color(nsColor: .windowBackgroundColor))
                 .padding(.horizontal, 14)
                 .frame(height: 32)

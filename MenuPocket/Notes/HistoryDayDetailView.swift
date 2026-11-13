@@ -76,19 +76,15 @@ struct HistoryDayDetailView: View {
                 }
                 if let message = state.continuationMessage {
                     Text(message)
-                        .font(.callout)
+                        .font(.callout.monospaced())
                         .foregroundStyle(state.continuationFailed ? Color.red : Color.secondary)
                         .accessibilityIdentifier("historyContinuationMessage")
                 }
             }
             if history.daySnapshot != nil {
-                Picker("Show", selection: Binding(get: { history.filter }, set: { history.setFilter($0) })) {
-                    Text("All").tag(HistoryTaskFilter.all)
-                    Text("Unfinished").tag(HistoryTaskFilter.unfinished)
-                    Text("Completed").tag(HistoryTaskFilter.completed)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                SystemMonospaceSegmentedPicker(label: "Show",
+                    selection: Binding(get: { history.filter }, set: { history.setFilter($0) }),
+                    options: [(.all, "All"), (.unfinished, "Unfinished"), (.completed, "Completed")])
                 .frame(maxWidth: 320, alignment: .leading)
                 .focusable()
                 .keyboardFocusAppearance()
@@ -150,13 +146,13 @@ struct HistoryDayDetailView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(day.label("EEEE, MMMM d"))
-                            .font(.title3.weight(.semibold))
+                            .font(.title3.weight(.semibold).monospaced())
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
                             .accessibilityLabel(day.label("EEEE, MMMM d, yyyy"))
                             .accessibilityIdentifier("historyDayTitle")
                         Text(day.label("yyyy"))
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .accessibilityHidden(true)
                     }
@@ -172,7 +168,7 @@ struct HistoryDayDetailView: View {
                         .frame(width: 100, height: 4)
                         .accessibilityHidden(true)
                         Text("\(progress.completed) of \(progress.total) complete")
-                            .font(.system(size: 12).monospacedDigit())
+                            .font(.system(size: 12, design: .monospaced).monospacedDigit())
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("\(progress.completed) of \(progress.total) tasks complete")
                             .accessibilityIdentifier("historyDayProgress")
@@ -181,7 +177,7 @@ struct HistoryDayDetailView: View {
             }
         } else if history.dayIssue == nil && history.monthSummaries != nil {
             Text("Select a day")
-                .font(.title3.weight(.semibold))
+                .font(.title3.weight(.semibold).monospaced())
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("historyDayTitle")
         }
@@ -196,15 +192,15 @@ struct HistoryDayDetailView: View {
             Button(action: toggle) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(.caption.weight(.semibold).monospaced())
                         .foregroundStyle(.secondary)
                         .frame(width: 14)
                     Text(group.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("\(group.progress.completed)/\(group.progress.total)")
-                        .font(.system(size: 12).monospacedDigit())
+                        .font(.system(size: 12, design: .monospaced).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize()
                 }
@@ -260,7 +256,7 @@ struct HistoryDayDetailView: View {
                 .accessibilityIdentifier("continueSelection-\(note.id)")
             } else if note.isCompleted {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.accentColor)
                     .accessibilityHidden(true)
             } else {
@@ -273,11 +269,11 @@ struct HistoryDayDetailView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(status(note))
-                .font(.system(size: 11))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 14))
+        .font(.system(size: 14, design: .monospaced))
         .foregroundStyle(note.isCompleted ? .secondary : .primary)
         .padding(.vertical, 10)
         .accessibilityElement(children: .contain)

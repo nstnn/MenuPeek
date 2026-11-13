@@ -26,6 +26,7 @@ enum MenuBarGlanceMenu {
 
     static func make(_ glance: MenuBarGlance, actions: MenuBarGlanceActions) -> NSMenu {
         let menu = NSMenu(title: "MenuPocket")
+        menu.font = menuFont
         // Enabled flags come from the model, not from responder validation.
         menu.autoenablesItems = false
         menu.addItem(headerItem(glance.header))
@@ -108,8 +109,12 @@ enum MenuBarGlanceMenu {
         return text
     }
 
-    private static var menuFont: NSFont { .menuFont(ofSize: 0) }
-    private static var categoryFont: NSFont { .menuFont(ofSize: NSFont.smallSystemFontSize) }
+    private static var menuFont: NSFont {
+        .monospacedSystemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .regular)
+    }
+    private static var categoryFont: NSFont {
+        .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    }
 
     private static func width(of string: String, font: NSFont = menuFont) -> CGFloat {
         ceil((string as NSString).size(withAttributes: [.font: font]).width)
@@ -146,10 +151,10 @@ struct MenuBarGlanceHeaderView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(header.dateLabel)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 Spacer(minLength: 12)
                 Text(header.countLabel)
-                    .font(.system(size: 12).monospacedDigit())
+                    .font(.system(size: 12, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             .lineLimit(1)

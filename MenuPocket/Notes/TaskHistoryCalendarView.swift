@@ -35,7 +35,7 @@ struct TaskHistoryCalendarView: View {
                     GridRow {
                         ForEach(grid.weekdaySymbols, id: \.self) { symbol in
                             Text(symbol)
-                                .font(.system(size: 11))
+                                .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                         }
@@ -73,7 +73,7 @@ struct TaskHistoryCalendarView: View {
         return Button(action: select) {
             VStack(spacing: 2) {
                 Text("\(cell.day.day)")
-                    .font(.system(size: 13, weight: cell.isToday ? .bold : .regular).monospacedDigit())
+                    .font(.system(size: 13, weight: cell.isToday ? .bold : .regular, design: .monospaced).monospacedDigit())
                     .foregroundStyle(cell.isToday ? Color.white : cell.isFuture ? Color.secondary : Color.primary)
                     .frame(minWidth: 22, minHeight: 22)
                     .background {
@@ -81,7 +81,7 @@ struct TaskHistoryCalendarView: View {
                         if cell.isToday { Circle().fill(Color.accentColor) }
                     }
                 Text(cell.countText)
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(.system(size: 11, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)

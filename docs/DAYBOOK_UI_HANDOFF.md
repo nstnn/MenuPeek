@@ -1,5 +1,7 @@
 # Daybook UI handoff — 2026-11-09
 
+Typography update (2026-11-12): app-owned text now uses System Monospace. The original Georgia/serif observations below are historical; see [System Monospace acceptance](SYSTEM_MONOSPACE_ACCEPTANCE.md) for the current implementation and verification.
+
 The user approved the Daybook concept and requested implementation. This is a native SwiftUI/AppKit presentation change to Today/Later, not a new task model. No installation, commit, push, or release publication is included.
 
 ## Implementation

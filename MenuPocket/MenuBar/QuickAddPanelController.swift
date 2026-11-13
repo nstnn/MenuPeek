@@ -220,7 +220,7 @@ struct QuickAddPanelView: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Add a task for today", text: $model.text)
                 .textFieldStyle(.plain)
-                .font(.title2)
+                .font(.title2.monospaced())
                 .accessibilityLabel("Quick Add task")
                 .accessibilityIdentifier("quickAddField")
                 .onSubmit(onSubmit)
@@ -231,6 +231,8 @@ struct QuickAddPanelView: View {
             }
         }
         .padding(16)
+        .font(.system(.body, design: .monospaced))
+        .fontDesign(.monospaced)
         .frame(width: QuickAddPanelController.contentWidth, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
