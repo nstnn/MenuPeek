@@ -164,10 +164,7 @@ struct SettingsView: View {
         .font(.system(size: 13, design: .monospaced))
         .fontDesign(.monospaced)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            Color(nsColor: .windowBackgroundColor)
-                .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
-        }
+        .background { DaybookPalette.canvas(colorScheme) }
     }
 
     private var quickAddShortcutStatus: String {

@@ -2,6 +2,20 @@
 
 Typography update (2026-11-12): app-owned text now uses System Monospace. The original Georgia/serif observations below are historical; see [System Monospace acceptance](SYSTEM_MONOSPACE_ACCEPTANCE.md) for the current implementation and verification.
 
+## Shared pane canvas — 2026-11-13
+
+History (including Unfinished), Categories and Settings now use `DaybookPalette.canvas`, matching Today/Later in both themes. Their former system-window background and Light overlay covered the parent canvas. The rail and inset card surfaces retain their existing colors. This change only replaces the three pane backgrounds; pre-existing composer edits in `TaskWindowView.swift` and its verification recipe were preserved.
+
+- **Pass:** shared `MenuPocket` scheme Debug build (`build/canvas-validation-build.log`); `git diff --check`. No new logic tests or full-suite run for this presentation-only change.
+- **Pass, agent-operated fixture:** run `20261113-104040`, fictional `basic` data, fixed `2026-11-13T16:00:00Z` / `America/Toronto`, separate SQLite/defaults, fake login/hotkey services. Doctor confirmed the executable identity and isolated database. Sidebar navigation opened Today, Later, History, Unfinished, Categories and Settings in both Light and Dark. Screenshots show the shared canvas with readable cards and controls, including the Settings heading and footer.
+- **Pass:** three unobstructed main-pane pixel positions match exactly across all six destinations within each theme (12 screenshots). Raw evidence: `build/verify-menupocket/evidence/20261113-104040/canvas-pixel-checks.json`, `snapshots/02-settings-Dark` through `13-categories-Light`, and `actions.log`.
+- **Pass:** all 14 `db.txt` snapshots are byte-identical, including rowids, task/category values and schema v5. Theme was restored to System; Today and the menu bar retained `1/4` progress.
+- Artifact identity: base HEAD `11784038efe55c5e2477b667feac658b3596a0c9`; dirty app sources are the three changed pane views plus the pre-existing `TaskWindowView.swift`. Source-manifest SHA256 `97827ad934af1e2fc72bcaf0a994374b118580e05ad6205212247a73dd690946`; fixture executable SHA256 `f8a2eb7e27c4b151a39ccc87a7335ad4843e56d2685b977b01f3e4a216b75248`. `identity.json` retains paths, bundle ID and Swift toolchain.
+- **Pass, cleanup:** fixture stopped, trashed and unregistered; its defaults and scratch run removed. The isolated Xcode Debug bundle was also trashed and its original/Trash paths unregistered. `cleanup.txt` and `build-host-cleanup.txt` retain checks. The installed main executable SHA256 remained `8a9f58c7cb903fce476221f5d8f15fbc2b94fb7be8407b8fdc31dbc2ee9366da`.
+- **Not tested:** production sandbox/system integrations, physical pointer behavior, minimum-size resizing and VoiceOver. No install, commit or push was performed.
+
+## Original Daybook handoff
+
 The user approved the Daybook concept and requested implementation. This is a native SwiftUI/AppKit presentation change to Today/Later, not a new task model. No installation, commit, push, or release publication is included.
 
 ## Implementation
