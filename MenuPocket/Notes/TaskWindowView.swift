@@ -1436,7 +1436,8 @@ private struct TaskCategoryPicker: View {
     }
 }
 
-private struct TaskMenuAnchor: NSViewRepresentable {
+/// Shared anchor for the task, composer and category actions popovers.
+struct TaskMenuAnchor: NSViewRepresentable {
     // The anchor is layout plumbing, not observable UI state. Updating a binding
     // when it mounts can interrupt the parent window's sheet dismissal.
     @MainActor final class Reference {

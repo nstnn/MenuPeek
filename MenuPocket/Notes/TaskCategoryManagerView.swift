@@ -6,7 +6,7 @@ import SwiftUI
 struct TaskCategoryManagerView: View {
     private enum Field: Hashable {
         case newName, create, done, retry
-        case rename(UUID), remove(UUID)
+        case rename(UUID), actions(UUID)
         case renameName, saveRename, cancelRename
         case cancelRemoval, confirmRemoval
     }
@@ -24,6 +24,7 @@ struct TaskCategoryManagerView: View {
     @State private var renameDraft = ""
     @State private var nameIssueField: NameField?
     @State private var createdID: UUID?
+    @State private var categoryListHeight: CGFloat = 1
     @FocusState private var focus: Field?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -59,22 +60,35 @@ struct TaskCategoryManagerView: View {
     }
 
     private var manager: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Categories")
-                    .font(.system(size: 32, design: .monospaced))
-                    .accessibilityAddTraits(.isHeader)
-                Text("Categories are shared by Today, Later, and all saved days. Tasks without a category appear in General.")
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Categories")
+                        .font(.system(size: 28, weight: .medium, design: .monospaced))
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 12)
+                    Button("Done", action: dismiss)
+                        .modifier(keyboard(.done, dismiss))
+                        // While renaming, Escape belongs to the rename's Cancel.
+                        .keyboardShortcut(renamingID == nil ? KeyboardShortcut.cancelAction : nil)
+                        .accessibilityIdentifier("doneManagingCategories")
+                }
+                Text("Shared by Today, Later & saved days.")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.bottom, 8)
             if let categories = state.availableCategories {
                 categoryList(categories)
                 newCategoryRow
+                    .padding(.top, 4)
+                Text("General can’t be renamed or removed.\nDrag the handle to reorder your categories.")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 unavailableState
-                Spacer(minLength: 0)
             }
             if let message = state.categoryIssue?.message {
                 Text(message)
@@ -88,14 +102,7 @@ struct TaskCategoryManagerView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("categoryReorderError")
             }
-            HStack {
-                Spacer()
-                Button("Done", action: dismiss)
-                    .modifier(keyboard(.done, dismiss))
-                    // While renaming, Escape belongs to the rename's Cancel.
-                    .keyboardShortcut(renamingID == nil ? KeyboardShortcut.cancelAction : nil)
-                    .accessibilityIdentifier("doneManagingCategories")
-            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -109,6 +116,9 @@ struct TaskCategoryManagerView: View {
                             generalRow
                                 .overlay { categoryTarget(.general, categories: categories) }
                         case let .custom(category):
+                            DaybookPalette.rule(colorScheme)
+                                .frame(height: 1)
+                                .accessibilityHidden(true)
                             categoryRow(category)
                                 .overlay { categoryTarget(.category(category.id), categories: categories) }
                                 .id(category.id)
@@ -116,16 +126,28 @@ struct TaskCategoryManagerView: View {
                     }
                     if categories.isEmpty {
                         Text("No custom categories yet.")
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
+                            .padding(16)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: CategoryListHeight.self, value: geometry.size.height)
+                    }
+                }
             }
-            .frame(maxHeight: .infinity)
-            .background { insetSurface }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Hug short catalogs; the list alone gives up height and scrolls
+            // when the window cannot fit every row and the creation controls.
+            .frame(maxHeight: max(1, categoryListHeight))
+            .background { DaybookPalette.rail(colorScheme).opacity(0.5) }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(DaybookPalette.rule(colorScheme), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .onPreferenceChange(CategoryListHeight.self) { categoryListHeight = $0 }
             .accessibilityIdentifier("categoryList")
             .onChange(of: createdID) { _, id in
                 if let id { proxy.scrollTo(id) }
@@ -143,7 +165,7 @@ struct TaskCategoryManagerView: View {
                 // Confirmation replaces the list. Bring its restored row focus
                 // back into view when the list returns, including after a failure.
                 switch field {
-                case let .rename(id), let .remove(id): proxy.scrollTo(id)
+                case let .rename(id), let .actions(id): proxy.scrollTo(id)
                 default: break
                 }
             }
@@ -155,11 +177,26 @@ struct TaskCategoryManagerView: View {
         if renamingID == category.id {
             renameRow(category)
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(category.name)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .center, spacing: 12) {
+                HStack(spacing: 14) {
+                    HStack(spacing: 2) {
+                        ForEach(0..<2) { _ in
+                            VStack(spacing: 2) {
+                                ForEach(0..<3) { _ in
+                                    Circle().frame(width: 2, height: 2)
+                                }
+                            }
+                        }
+                    }
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                        .accessibilityHidden(true)
+                    Text(category.name)
+                        .fontWeight(.medium)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
                     .overlay {
                         CategoryDragSource(name: category.name, categoryID: category.id, context: .manager,
                                            state: state, session: presentation.categoryDragSession,
@@ -172,12 +209,13 @@ struct TaskCategoryManagerView: View {
                     .fixedSize()
                     .accessibilityLabel("Rename \(category.name)")
                     .accessibilityIdentifier("renameCategory-\(category.id)")
-                Button("Remove…", role: .destructive) { requestRemoval(category) }
-                    .modifier(keyboard(.remove(category.id)) { requestRemoval(category) })
-                    .fixedSize()
-                    .accessibilityLabel("Remove \(category.name)")
-                    .accessibilityIdentifier("removeCategory-\(category.id)")
+                CategoryActionsMenu(category: category, onRemove: { requestRemoval(category) }, onDismiss: {
+                    focus = .actions(category.id)
+                })
+                    .focused($focus, equals: .actions(category.id))
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
             // One rename at a time, so an unsaved name is never silently replaced.
             .disabled(renamingID != nil)
             .accessibilityElement(children: .contain)
@@ -216,19 +254,38 @@ struct TaskCategoryManagerView: View {
             }
             nameIssue(for: .rename(category.id))
         }
-        .padding(.vertical, 8)
+        .padding(16)
     }
 
     /// General has no saved row, so it has no actions.
     private var generalRow: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(TaskCategoryName.general)
-            Text("Built in. Tasks without a category appear here. It can't be renamed or removed.")
-                .font(.system(size: 12, design: .monospaced))
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "folder")
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(TaskCategoryName.general)
+                    .fontWeight(.medium)
+                Text("For tasks without a category.")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Text("Built-in")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(DaybookPalette.rule(colorScheme), lineWidth: 1)
+                }
+                .fixedSize()
         }
-        .padding(.vertical, 8)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("generalCategory")
@@ -236,8 +293,11 @@ struct TaskCategoryManagerView: View {
 
     private var newCategoryRow: some View {
         VStack(alignment: .leading, spacing: 6) {
+            Text("New category")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                TextField("New category", text: $newName)
+                TextField("Category name", text: $newName)
                     .textFieldStyle(.roundedBorder)
                     .focused($focus, equals: .newName)
                     .onSubmit(create)
@@ -419,7 +479,7 @@ struct TaskCategoryManagerView: View {
         presentation.confirmCategoryRemoval(state: state)
     }
 
-    /// The row's Remove button while the category exists, otherwise the name field.
+    /// The row's actions button while the category exists, otherwise the name field.
     private func restoreFocusAfterRemoval(_ id: UUID) {
         Task { @MainActor in
             await Task.yield()
@@ -427,7 +487,7 @@ struct TaskCategoryManagerView: View {
                 focus = .retry
                 return
             }
-            focus = categories.contains(where: { $0.id == id }) ? .remove(id) : .newName
+            focus = categories.contains(where: { $0.id == id }) ? .actions(id) : .newName
         }
     }
 
@@ -473,5 +533,87 @@ struct TaskCategoryManagerView: View {
                         .allowsHitTesting(false)
                 }
         }
+    }
+}
+
+private struct CategoryListHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Use the existing Daybook popover so pointer and keyboard activation share
+/// the same dismissal and focus behavior as the task row actions.
+private struct CategoryActionsMenu: View {
+    let category: TaskCategory
+    let onRemove: () -> Void
+    let onDismiss: () -> Void
+    @State private var anchor = TaskMenuAnchor.Reference()
+    @State private var isHovered = false
+    @State private var isOpen = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let accent = DaybookPalette.accent(colorScheme)
+        let active = isEnabled && (isHovered || isOpen)
+        Button { showMenu(fromKeyboard: false) } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .frame(width: 28, height: 28)
+                .foregroundStyle(active ? accent : Color.secondary)
+                .background {
+                    Circle().fill(accent.opacity(isOpen ? 0.18 : active ? 0.10 : 0))
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("More actions for \(category.name)")
+        .accessibilityLabel("Actions for category: \(category.name)")
+        .accessibilityIdentifier("categoryActions-\(category.id)")
+        .onHover { isHovered = $0 }
+        .focusable()
+        .keyboardFocusAppearance()
+        .onKeyPress(keys: [.space, .return], phases: [.down, .repeat, .up]) { press in
+            if anchor.presenter.isOpen { return .ignored }
+            if press.phase == .down {
+                anchor.opensOnKeyUp = true
+            } else if press.phase == .up {
+                guard anchor.opensOnKeyUp else { return .ignored }
+                anchor.opensOnKeyUp = false
+                showMenu(fromKeyboard: true)
+            }
+            return .handled
+        }
+        .background {
+            TaskMenuAnchor(reference: anchor)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .onDisappear { anchor.presenter.close(with: nil) }
+    }
+
+    private func showMenu(fromKeyboard: Bool) {
+        guard isEnabled, !anchor.presenter.isOpen, let view = anchor.view, view.window != nil else { return }
+        isOpen = true
+        let remove = TaskActionRow.item(.init(
+            id: "removeCategory-\(category.id)", title: "Remove…",
+            accessibilityLabel: "Remove \(category.name)", symbol: "trash",
+            isDestructive: true, selection: .delete))
+        anchor.presenter.present(
+            rows: [remove], from: view, highlight: fromKeyboard ? .first : .none,
+            labels: .init(popover: "Category actions", identifier: "categoryActionsPopover", itemPrefix: ""),
+            onKeyboardDismiss: {
+                // An outside click/scroll owns its destination focus. Only a
+                // keyboard dismissal should explicitly restore this trigger.
+                DispatchQueue.main.async { onDismiss() }
+            }) { selection in
+                isOpen = false
+                // Let the task window regain key status before the confirmation
+                // mounts and focuses its Cancel button.
+                if case .delete = selection { DispatchQueue.main.async { onRemove() } }
+            }
     }
 }

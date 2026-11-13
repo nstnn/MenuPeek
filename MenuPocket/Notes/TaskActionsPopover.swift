@@ -231,6 +231,7 @@ final class TaskActionsPresenter {
     private var monitor: Any?
     private var resignObserver: NSObjectProtocol?
     private var completion: ((TaskActionSelection?) -> Void)?
+    private var onKeyboardDismiss: (() -> Void)?
     private weak var trigger: NSView?
 
     var isOpen: Bool { panel != nil }
@@ -248,6 +249,7 @@ final class TaskActionsPresenter {
     func present(rows: [TaskActionRow], from view: NSView,
                  highlight: TaskActionsModel.InitialHighlight, alignment: Alignment = .trailing,
                  labels: Labels = Labels(),
+                 onKeyboardDismiss: @escaping () -> Void = {},
                  completion: @escaping (TaskActionSelection?) -> Void) {
         guard panel == nil, let parent = view.window else { return }
         let model = TaskActionsModel(rows: rows)
@@ -282,6 +284,7 @@ final class TaskActionsPresenter {
         self.panel = panel
         self.trigger = view
         self.completion = completion
+        self.onKeyboardDismiss = onKeyboardDismiss
         parent.addChildWindow(panel, ordered: .above)
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
@@ -303,7 +306,7 @@ final class TaskActionsPresenter {
         }
     }
 
-    func close(with selection: TaskActionSelection?) {
+    func close(with selection: TaskActionSelection?, keyboardDismissal: Bool = false) {
         guard let panel else { return }
         self.panel = nil
         if let monitor { NSEvent.removeMonitor(monitor) }
@@ -316,8 +319,11 @@ final class TaskActionsPresenter {
         panel.orderOut(nil)
         parent?.makeKey()
         let completion = self.completion
+        let onKeyboardDismiss = self.onKeyboardDismiss
         self.completion = nil
+        self.onKeyboardDismiss = nil
         completion?(selection)
+        if keyboardDismissal { onKeyboardDismiss?() }
     }
 
     private func handle(_ event: NSEvent, model: TaskActionsModel) -> Bool {
@@ -325,8 +331,8 @@ final class TaskActionsPresenter {
         case 126: model.step(-1) // up
         case 125: model.step(1) // down
         case 36, 76, 49: model.chooseHighlighted() // return, enter, space
-        case 53: close(with: nil) // escape
-        case 48: close(with: nil) // tab leaves the popover, as it does a menu
+        case 53: close(with: nil, keyboardDismissal: true) // escape
+        case 48: close(with: nil, keyboardDismissal: true) // tab leaves the popover, as it does a menu
         default: return false
         }
         return true
