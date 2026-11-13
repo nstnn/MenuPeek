@@ -176,11 +176,7 @@ struct TaskBrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The same tinted canvas as Today keeps group cards distinct in Light.
-        .background {
-            Color(nsColor: .windowBackgroundColor)
-                .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
-        }
+        .background { DaybookPalette.canvas(colorScheme) }
         .accessibilityIdentifier("taskBrowserChild")
     }
 }

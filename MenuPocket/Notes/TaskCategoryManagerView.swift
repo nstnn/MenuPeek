@@ -39,10 +39,7 @@ struct TaskCategoryManagerView: View {
         .frame(maxWidth: 660, maxHeight: .infinity, alignment: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .font(.system(size: 14, design: .monospaced))
-        .background {
-            Color(nsColor: .windowBackgroundColor)
-                .overlay { Color.primary.opacity(colorScheme == .light ? 0.04 : 0) }
-        }
+        .background { DaybookPalette.canvas(colorScheme) }
         .task {
             await Task.yield()
             focus = state.availableCategories == nil ? .retry : .newName
