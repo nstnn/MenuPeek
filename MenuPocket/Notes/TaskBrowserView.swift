@@ -12,11 +12,19 @@ struct TaskBrowserView: View {
     @FocusState private var unfinishedEntryFocused: Bool
     @FocusState private var unfinishedDayFocus: GregorianDay?
     @State private var lastRoute: TaskWindowPresentation.Route = .today
+    @State private var historySelectionCancelRequest: UUID?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         TaskWindowView(state: state, presentation: presentation, onSettings: onSettings,
                        detailContent: detailContent)
+        .environment(\.historySelectionCancelRequest, historySelectionCancelRequest)
+        .onKeyPress(.escape) {
+            guard !presentation.isManagingCategories, !presentation.isShowingSettings,
+                  presentation.route == .history || presentation.route == .unfinishedDay else { return .ignored }
+            historySelectionCancelRequest = UUID()
+            return .handled
+        }
         .font(.system(.body, design: .monospaced))
         .fontDesign(.monospaced)
         .task(id: presentation.route) {
@@ -29,10 +37,10 @@ struct TaskBrowserView: View {
                let day = presentation.unfinishedState?.selectedDay,
                presentation.unfinishedState?.summaries?.contains(where: { $0.day == day }) == true {
                 unfinishedDayFocus = day
-            } else if previous == .unfinished, route == .history, presentation.browserIssue == nil {
+            } else if route == .history, presentation.browserIssue == nil {
                 unfinishedEntryFocused = true
             } else {
-                backFocused = route != .today
+                backFocused = route == .unfinished || route == .unfinishedDay
             }
         }
     }
@@ -88,7 +96,7 @@ struct TaskBrowserView: View {
         Button {
             presentation.showUnfinished(state: state)
         } label: {
-            Label("Unfinished from previous days", systemImage: "chevron.right")
+            Label("Review unfinished…", systemImage: "chevron.right")
                 .labelStyle(TrailingIconLabelStyle())
         }
         .focusable()
@@ -99,6 +107,7 @@ struct TaskBrowserView: View {
             return .handled
         }
         .accessibilityIdentifier("unfinishedHistoryEntry")
+        .help("Review unfinished tasks from all previous days")
     }
 
     @ViewBuilder
@@ -106,20 +115,18 @@ struct TaskBrowserView: View {
         if presentation.route == .history {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    backButton.buttonStyle(.plain)
-                    Divider().frame(height: 20).accessibilityHidden(true)
                     Text("History")
-                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 24, weight: .medium, design: .monospaced))
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("taskBrowserHeading")
                     Spacer(minLength: 12)
                     if isWide, presentation.browserIssue == nil {
-                        unfinishedEntry.buttonStyle(.plain)
+                        unfinishedEntry.buttonStyle(.daybook)
                     }
                 }
                 .frame(minHeight: 30)
                 if !isWide, presentation.browserIssue == nil {
-                    unfinishedEntry.buttonStyle(.plain)
+                    unfinishedEntry.buttonStyle(.daybook)
                 }
             }
         } else {
@@ -127,10 +134,6 @@ struct TaskBrowserView: View {
                 HStack(spacing: 16) {
                     backButton
                     Spacer()
-                    // Unfinished is nested; Today stays one action away.
-                    Button("Go to Today") { presentation.showToday(state: state) }
-                        .historyKeyAction { presentation.showToday(state: state) }
-                        .accessibilityIdentifier("taskBrowserToday")
                 }
                 Text("Unfinished")
                     .font(.system(size: 24, weight: .semibold, design: .monospaced))
@@ -142,7 +145,7 @@ struct TaskBrowserView: View {
 
     private var browserContent: some View {
         GeometryReader { geometry in
-            let isWide = presentation.route == .history && geometry.size.width >= 760
+            let isWide = presentation.route == .history && geometry.size.width >= 700
             let contentWidth = min(max(geometry.size.width - 48, 0), 920)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -154,7 +157,7 @@ struct TaskBrowserView: View {
                                 .keyboardFocusAppearance()
                         } else if presentation.route == .history, let history = presentation.historyState {
                             TaskHistoryView(history: history, isWide: isWide,
-                                            calendarWidth: min(380, contentWidth * 0.43), state: state)
+                                            calendarWidth: min(260, max(240, contentWidth * 0.30)), state: state)
                         } else if presentation.route == .unfinished, let unfinished = presentation.unfinishedState {
                             UnfinishedTasksView(unfinished: unfinished, focusedDay: $unfinishedDayFocus) { day in
                                 presentation.showUnfinishedDay(day, state: state)

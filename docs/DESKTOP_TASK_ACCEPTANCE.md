@@ -773,3 +773,7 @@ Agent-operated isolated fixture, `basic` seed, on branch `fix/persistent-task-si
 | Production/system acceptance | **Not tested.** Installed production app, real login/global hotkey, VoiceOver and pointer category dragging were outside this navigation change. |
 
 Earlier fixture `162319` established layout before a focus correction and is historical only. Raw evidence is ignored; the hashes and scoped results above identify the final source/artifact.
+
+## Compact History — 2026-11-13
+
+**Pass (scoped, agent-operated fixture).** The [Compact History handoff](HISTORY_COMPACT_HANDOFF.md) records the approved redesign, exact final source/binary identities, screenshots/AX, cancelled-selection/database preservation, and final fixes for focused-control reveal and Escape from sibling calendar focus. Final fixture `20261113-120303` was cleaned; installed app/data were preserved. Earlier source-specific evidence for Light/empty/filter/continuation and quit/relaunch is identified separately. Native fault recovery, VoiceOver, pointer minimum-size enforcement and production/system behavior remain Not tested; this is not whole-project or production acceptance.
