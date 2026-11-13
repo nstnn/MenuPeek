@@ -6,55 +6,44 @@ import SwiftUI
 struct TaskHistoryView: View {
     let history: TaskHistoryState
     let isWide: Bool
-    var calendarWidth: CGFloat = 380
+    var calendarWidth: CGFloat = 260
     var state: DailyNotesState? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            if isWide {
-                HStack(alignment: .top, spacing: 28) {
-                    calendarPane.frame(width: calendarWidth)
-                    Divider()
-                    HistoryDayDetailView(history: history, state: state)
-                }
-            } else {
-                calendarPane
-                Divider()
-                HistoryDayDetailView(history: history, state: state)
-            }
+        // Changing layout must not replace day detail and discard a pending
+        // continuation selection when the window crosses the width threshold.
+        let layout = isWide
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+        layout {
+            calendarPane
+                .frame(width: isWide ? calendarWidth : nil)
+                .frame(maxWidth: isWide ? nil : 280, alignment: .leading)
+            Rectangle()
+                .fill(.quaternary)
+                .frame(width: isWide ? 1 : nil, height: isWide ? nil : 1)
+                .accessibilityHidden(true)
+            HistoryDayDetailView(history: history, state: state, isWideLayout: isWide)
         }
     }
 
     private var calendarPane: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             monthControls
             TaskHistoryCalendarView(history: history)
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.accentColor.opacity(0.15))
-                        .overlay { RoundedRectangle(cornerRadius: 2).strokeBorder(Color.accentColor, lineWidth: 1) }
-                        .frame(width: 8, height: 8)
-                        .accessibilityHidden(true)
-                    Text("Selected")
-                }
-                HStack(spacing: 4) {
-                    Circle().fill(Color.accentColor).frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                    Text("Today")
-                }
-                Text("Completed / total")
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .accessibilityElement(children: .combine)
+            Text("• Has tasks · Today: \(history.today.label("MMM d"))")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Button("This month") { try? history.thisMonth() }
+                .historyKeyAction { try? history.thisMonth() }
+                .accessibilityIdentifier("historyThisMonth")
         }
     }
 
     private var monthControls: some View {
         HStack(spacing: 8) {
             Text(history.month.start.label("MMMM yyyy"))
-                .font(.headline.monospaced())
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .fixedSize()
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("historyMonth")
@@ -73,9 +62,6 @@ struct TaskHistoryView: View {
             .help("Next month")
             .accessibilityLabel("Next month")
             .accessibilityIdentifier("historyNextMonth")
-            Button("This month") { try? history.thisMonth() }
-                .historyKeyAction { try? history.thisMonth() }
-                .accessibilityIdentifier("historyThisMonth")
         }
         .frame(minHeight: 30)
     }

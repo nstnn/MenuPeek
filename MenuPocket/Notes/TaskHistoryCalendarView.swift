@@ -7,6 +7,7 @@ struct TaskHistoryCalendarView: View {
     let history: TaskHistoryState
     @FocusState private var focusedDay: GregorianDay?
     @Environment(\.historyScrollProxy) private var proxy
+    @Environment(\.colorScheme) private var colorScheme
 
     /// A grid that cannot be built (mismatched summaries) shows Unavailable
     /// rather than invented counts.
@@ -71,29 +72,26 @@ struct TaskHistoryCalendarView: View {
             try? history.select(cell.day, filter: history.filter)
         }
         return Button(action: select) {
-            VStack(spacing: 2) {
+            VStack(spacing: 4) {
                 Text("\(cell.day.day)")
-                    .font(.system(size: 13, weight: cell.isToday ? .bold : .regular, design: .monospaced).monospacedDigit())
-                    .foregroundStyle(cell.isToday ? Color.white : cell.isFuture ? Color.secondary : Color.primary)
-                    .frame(minWidth: 22, minHeight: 22)
-                    .background {
-                        // Today is a filled circle; selection is the cell outline.
-                        if cell.isToday { Circle().fill(Color.accentColor) }
-                    }
-                Text(cell.countText)
-                    .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                    .font(.system(size: 13, weight: cell.isToday ? .medium : .regular, design: .monospaced).monospacedDigit())
+                    .foregroundStyle(cell.isSelected ? DaybookPalette.accent(colorScheme) : cell.isFuture ? Color.secondary : Color.primary)
+                    .underline(cell.isToday)
+                // Loaded empty days stay quiet; unavailable data has a distinct
+                // mark and pane error, never the appearance of an empty month.
+                Text(cell.availability == .unavailable ? "?" : (cell.availability.progress?.total ?? 0) > 0 ? "•" : " ")
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 2)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .frame(maxWidth: .infinity, minHeight: 38)
             .contentShape(Rectangle())
-            .background(cell.isSelected ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .background(cell.isSelected ? DaybookPalette.accent(colorScheme).opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .overlay {
                 if cell.isSelected {
-                    RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 6).strokeBorder(DaybookPalette.accent(colorScheme), lineWidth: 1)
                 }
             }
         }
