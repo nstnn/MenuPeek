@@ -15,7 +15,7 @@ enum SQLiteNoteStoreError: Error {
 /// One connection to the app's local notes database. SQLite stores dates as
 /// seconds since the Unix epoch and keeps the assigned local day separately.
 final class SQLiteNoteRepository: NoteRepository {
-    static let schemaVersion = 5
+    static let schemaVersion = 6
 
     private let database: OpaquePointer
 
@@ -828,8 +828,9 @@ final class SQLiteNoteRepository: NoteRepository {
         if !isFresh {
             let expected: [[String?]]
             switch version {
-            case 5: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
-            case 3, 4: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
+            case 6: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"],
+                                ["table", "schedule_blocks"]]
+            case 3, 4, 5: expected = [["table", "categories"], ["table", "later_tasks"], ["table", "notes"]]
             case 2: expected = [["table", "categories"], ["table", "notes"]]
             default: expected = [["table", "notes"]]
             }
@@ -852,7 +853,10 @@ final class SQLiteNoteRepository: NoteRepository {
             }
             if version < 3 { try addLaterTasks(in: database) }
             if version < 4 { try addDisplayOrder(in: database) }
-            try execute("ALTER TABLE notes ADD COLUMN continued_on TEXT DEFAULT NULL", in: database)
+            if version < 5 {
+                try execute("ALTER TABLE notes ADD COLUMN continued_on TEXT DEFAULT NULL", in: database)
+            }
+            if version < 6 { try addScheduleBlocks(in: database) }
             try validateSchema(version: schemaVersion, in: database)
             try validateIntegrity(in: database)
             try execute("PRAGMA user_version = \(schemaVersion)", in: database)
@@ -937,6 +941,80 @@ final class SQLiteNoteRepository: NoteRepository {
         )
         try execute("CREATE UNIQUE INDEX notes_day_display_order_idx ON notes(day_key, display_order)",
                     in: database)
+    }
+
+    /// Additive v6 migration: the standalone Calendar block table. It references
+    /// no other table, so existing tasks, Later tasks and categories are untouched.
+    /// Plain (non-STRICT) DDL keeps the store readable by older system SQLite.
+    private static func addScheduleBlocks(in database: OpaquePointer) throws {
+        try execute(
+            """
+            CREATE TABLE schedule_blocks (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                day_key TEXT NOT NULL,
+                start_minute INTEGER NOT NULL CHECK(typeof(start_minute) = 'integer'),
+                end_minute INTEGER NOT NULL CHECK(typeof(end_minute) = 'integer'),
+                created_at REAL NOT NULL,
+                CHECK(0 <= start_minute AND start_minute < end_minute AND end_minute <= 1440)
+            )
+            """, in: database
+        )
+        try execute("CREATE INDEX schedule_blocks_day_key_idx ON schedule_blocks(day_key)", in: database)
+    }
+
+    /// Checks the v6 table's declared constraints and every saved row against the
+    /// block rules in `ScheduleBlockContent`. A violation is refused, never repaired.
+    private static func validateScheduleBlocks(in database: OpaquePointer) throws {
+        try validateColumns("schedule_blocks", expected: [
+            ["id", "TEXT", "1", nil, "1", "0"],
+            ["title", "TEXT", "1", nil, "0", "0"],
+            ["day_key", "TEXT", "1", nil, "0", "0"],
+            ["start_minute", "INTEGER", "1", nil, "0", "0"],
+            ["end_minute", "INTEGER", "1", nil, "0", "0"],
+            ["created_at", "REAL", "1", nil, "0", "0"]
+        ], in: database)
+        try validateRowidTable("schedule_blocks", in: database)
+        try validateForeignKeys("schedule_blocks", expected: [], in: database)
+        try validateIndex("schedule_blocks_day_key_idx", table: "schedule_blocks", column: "day_key",
+                          required: true, in: database)
+        let definitions = try schemaRows(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedule_blocks'", in: database
+        )
+        let compact = (definitions.first?.first.flatMap { $0 } ?? "").lowercased().filter { !$0.isWhitespace }
+        let requiredChecks = [
+            "check(typeof(start_minute)='integer')",
+            "check(typeof(end_minute)='integer')",
+            "check(0<=start_minuteandstart_minute<end_minuteandend_minute<=1440)"
+        ]
+        guard requiredChecks.allSatisfy(compact.contains) else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Missing schedule block constraints")
+        }
+
+        let slot = ScheduleBlockContent.slotMinutes
+        guard try schemaRows(
+            """
+            SELECT 1 FROM schedule_blocks
+            WHERE typeof(id) != 'text' OR typeof(title) != 'text' OR typeof(day_key) != 'text'
+               OR typeof(start_minute) != 'integer' OR typeof(end_minute) != 'integer'
+               OR typeof(created_at) != 'real'
+               OR start_minute < 0 OR start_minute > \(ScheduleBlockContent.latestStartMinute)
+               OR end_minute > \(ScheduleBlockContent.minutesPerDay)
+               OR start_minute % \(slot) != 0 OR end_minute % \(slot) != 0
+               OR end_minute - start_minute < \(slot)
+            LIMIT 1
+            """, in: database
+        ).isEmpty else {
+            throw SQLiteNoteStoreError.incompatibleSchema("Invalid schedule block times")
+        }
+        // Identity, title and day rules need Swift parsing; values were type-checked above.
+        for row in try schemaRows("SELECT id, title, day_key FROM schedule_blocks", in: database) {
+            guard let id = row[0], UUID(uuidString: id)?.uuidString == id,
+                  let title = row[1], (try? ScheduleBlockContent.validateTitle(title)) == title,
+                  let dayKey = row[2], (try? GregorianDay(key: dayKey))?.key == dayKey else {
+                throw SQLiteNoteStoreError.incompatibleSchema("Invalid schedule block row")
+            }
+        }
     }
 
     private static func validateDisplayOrder(in database: OpaquePointer) throws {
@@ -1041,6 +1119,9 @@ final class SQLiteNoteRepository: NoteRepository {
         try validateForeignKeys("later_tasks", expected: categoryReference, in: database)
         try validateIndex("later_tasks_category_id_idx", table: "later_tasks", column: "category_id",
                           required: true, in: database)
+        guard version >= 6 else { return }
+
+        try validateScheduleBlocks(in: database)
     }
 
     /// WITHOUT ROWID is incompatible with the saved insertion-order contract.

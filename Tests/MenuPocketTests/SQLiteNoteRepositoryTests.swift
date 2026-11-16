@@ -140,13 +140,13 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             let store = try SQLiteNoteRepository(databaseURL: databaseURL)
             try store.add(note("Keep", day: "2026-10-21", createdAt: 1))
         }
-        try executeRaw("ALTER TABLE notes DROP COLUMN continued_on; PRAGMA user_version = 4; UPDATE notes SET display_order = 17;")
+        try executeRaw("DROP TABLE schedule_blocks; ALTER TABLE notes DROP COLUMN continued_on; PRAGMA user_version = 4; UPDATE notes SET display_order = 17;")
         let rows = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
         let store = try SQLiteNoteRepository(databaseURL: databaseURL)
         XCTAssertEqual(try rawRows("SELECT rowid, id, text, day_key, created_at, completed_at, category_id, display_order FROM notes ORDER BY rowid"), rows)
         XCTAssertEqual(try rawRows("SELECT continued_on FROM notes"), [[nil]])
         XCTAssertEqual(try store.notes(for: "2026-10-21").map(\.text), ["Keep"])
-        XCTAssertEqual(try schemaVersion(), 5)
+        XCTAssertEqual(try schemaVersion(), SQLiteNoteRepository.schemaVersion)
     }
 
     func testUnversionedExistingTableKeepsItsRows() throws {
@@ -217,17 +217,17 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             """
             CREATE TABLE future_data (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
             INSERT INTO future_data VALUES (1, 'Preserve unknown future data 📝');
-            PRAGMA user_version = 6;
+            PRAGMA user_version = 7;
             """
         )
         let originalBytes = try Data(contentsOf: databaseURL)
 
         XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
-            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(6) = error else {
+            guard case SQLiteNoteStoreError.unsupportedSchemaVersion(7) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
         }
-        XCTAssertEqual(try schemaVersion(), 6)
+        XCTAssertEqual(try schemaVersion(), 7)
         XCTAssertEqual(try Data(contentsOf: databaseURL), originalBytes)
     }
 
@@ -339,7 +339,7 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
             XCTAssertEqual(try laterRows(), [])
             // Category and existing index definitions survive; notes gains one column.
             let upgraded = try schemaSnapshot()
-            XCTAssertEqual(upgraded.filter { $0[2] != "later_tasks" && $0[1] != "notes" && $0[1] != "notes_day_display_order_idx" },
+            XCTAssertEqual(upgraded.filter { $0[2] != "later_tasks" && $0[2] != "schedule_blocks" && $0[1] != "notes" && $0[1] != "notes_day_display_order_idx" },
                            schema.filter { $0[1] != "notes" })
             XCTAssertEqual(upgraded.filter { $0[2] == "later_tasks" }.map { $0[1] },
                            ["later_tasks_category_id_idx", "sqlite_autoindex_later_tasks_1", "later_tasks"])
@@ -2178,5 +2178,214 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         defer { sqlite3_finalize(statement) }
         XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
         return Int(sqlite3_column_int(statement, 0))
+    }
+}
+
+// MARK: - Schema v6: Calendar blocks
+
+extension SQLiteNoteRepositoryTests {
+    private static let blockColumns =
+        "id, title, day_key, start_minute, end_minute, created_at"
+    private static let validBlock =
+        "('00000000-0000-0000-0000-0000000000C1', 'Deep work 📝', '2026-11-16', 540, 600, 100.5)"
+
+    func testFreshStoreReachesVersionSixWithEmptyConstrainedScheduleTable() throws {
+        do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+        XCTAssertEqual(try schemaVersion(), 6)
+        XCTAssertEqual(try rawRows("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
+                       [["categories"], ["later_tasks"], ["notes"], ["schedule_blocks"]])
+        XCTAssertEqual(try rawRows("SELECT name, upper(type), \"notnull\", dflt_value, pk FROM pragma_table_xinfo('schedule_blocks') ORDER BY cid"), [
+            ["id", "TEXT", "1", nil, "1"], ["title", "TEXT", "1", nil, "0"],
+            ["day_key", "TEXT", "1", nil, "0"], ["start_minute", "INTEGER", "1", nil, "0"],
+            ["end_minute", "INTEGER", "1", nil, "0"], ["created_at", "REAL", "1", nil, "0"]
+        ])
+        XCTAssertEqual(try rawRows("SELECT name FROM pragma_index_info('schedule_blocks_day_key_idx')"),
+                       [["day_key"]])
+        XCTAssertEqual(try rawRows("SELECT * FROM schedule_blocks"), [])
+
+        // Declared CHECKs refuse non-integer and out-of-order times at write time.
+        let refused = [
+            "('A', 't', '2026-11-16', 540.5, 600, 1)", "('B', 't', '2026-11-16', 'nine', 600, 1)",
+            "('C', 't', '2026-11-16', -15, 600, 1)", "('D', 't', '2026-11-16', 600, 600, 1)",
+            "('E', 't', '2026-11-16', 600, 540, 1)", "('F', 't', '2026-11-16', 0, 1455, 1)"
+        ]
+        for values in refused {
+            XCTAssertEqual(try rawResult("INSERT INTO schedule_blocks (\(Self.blockColumns)) VALUES \(values)"),
+                           SQLITE_CONSTRAINT, values)
+        }
+        try executeRaw("INSERT INTO schedule_blocks (\(Self.blockColumns)) VALUES \(Self.validBlock)")
+        let bytes = try Data(contentsOf: databaseURL)
+        do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+    }
+
+    func testEveryHistoricalVersionUpgradesToSixWithoutChangingExistingRows() throws {
+        for version in 0...5 {
+            try seed(version: version)
+            let schema = try schemaSnapshot()
+            let notes = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            let categories = version >= 2 ? try rawRows("SELECT rowid, * FROM categories ORDER BY rowid") : []
+            let later = version >= 3 ? try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid") : []
+            let legacy = try legacyRows()
+            do {
+                let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+                XCTAssertEqual(try schemaVersion(), 6, "v\(version)")
+                XCTAssertEqual(try rawRows("SELECT * FROM schedule_blocks"), [], "v\(version)")
+                XCTAssertEqual(try legacyRows(), legacy, "v\(version)")
+                XCTAssertEqual(try store.notes(for: "2026-09-27").count, 2, "v\(version)")
+                if version >= 2 {
+                    XCTAssertEqual(try rawRows("SELECT rowid, * FROM categories ORDER BY rowid"), categories)
+                }
+                if version >= 3 {
+                    XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), later)
+                }
+                if version == 5 {
+                    // v5→v6 is purely additive: every prior object and row is identical.
+                    XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notes)
+                    XCTAssertEqual(try schemaSnapshot().filter { $0[2] != "schedule_blocks" }, schema)
+                    XCTAssertEqual(try store.notes(for: "2026-09-26").first?.continuedOn, "2026-09-27")
+                }
+                XCTAssertEqual(try schemaSnapshot().filter { $0[2] == "schedule_blocks" }.map { $0[1] },
+                               ["schedule_blocks_day_key_idx", "sqlite_autoindex_schedule_blocks_1",
+                                "schedule_blocks"])
+            }
+            let bytes = try Data(contentsOf: databaseURL)
+            do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+            XCTAssertEqual(try Data(contentsOf: databaseURL), bytes, "v\(version) reopen")
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+    }
+
+    func testFailedVersionSixStepRollsBackEveryVersionThenRetries() throws {
+        for version in 0...5 {
+            try seed(version: version)
+            // The table is created, then its index name collides: the last upgrade step fails.
+            try executeRaw("CREATE INDEX schedule_blocks_day_key_idx ON notes(text)")
+            let schema = try schemaSnapshot()
+            let notes = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
+                guard case SQLiteNoteStoreError.databaseError = error else {
+                    return XCTFail("v\(version): \(error)")
+                }
+            }
+            XCTAssertEqual(try schemaSnapshot(), schema, "v\(version)")
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), notes, "v\(version)")
+            XCTAssertEqual(try schemaVersion(), version)
+
+            try executeRaw("DROP INDEX schedule_blocks_day_key_idx")
+            do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+            XCTAssertEqual(try schemaVersion(), 6, "v\(version) retry")
+            XCTAssertEqual(try legacyRows(), notes.map { Array($0.prefix(6)) }, "v\(version) retry")
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+    }
+
+    func testMalformedVersionSixScheduleIsRefusedWithoutRepair() throws {
+        let columns = "id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, day_key TEXT NOT NULL, start_minute INTEGER NOT NULL CHECK(typeof(start_minute) = 'integer'), end_minute INTEGER NOT NULL CHECK(typeof(end_minute) = 'integer'), created_at REAL NOT NULL"
+        let range = "CHECK(0 <= start_minute AND start_minute < end_minute AND end_minute <= 1440)"
+        let replace = "DROP TABLE schedule_blocks;"
+        let index = "CREATE INDEX schedule_blocks_day_key_idx ON schedule_blocks(day_key);"
+        func row(_ values: String) -> String {
+            "PRAGMA ignore_check_constraints = ON; INSERT INTO schedule_blocks (\(Self.blockColumns)) VALUES \(values);"
+        }
+        let cases: [(name: String, sql: String)] = [
+            ("missing index", "DROP INDEX schedule_blocks_day_key_idx;"),
+            ("index on wrong column",
+             "DROP INDEX schedule_blocks_day_key_idx; CREATE INDEX schedule_blocks_day_key_idx ON schedule_blocks(title);"),
+            ("unique index",
+             "DROP INDEX schedule_blocks_day_key_idx; CREATE UNIQUE INDEX schedule_blocks_day_key_idx ON schedule_blocks(day_key);"),
+            ("missing range check", "\(replace) CREATE TABLE schedule_blocks (\(columns)); \(index)"),
+            ("missing type check",
+             "\(replace) CREATE TABLE schedule_blocks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, day_key TEXT NOT NULL, start_minute INTEGER NOT NULL, end_minute INTEGER NOT NULL CHECK(typeof(end_minute) = 'integer'), created_at REAL NOT NULL, \(range)); \(index)"),
+            ("extra column", "\(replace) CREATE TABLE schedule_blocks (\(columns), category_id TEXT, \(range)); \(index)"),
+            ("WITHOUT ROWID", "\(replace) CREATE TABLE schedule_blocks (\(columns), \(range)) WITHOUT ROWID; \(index)"),
+            ("task reference",
+             "\(replace) CREATE TABLE schedule_blocks (\(columns), note_id TEXT REFERENCES notes(id), \(range)); \(index)"),
+            ("off-grid start", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-11-16', 545, 600, 1.0)")),
+            ("too short", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-11-16', 600, 600, 1.0)")),
+            ("past midnight", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-11-16', 1425, 1455, 1.0)")),
+            ("real minute", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-11-16', 540.5, 600, 1.0)")),
+            ("text created_at", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-11-16', 540, 600, 'soon')")),
+            ("invalid day", row("('00000000-0000-0000-0000-0000000000C1', 'T', '2026-02-30', 540, 600, 1.0)")),
+            ("blank title", row("('00000000-0000-0000-0000-0000000000C1', '   ', '2026-11-16', 540, 600, 1.0)")),
+            ("untrimmed title", row("('00000000-0000-0000-0000-0000000000C1', ' T', '2026-11-16', 540, 600, 1.0)")),
+            ("multiline title", row("('00000000-0000-0000-0000-0000000000C1', 'A' || char(10) || 'B', '2026-11-16', 540, 600, 1.0)")),
+            ("non-UUID id", row("('block-1', 'T', '2026-11-16', 540, 600, 1.0)")),
+            ("lowercase id", row("('00000000-0000-0000-0000-0000000000c1', 'T', '2026-11-16', 540, 600, 1.0)")),
+            ("unknown extra table", "CREATE TABLE future_data (payload TEXT);")
+        ]
+        for testCase in cases {
+            try seed(version: 5)
+            do { _ = try SQLiteNoteRepository(databaseURL: databaseURL) }
+            try executeRaw(testCase.sql)
+            let bytes = try Data(contentsOf: databaseURL)
+            XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL), testCase.name) { error in
+                // WITHOUT ROWID surfaces as a failed rowid read, like the Later table check.
+                XCTAssertTrue(error is SQLiteNoteStoreError, "\(testCase.name): \(error)")
+            }
+            XCTAssertEqual(try schemaVersion(), 6, testCase.name)
+            XCTAssertEqual(try Data(contentsOf: databaseURL), bytes, testCase.name)
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+    }
+
+    func testVersionFiveLabelHoldingScheduleTableIsRefusedWithoutRepair() throws {
+        try seed(version: 5)
+        try executeRaw(
+            """
+            CREATE TABLE schedule_blocks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                day_key TEXT NOT NULL, start_minute INTEGER NOT NULL, end_minute INTEGER NOT NULL,
+                created_at REAL NOT NULL);
+            """
+        )
+        let bytes = try Data(contentsOf: databaseURL)
+        XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL)) { error in
+            guard case SQLiteNoteStoreError.incompatibleSchema = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(try schemaVersion(), 5)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+    }
+
+    func testVersionSixLabelWithoutScheduleTableIsRefusedWithoutRepair() throws {
+        try seed(version: 5)
+        try executeRaw("PRAGMA user_version = 6")
+        let bytes = try Data(contentsOf: databaseURL)
+        XCTAssertThrowsError(try SQLiteNoteRepository(databaseURL: databaseURL))
+        XCTAssertEqual(try schemaVersion(), 6)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
+    }
+
+    /// Writes each historical format directly, independently of the current bootstrap.
+    private func seed(version: Int) throws {
+        switch version {
+        case 0, 1: try seedLegacy(version: version)
+        case 2: try seedVersionTwo()
+        case 3: try seedVersionThree()
+        default: try seedVersionFourOrFive(version: version)
+        }
+    }
+
+    /// v4 adds the per-day display order (backfilled in rowid order); v5 adds the
+    /// nullable continuation marker, set here on one unfinished task.
+    private func seedVersionFourOrFive(version: Int) throws {
+        try seedVersionThree()
+        try executeRaw(
+            """
+            ALTER TABLE notes ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0 CHECK(typeof(display_order) = 'integer');
+            UPDATE notes SET display_order = 1 WHERE rowid IN (21, 80);
+            CREATE UNIQUE INDEX notes_day_display_order_idx ON notes(day_key, display_order);
+            PRAGMA user_version = 4;
+            """
+        )
+        guard version == 5 else { return }
+        try executeRaw(
+            """
+            ALTER TABLE notes ADD COLUMN continued_on TEXT DEFAULT NULL;
+            UPDATE notes SET continued_on = '2026-09-27' WHERE rowid = 35;
+            PRAGMA user_version = 5;
+            """
+        )
     }
 }
