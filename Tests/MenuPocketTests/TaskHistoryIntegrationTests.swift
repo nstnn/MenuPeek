@@ -177,7 +177,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), laterRows)
         XCTAssertEqual(try rawRows("SELECT rowid, id, name, name_key FROM categories ORDER BY rowid"), categoryFields)
         XCTAssertEqual(try rawRows("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"), schema)
-        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["5"]])
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [[String(SQLiteNoteRepository.schemaVersion)]])
         XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
         XCTAssertEqual(daily.draft, "Today draft")
         XCTAssertEqual(daily.draftCategoryID, empty.id)
@@ -230,7 +230,7 @@ final class TaskHistoryIntegrationTests: XCTestCase {
         }
         XCTAssertEqual(reopenedDefaults.persistentDomain(forName: suite) as NSDictionary?, defaultsBefore)
         XCTAssertEqual(try rawRows("PRAGMA integrity_check"), [["ok"]])
-        XCTAssertEqual(try rawRows("PRAGMA user_version"), [["5"]])
+        XCTAssertEqual(try rawRows("PRAGMA user_version"), [[String(SQLiteNoteRepository.schemaVersion)]])
         XCTAssertEqual(try reopened.historyDaySnapshot(for: "2026-10-05").notes, snapshot.notes)
     }
 
