@@ -19,6 +19,9 @@ struct TaskHistoryView: View {
             calendarPane
                 .frame(width: isWide ? calendarWidth : nil)
                 .frame(maxWidth: isWide ? nil : 280, alignment: .leading)
+                // Keep the month controls and grid at their natural height.
+                // The sibling detail can grow or shrink as filters/groups change.
+                .fixedSize(horizontal: false, vertical: true)
             Rectangle()
                 .fill(.quaternary)
                 .frame(width: isWide ? 1 : nil, height: isWide ? nil : 1)

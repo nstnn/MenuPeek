@@ -56,3 +56,46 @@ Full-suite limitation: `build/history-compact/tests-final.log` executed455 test 
 Native failed-write recovery, pane error/Retry, VoiceOver, pointer resize/minimum-size enforcement, real midnight/wake/time-zone events and production/system integrations remain **Not tested**. Hosted rollback/retry and direct failure-branch inspection are narrower evidence. The current fixture has no sanctioned continuation-write fault seed, and its skill forbids manufacturing live SQLite/defaults state outside named seed preconditions.
 
 Independent reviewer `/root/review_history` did not author the changes, inspected actual source/callers, raw tests and screenshots/AX, reproduced the baseline test failure and checked final evidence. Detailed report: `build/history-compact-review.md` (local evidence; scope and residual limits apply). No remote CI or release approval is implied.
+
+## Calendar position correction — 2026-11-17
+
+`TaskHistoryView` now gives the calendar pane its natural vertical size with
+`fixedSize(horizontal: false, vertical: true)`. The top-aligned layout no longer
+redistributes calendar spacing when the sibling detail grows or shrinks. Width
+constraints, responsive stacking, filtering and storage behavior remain unchanged.
+The History verification recipe includes a long/short/empty-detail geometry check.
+
+Source: `97e7f9c615a70568111116835c2acabffb83df99` plus only the calendar-pane
+source change. Xcode 27.0 (27A266a), Swift 6.4; shared `MenuPocket` Debug scheme.
+**Pass:** 23 focused tests in `TaskHistoryStateTests`, `TaskHistoryCalendarTests`
+and `TaskHistoryIntegrationTests`, zero failures. Log:
+`build/history-calendar-layout-tests.log`; result bundle:
+`build/DerivedData/Logs/Test/Test-MenuPocket-2026.11.17_16-25-45--0500.xcresult`.
+The full suite was not run for this layout-only correction.
+
+Native observations below are agent-operated on isolated fixtures with the
+`category-reordering` seed, fixed `2026-11-17T17:00:00Z` clock, America/Toronto,
+and fake login/hotkey services. A simulated next-day made the 28-task seeded day
+historical. Raw identity, actions, screenshots, AX, database/defaults snapshots
+and cleanup reports are in `build/verify-menupocket/evidence/<run>/`.
+
+| Check | Result |
+| --- | --- |
+| Baseline reproduction, run `20261117-162403` | **Pass, reproduced defect.** All → Completed moved the month label from y=196 to 188 and the calendar from y=230 to 223 pt. Snapshots 01–02. Startup first timed out; doctor and a stack sample recorded a directory-open wait during SQLite commit. The same instance subsequently became ready; no duplicate launch. |
+| Fixed wide layout, run `20261117-162542`, PID 49256 | **Pass.** All, Completed, Unfinished and long-group collapse/expand keep identical month `(499,188,96,15)`, calendar `(499,223,240,239)`, selected-day `(568,331,31,41)` and This month `(499,500,101,26)` frames in screen points. Snapshots 01–04; database and decoded defaults are identical. |
+| Empty Unfinished → long All | **Pass.** Continued all 26 unfinished rows through visible selection controls, then returned through Today/History. Empty Unfinished and All with continued originals keep exactly those same four frames; historical progress stays 2/28. Snapshots 05–06 have identical database/defaults. The continuation itself intentionally created 26 Today attempts and source markers in fixture data. |
+| Stacked layout and keyboard | **Pass.** Native ⌘+ gives stacked layout at 1.1 zoom. All/empty Unfinished retain identical month `(523,238,106,16)`, calendar `(523,276,308,262)`, selected-day `(612,395,40,45)` and This month `(523,581,111,28)` frames. Snapshots 07–08. Right Arrow moves focus Nov 17 → Nov 18 while selection/progress remain Nov 17, 2/28 (snapshot 09); ⌘0 restores actual size. |
+
+Final fixture app-source SHA256:
+`3004e457afb0de5906b9d6396b229e0f6373d4c850f2cfcd71fc11ccc41d52e9`;
+executable SHA256:
+`003b0b6a99a17bfa9c0a08e982ddabab0cf23aa5c7a718413ddb925c208482e2`.
+Bundle ID `local.menupocket.verify.r20261117-162542`, version `0.0.0-verify`/1;
+bundle and SQLite paths are recorded in `identity.json`. No production data,
+installation or system integration was exercised. Native checks used Dark;
+Light, physical resize, VoiceOver and genuine rollover are **Not tested** here.
+
+All three temporary fixture attempts (including sandbox compile failure
+`20261117-162334`) and the Debug XCTest host are cleaned after this session;
+individual cleanup reports retain the results. The user's running
+`/Applications/MenuPocket.app` (PID 5987) is preserved.
