@@ -1,6 +1,6 @@
 # Later list
 
-The Later tab holds undated tasks with only text and an optional category. Its main pane shows `N tasks remaining` and groups undated tasks by category. The persistent left rail retains today’s date, explicitly labeled Today progress, History, Categories and Settings at the same positions as Today. An unfinished Later task can be moved once to Today. Later-only changes never change the menu bar count; Move to Today raises Today's total by one.
+The Later tab holds undated tasks with only text and an optional category. Its main pane shows `N tasks remaining` and groups undated tasks by category. The persistent left rail retains today’s date, explicitly labeled Today progress, History, Categories and Settings at the same positions as Today. An unfinished Later task can be moved to Today, and an unfinished Today task can be moved to Later (see [Today tasks](today-tasks.md)). Later-only changes never change the menu bar count; Move to Today raises Today's total by one.
 
 ## Sub-features
 

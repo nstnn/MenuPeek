@@ -2042,6 +2042,77 @@ final class SQLiteNoteRepositoryTests: XCTestCase {
         }
     }
 
+    func testMoveTodayToLaterPreservesFieldsAppendsToLaterAndSurvivesReopen() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        let existingLater = later("Already Later", createdAt: 1)
+        try store.addLater(existingLater)
+        let source = note("Move me", day: "2026-10-05", createdAt: 10, categoryID: work.id)
+        let stay = note("Stay Today", day: "2026-10-05", createdAt: 20)
+        try store.add(source)
+        try store.add(stay)
+
+        let moved = try store.moveTodayToLater(id: source.id, dayKey: "2026-10-05")
+        XCTAssertEqual(moved, LaterTask(id: source.id, text: source.text, createdAt: source.createdAt,
+                                        completedAt: nil, categoryID: work.id))
+        XCTAssertEqual(try store.notes(for: "2026-10-05"), [stay])
+        XCTAssertEqual(try store.incompleteCount(for: "2026-10-05"), 1)
+        XCTAssertEqual(try store.laterTasks(), [existingLater, moved])
+        XCTAssertEqual(try rawRows("SELECT id FROM notes WHERE id = '\(source.id.uuidString)'"), [])
+
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.notes(for: "2026-10-05"), [stay])
+        XCTAssertEqual(try reopened.laterTasks(), [existingLater, moved])
+        // The round trip back to Today keeps the same identity.
+        let back = try reopened.moveLaterToToday(id: source.id, dayKey: "2026-10-06")
+        XCTAssertEqual(back.id, source.id)
+        XCTAssertEqual(try reopened.laterTasks(), [existingLater])
+    }
+
+    func testMoveTodayToLaterRejectsMissingOtherDayCompletedContinuedAndCollidingTasks() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+
+        let missingID = UUID()
+        XCTAssertThrowsError(try store.moveTodayToLater(id: missingID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TodayToLaterError, .notFound(missingID))
+        }
+
+        let past = note("Past day", day: "2026-10-04", createdAt: 1)
+        try store.add(past)
+        XCTAssertThrowsError(try store.moveTodayToLater(id: past.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TodayToLaterError, .notToday(past.id))
+        }
+
+        let done = note("Done", day: "2026-10-05", createdAt: 2, completedAt: Date(timeIntervalSince1970: 3))
+        try store.add(done)
+        XCTAssertThrowsError(try store.moveTodayToLater(id: done.id, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TodayToLaterError, .alreadyCompleted(done.id))
+        }
+
+        _ = try store.continueTasks([past], to: "2026-10-05", at: Date(timeIntervalSince1970: 4))
+        XCTAssertThrowsError(try store.moveTodayToLater(id: past.id, dayKey: "2026-10-04")) {
+            XCTAssertEqual($0 as? TodayToLaterError, .alreadyCompleted(past.id))
+        }
+
+        let collisionID = UUID()
+        let daily = Note(id: collisionID, text: "Daily", dayKey: "2026-10-05",
+                         createdAt: Date(timeIntervalSince1970: 5), completedAt: nil)
+        try store.add(daily)
+        try executeRaw(
+            """
+            INSERT INTO later_tasks (id, text, created_at, completed_at, category_id)
+            VALUES ('\(collisionID.uuidString)', 'Colliding later', 6, NULL, NULL);
+            """
+        )
+        let beforeNotes = try rawRows("SELECT rowid, * FROM notes ORDER BY rowid")
+        let beforeLater = try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid")
+        XCTAssertThrowsError(try store.moveTodayToLater(id: collisionID, dayKey: "2026-10-05")) {
+            XCTAssertEqual($0 as? TodayToLaterError, .idCollision(collisionID))
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM notes ORDER BY rowid"), beforeNotes)
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM later_tasks ORDER BY rowid"), beforeLater)
+    }
+
     private func later(_ text: String, createdAt: TimeInterval, completedAt: Date? = nil,
                        categoryID: UUID? = nil, id: UUID = UUID()) -> LaterTask {
         LaterTask(id: id, text: text, createdAt: Date(timeIntervalSince1970: createdAt),

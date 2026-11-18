@@ -7,6 +7,7 @@ enum TaskActionSelection {
     case edit
     case delete
     case moveToToday
+    case moveToLater
     case move(TaskMoveRequest)
     case category(UUID?)
 }

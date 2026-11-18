@@ -25,6 +25,19 @@ enum LaterTaskRepositoryError: Error, Equatable {
     case unsupported(String)
 }
 
+enum TodayToLaterError: Error, Equatable {
+    /// No saved daily task has this ID.
+    case notFound(UUID)
+    /// The task belongs to another day than the action-time Today.
+    case notToday(UUID)
+    /// Only unfinished, uncontinued Today tasks can move to Later.
+    case alreadyCompleted(UUID)
+    /// A Later task already uses this ID, so a move would duplicate it.
+    case idCollision(UUID)
+    /// The repository does not implement this move. Nothing was written.
+    case unsupported
+}
+
 /// All mutations either persist fully or throw, including writes for a missing
 /// ID. Callers should publish changed notes only after successful persistence.
 protocol NoteRepository {
@@ -90,9 +103,18 @@ protocol NoteRepository {
     /// `LaterTaskRepositoryError.notFound`, `.alreadyCompleted`, or
     /// `.idCollision` without changing either list.
     func moveLaterToToday(id: UUID, dayKey: String) throws -> Note
+    /// Atomically moves one unfinished task of `dayKey` (the action-time Today)
+    /// to the end of the Later list, keeping its ID, text, category, and
+    /// creation instant, and returns the saved Later task. Throws
+    /// `TodayToLaterError` without changing either list.
+    func moveTodayToLater(id: UUID, dayKey: String) throws -> LaterTask
 }
 
 extension NoteRepository {
+    func moveTodayToLater(id: UUID, dayKey: String) throws -> LaterTask {
+        throw TodayToLaterError.unsupported
+    }
+
     func continueTasks(_ sources: [Note], to dayKey: String, at instant: Date) throws -> [Note] {
         throw TaskContinuationError.unsupported
     }

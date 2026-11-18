@@ -3743,6 +3743,86 @@ final class DailyNotesStateTests: XCTestCase {
         }
     }
 
+    func testMoveTodayToLaterAppendsToLaterAndPreservesFields() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let source = Note(id: UUID(), text: "Push to Later", dayKey: "2026-09-27",
+                          createdAt: Date(timeIntervalSince1970: 5), completedAt: nil, categoryID: work.id)
+        let other = note("Stay Today", day: "2026-09-27", createdAt: 6)
+        let existingLater = laterTask("Already Later", createdAt: 1)
+        let store = FakeNoteRepository(notes: [source, other], categories: [work], laterTasks: [existingLater])
+        let preferences = isolatedCategoryPreferences()
+        preferences.setCollapsed(true, for: .category(work.id), in: .later)
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") }, preferences: preferences)
+        state.startup()
+        state.draft = "Keep Today draft"
+        let revision = state.historyRevision
+
+        XCTAssertTrue(state.moveTodayToLater(id: source.id))
+        XCTAssertEqual(state.notes, [other])
+        XCTAssertEqual(state.availableProgress, NoteProgress(completed: 0, total: 1))
+        XCTAssertEqual(state.laterTasks.map(\.id), [existingLater.id, source.id])
+        let moved = try XCTUnwrap(state.laterTasks.last)
+        XCTAssertEqual(moved.text, source.text)
+        XCTAssertEqual(moved.categoryID, work.id)
+        XCTAssertEqual(moved.createdAt, source.createdAt)
+        XCTAssertNil(moved.completedAt)
+        XCTAssertEqual(state.availableLaterRemainingCount, 2)
+        XCTAssertEqual(state.historyRevision, revision + 1)
+        XCTAssertNil(state.taskIssue)
+        XCTAssertFalse(preferences.isCollapsed(.category(work.id), in: .later))
+        XCTAssertEqual(state.draft, "Keep Today draft")
+        XCTAssertEqual(store.saved, [other])
+        XCTAssertEqual(store.savedLaterTasks, state.laterTasks)
+
+        // A moved task is gone from Today, so a second attempt never writes.
+        XCTAssertFalse(state.moveTodayToLater(id: source.id))
+        XCTAssertEqual(store.todayToLaterAttempts, 1)
+    }
+
+    func testMoveTodayToLaterRejectsCompletedTasksAndKeepsBothListsOnFailure() throws {
+        let done = note("Finished", day: "2026-09-27", createdAt: 2,
+                        completedAt: Date(timeIntervalSince1970: 3))
+        let open = note("Open", day: "2026-09-27", createdAt: 4)
+        let store = FakeNoteRepository(notes: [done, open])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+
+        XCTAssertFalse(state.moveTodayToLater(id: done.id))
+        XCTAssertEqual(store.todayToLaterAttempts, 0)
+
+        let revision = state.historyRevision
+        store.failWrite = .moveToLater
+        XCTAssertFalse(state.moveTodayToLater(id: open.id))
+        XCTAssertEqual(state.taskIssue, .moveToLater)
+        XCTAssertEqual(state.issue?.message, "Could not move task to Later. Try again.")
+        XCTAssertEqual(state.notes, [done, open])
+        XCTAssertEqual(state.laterTasks, [])
+        XCTAssertEqual(state.historyRevision, revision)
+
+        store.failWrite = nil
+        XCTAssertTrue(state.moveTodayToLater(id: open.id))
+        XCTAssertNil(state.taskIssue)
+        XCTAssertEqual(state.notes, [done])
+        XCTAssertEqual(state.laterTasks.map(\.id), [open.id])
+    }
+
+    func testMoveTodayToLaterAfterRolloverDoesNotMoveYesterdaysTask() {
+        let yesterday = note("Yesterday", day: "2026-09-27", createdAt: 2)
+        let store = FakeNoteRepository(notes: [yesterday])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        XCTAssertEqual(state.notes, [yesterday])
+
+        current = instant("2026-09-28T00:01:00-04:00")
+        XCTAssertFalse(state.moveTodayToLater(id: yesterday.id))
+        XCTAssertEqual(state.todayKey, "2026-09-28")
+        XCTAssertEqual(state.notes, [])
+        XCTAssertEqual(store.todayToLaterAttempts, 0)
+        XCTAssertEqual(store.saved, [yesterday])
+        XCTAssertEqual(store.savedLaterTasks, [])
+    }
+
     private func makeState(store: FakeNoteRepository, now: @escaping () -> Date,
                            preferences: TaskCategoryPreferences? = nil) -> DailyNotesState {
         DailyNotesState(repositoryFactory: { store }, day: makeDay(now: now),
@@ -4529,6 +4609,7 @@ private final class FakeNoteRepository: NoteRepository {
     var failLaterWrite: DailyNotesIssue?
     var laterWriteAttempts = 0
     var moveAttempts = 0
+    var todayToLaterAttempts = 0
     var categoryMoveAttempts = 0
     var categoryUsageReadAttempts = 0
     var onCategoryMove: (() -> Void)?
@@ -4759,6 +4840,21 @@ private final class FakeNoteRepository: NoteRepository {
         saved.append(note)
         savedLaterTasks.removeAll { $0.id == id }
         return note
+    }
+
+    func moveTodayToLater(id: UUID, dayKey: String) throws -> LaterTask {
+        todayToLaterAttempts += 1
+        if failWrite == .moveToLater { throw FakeFailure.failed }
+        guard let note = saved.first(where: { $0.id == id }) else { throw TodayToLaterError.notFound(id) }
+        guard note.dayKey == dayKey else { throw TodayToLaterError.notToday(id) }
+        guard note.isUnfinished else { throw TodayToLaterError.alreadyCompleted(id) }
+        if let categoryID = note.categoryID { _ = try requireCategory(categoryID) }
+        guard !savedLaterTasks.contains(where: { $0.id == id }) else { throw TodayToLaterError.idCollision(id) }
+        let task = LaterTask(id: note.id, text: note.text, createdAt: note.createdAt,
+                             completedAt: nil, categoryID: note.categoryID)
+        savedLaterTasks.append(task)
+        saved.removeAll { $0.id == id }
+        return task
     }
 
     private func checkLaterWrite(_ issue: DailyNotesIssue) throws {
