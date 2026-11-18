@@ -15,6 +15,8 @@ enum DailyNotesIssue: Equatable {
     case move
     /// Transferring a Later task to Today.
     case moveToToday
+    /// Transferring a Today task to Later.
+    case moveToLater
 
     var message: String {
         switch self {
@@ -25,6 +27,7 @@ enum DailyNotesIssue: Equatable {
         case .delete: "Could not delete note. Try again."
         case .move: "Could not move task. Try again."
         case .moveToToday: "Could not move task to Today. Try again."
+        case .moveToLater: "Could not move task to Later. Try again."
         }
     }
 }
@@ -632,6 +635,41 @@ final class DailyNotesState {
             return true
         } catch {
             recordLaterError(error, fallback: .moveToToday)
+            return false
+        }
+    }
+
+    /// The reverse of `moveLaterToToday`: one committed outcome, published
+    /// without a fallible post-write read.
+    @discardableResult
+    func moveTodayToLater(id: UUID) -> Bool {
+        let keys = day.keys()
+        if todayKey != keys.today || !hasLoadedToday || !hasLoadedLater || !hasLoadedCatalog {
+            refresh(keys: keys)
+        }
+        guard !isTerminating, hasLoadedCatalog, hasLoadedLater, hasLoadedToday,
+              todayKey == keys.today, let repository,
+              let source = notes.first(where: { $0.id == id }),
+              source.dayKey == keys.today, source.isUnfinished,
+              isAvailable(source.categoryID) else { return false }
+        do {
+            let saved = try repository.moveTodayToLater(id: id, dayKey: keys.today)
+            notes.removeAll { $0.id == id }
+            laterTasks.append(saved)
+            historyRevision += 1
+            if editingNoteID == id { cancelEditing() }
+            categoryPreferences.setCollapsed(false, for: TaskGroupID(categoryID: saved.categoryID), in: .later)
+            taskIssue = nil
+            return true
+        } catch {
+            switch error {
+            case TodayToLaterError.notFound, TodayToLaterError.notToday,
+                 TodayToLaterError.alreadyCompleted, TaskCategoryRepositoryError.notFound:
+                refresh()
+            default:
+                break
+            }
+            taskIssue = .moveToLater
             return false
         }
     }

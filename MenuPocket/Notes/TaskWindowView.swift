@@ -80,7 +80,8 @@ struct TaskWindowView: View {
     /// A menu-moved row whose actions regain focus once its reveal finishes.
     @State private var menuMoveFocusID: UUID?
     @State private var moveNoticeID = UUID()
-    @State private var isMoveNoticeVisible = false
+    /// The list whose transfer notice is showing; nil hides it.
+    @State private var moveNoticeDestination: TaskListDestination?
     @FocusState private var focusedControl: FocusControl?
     @State private var keyboardFocus = KeyboardFocusVisibility.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -134,9 +135,9 @@ struct TaskWindowView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if hasComposer { composer }
                     if hasMoveNotice {
-                        Text("Moved task to Today.")
+                        Text(isLater ? "Moved task to Today." : "Moved task to Later.")
                             .font(.callout.monospaced())
-                            .accessibilityIdentifier("laterMoveNotice")
+                            .accessibilityIdentifier(identifier("todayMoveNotice", "laterMoveNotice"))
                     }
                     if let message = topWriteError { taskWriteError(message) }
                     if let message = state.categoryReorderIssue?.message {
@@ -198,9 +199,9 @@ struct TaskWindowView: View {
             if presentation.route == .today { focusSelectedList() }
         }
         .task(id: moveNoticeID) {
-            guard isMoveNoticeVisible else { return }
+            guard moveNoticeDestination != nil else { return }
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            isMoveNoticeVisible = false
+            moveNoticeDestination = nil
         }
         .onChange(of: state.todayKey) { _, _ in presentation.validateDeletion(state: state) }
         .onChange(of: state.notes) { old, new in
@@ -444,6 +445,7 @@ struct TaskWindowView: View {
         case .delete: "Could not delete task. Try again."
         case .move: "Could not move task. Try again."
         case .moveToToday: "Could not move task to Today. Try again."
+        case .moveToLater: "Could not move task to Later. Try again."
         default: nil
         }
     }
@@ -632,7 +634,9 @@ struct TaskWindowView: View {
         editingID != nil && issue == .edit ? nil : writeError
     }
 
-    private var hasMoveNotice: Bool { isLater && isMoveNoticeVisible && issue != .moveToToday }
+    private var hasMoveNotice: Bool {
+        moveNoticeDestination == destination && issue != (isLater ? .moveToToday : .moveToLater)
+    }
 
     private var hasTopInteractionContent: Bool {
         presentation.deletionTarget == nil && (hasComposer || hasMoveNotice || topWriteError != nil || state.categoryReorderIssue != nil)
@@ -918,6 +922,7 @@ struct TaskWindowView: View {
             TaskActionsMenu(onOpen: { focusedControl = .actions(note.id) },
                             onEdit: { beginEditing(note.id) }, onDelete: { requestDeletion(note.id) },
                             onMoveToToday: isLater && !note.isCompleted ? { moveToToday(note.id) } : nil,
+                            onMoveToLater: !isLater && !note.isCompleted && note.continuedOn == nil ? { moveToLater(note.id) } : nil,
                             moves: { isLater ? nil : presentation.menuMoves(for: note.id, state: state) },
                             onMove: moveFromMenu)
             .focused($focusedControl, equals: .actions(note.id))
@@ -927,7 +932,8 @@ struct TaskWindowView: View {
             .accessibilityLabel("Actions for task: \(note.text)")
             .accessibilityHint(isLater ? (note.isCompleted ? "Opens Edit and Delete actions"
                                                            : "Opens Move to Today, Edit and Delete actions")
-                                       : "Opens Edit, Move, and Delete actions")
+                                       : (!note.isCompleted ? "Opens Move to Later, Edit, Move, and Delete actions"
+                                                            : "Opens Edit, Move, and Delete actions"))
             .accessibilityIdentifier("\(isLater ? "laterTaskActions" : "taskActions")-\(note.id)")
         }
         .font(.system(size: 14, design: .monospaced))
@@ -1064,7 +1070,18 @@ struct TaskWindowView: View {
               let group = groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
         rowActionOrigin = (id, group.id)
         if state.moveLaterToToday(id: id) {
-            isMoveNoticeVisible = true
+            moveNoticeDestination = .later
+            moveNoticeID = UUID()
+            restoreRowFocus(id, fallbackGroup: group.id)
+        }
+    }
+
+    private func moveToLater(_ id: UUID) {
+        guard !isLater, canUseRowActions,
+              let group = groups.first(where: { $0.notes.contains { $0.id == id } }) else { return }
+        rowActionOrigin = (id, group.id)
+        if state.moveTodayToLater(id: id) {
+            moveNoticeDestination = .today
             moveNoticeID = UUID()
             restoreRowFocus(id, fallbackGroup: group.id)
         }
@@ -1237,6 +1254,7 @@ private struct TaskActionsMenu: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     var onMoveToToday: (() -> Void)? = nil
+    var onMoveToLater: (() -> Void)? = nil
     /// Read when the popover opens, so entries reflect the current saved order.
     /// Nil omits the Today movement items.
     var moves: () -> TaskWindowPresentation.MenuMoves? = { nil }
@@ -1297,6 +1315,7 @@ private struct TaskActionsMenu: View {
             // the task window's restored key status cannot override draft/Cancel focus.
             switch selection {
             case .moveToToday: DispatchQueue.main.async { onMoveToToday?() }
+            case .moveToLater: DispatchQueue.main.async { onMoveToLater?() }
             case .edit: DispatchQueue.main.async { onEdit() }
             case .delete: DispatchQueue.main.async { onDelete() }
             case let .move(request): DispatchQueue.main.async { onMove(request) }
@@ -1311,6 +1330,11 @@ private struct TaskActionsMenu: View {
             rows.append(.item(.init(id: "moveToToday", title: "Move to Today", accessibilityLabel: "Move to Today",
                                     symbol: "sun.max", selection: .moveToToday)))
             rows.append(.separator("today"))
+        }
+        if onMoveToLater != nil {
+            rows.append(.item(.init(id: "moveToLater", title: "Move to Later", accessibilityLabel: "Move to Later",
+                                    symbol: "tray", selection: .moveToLater)))
+            rows.append(.separator("later"))
         }
         rows.append(.item(.init(id: "edit", title: "Edit", accessibilityLabel: "Edit",
                                 symbol: "pencil", selection: .edit)))
