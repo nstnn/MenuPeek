@@ -37,6 +37,15 @@ final class TaskWindowZoomTests: XCTestCase {
         XCTAssertFalse(zoom.zoomOut())
     }
 
+    func testPercentTextNamesEveryLevel() {
+        XCTAssertEqual(TaskWindowZoom.levels.map(TaskWindowZoom.percentText(for:)),
+                       ["80%", "90%", "100%", "110%", "125%", "150%"])
+        let zoom = TaskWindowZoom(userDefaults: isolatedDefaults())
+        XCTAssertEqual(zoom.percentText, "100%")
+        zoom.zoomIn()
+        XCTAssertEqual(zoom.percentText, "110%")
+    }
+
     func testZoomInRespectsTheFitCheck() {
         let zoom = TaskWindowZoom(userDefaults: isolatedDefaults())
         XCTAssertFalse(zoom.zoomIn(fits: { $0 <= 1.0 }))
