@@ -267,16 +267,13 @@ final class DailyNotesState {
         }
         if todayKey != keys.today {
             // Invalidate the old snapshot before asking storage for the new day.
-            let hadPreviousDay = todayKey != nil
             todayKey = keys.today
             notes = []
             yesterdayIncompleteCount = 0
             hasLoadedToday = false
             invalidateEditing()
             if taskIssue != .add { taskIssue = nil }
-            if hadPreviousDay {
-                refreshNotice = "The date changed. Previous task actions were cancelled; unsaved text is still available."
-            }
+            refreshNotice = nil
         }
 
         let store: any NoteRepository

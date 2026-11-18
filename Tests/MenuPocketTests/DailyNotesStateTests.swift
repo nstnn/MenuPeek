@@ -3049,6 +3049,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.yesterdayIncompleteCount, 1)
         XCTAssertEqual(store.saved, [saved])
         XCTAssertEqual(state.availableCategories, [category])
+        XCTAssertNil(state.refreshNotice)
     }
 
     func testRolloverCancelsStaleActionsAndRecoversEditEvenWhenReadFails() {
@@ -3065,7 +3066,7 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertFalse(state.saveEdit())
         XCTAssertNil(state.editingNoteID)
         XCTAssertEqual(state.recoveredEditDraft, "Recover my changes")
-        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertNil(state.refreshNotice)
         XCTAssertNil(state.availableProgress)
         XCTAssertTrue(state.notes.isEmpty)
         XCTAssertFalse(state.delete(id: old.id))
@@ -4459,7 +4460,7 @@ final class DailyNotesStateTests: XCTestCase {
 
         XCTAssertNil(state.editingNoteID)
         XCTAssertEqual(state.recoveredEdit?.text, "Updated today draft")
-        XCTAssertNotNil(state.refreshNotice)
+        XCTAssertNil(state.refreshNotice)
 
         XCTAssertEqual(state.editingLaterTaskID, later.id)
         XCTAssertEqual(state.laterEditDraft, "Updated later draft")
