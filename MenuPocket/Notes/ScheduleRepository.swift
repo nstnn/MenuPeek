@@ -7,6 +7,8 @@ enum ScheduleRepositoryError: Error, Equatable {
     case duplicateID(UUID)
     /// A saved row failed `ScheduleBlockContent` validation. Reads throw
     /// rather than skip or repair it, so a calendar is never shown partly.
+    /// Also thrown, before any write, for a block whose creation instant is not
+    /// finite, because saving it would create such a row.
     case invalidRow
 }
 
