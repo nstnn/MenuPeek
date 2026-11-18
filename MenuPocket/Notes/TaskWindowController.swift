@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class TaskWindowPresentation {
-    enum Route { case today, history, unfinished, unfinishedDay }
+    enum Route { case today, history, unfinished, unfinishedDay, calendar }
     enum HistoryEntry { case calendar, yesterday }
 
     private(set) var isShowingSettings = false
@@ -14,6 +14,11 @@ final class TaskWindowPresentation {
     private(set) var historyState: TaskHistoryState?
     private(set) var unfinishedState: UnfinishedTasksState?
     private(set) var browserIssue: String?
+    /// Created the first time Calendar opens and kept for the session, so the
+    /// chosen view and period survive leaving and returning.
+    private(set) var scheduleState: ScheduleState?
+    /// Set when the Calendar state could not be created; the pane offers Retry.
+    private(set) var calendarIssue: String?
     /// The top visible group is a fallback if retained scroll content disappears.
     var todayScrollAnchor: TaskGroupID?
     private(set) var todayScrollRestoreID: UUID?
@@ -23,6 +28,23 @@ final class TaskWindowPresentation {
     /// History is a child of the Today list; Later never browses history.
     func canBrowse(state: DailyNotesState) -> Bool {
         !isTerminating && selectedDestination == .today && canNavigate(state: state)
+    }
+
+    /// History, Unfinished and an Unfinished day. Calendar is not part of History.
+    var isShowingHistory: Bool {
+        switch route {
+        case .history, .unfinished, .unfinishedDay: true
+        case .today, .calendar: false
+        }
+    }
+
+    var isShowingCalendar: Bool { route == .calendar }
+
+    /// Calendar is a sibling of Today and Later, not a child of Today, so it
+    /// does not inherit `canBrowse`'s Today-only rule. It waits, like History,
+    /// for a task edit, deletion confirmation, category rename or removal.
+    func canShowCalendar(state: DailyNotesState) -> Bool {
+        canNavigate(state: state)
     }
 
     /// Task-list commands act only on the visible Today/Later list.
@@ -41,6 +63,27 @@ final class TaskWindowPresentation {
             catch { browserIssue = "Could not open yesterday. Try again." }
         }
         return true
+    }
+
+    /// Opens Calendar in the right column, keeping the selected Today/Later list
+    /// underneath. Selecting Today or Later, History, Categories or Settings leaves it.
+    @discardableResult
+    func showCalendar(state: DailyNotesState) -> Bool {
+        guard canShowCalendar(state: state) else { return false }
+        // Settings and Categories always reset the route, so this is the open pane.
+        if route == .calendar { return true }
+        leaveAuxiliaryPane()
+        cancelMovement()
+        route = .calendar
+        refreshBrowser(state: state)
+        return true
+    }
+
+    /// Retry for the Calendar pane: recreates a state that failed to open, or
+    /// reads the visible period again.
+    func retryCalendar(state: DailyNotesState) {
+        guard route == .calendar, !isTerminating else { return }
+        if let scheduleState { scheduleState.retry() } else { refreshBrowser(state: state) }
     }
 
     @discardableResult
@@ -106,20 +149,35 @@ final class TaskWindowPresentation {
         // Hide before invalidation so only the pane being presented reads.
         historyState?.setVisible(month: false, day: false)
         unfinishedState?.setVisible(false)
+        scheduleState?.setVisible(false)
         do {
-            if route != .today && historyState == nil { historyState = try state.makeHistoryState() }
+            if isShowingHistory && historyState == nil { historyState = try state.makeHistoryState() }
             if (route == .unfinished || route == .unfinishedDay) && unfinishedState == nil { unfinishedState = try state.makeUnfinishedState() }
             try historyState?.refresh(revision: state.historyRevision)
             try unfinishedState?.refresh(revision: state.historyRevision)
             browserIssue = nil
         } catch { browserIssue = "Could not open task history. Try again." }
+        prepareCalendar(state: state)
         updateBrowserVisibility()
+    }
+
+    /// Creates the Calendar state on first use and moves its Today marker after
+    /// a day change. Never reads blocks; visibility decides that.
+    private func prepareCalendar(state: DailyNotesState) {
+        if route == .calendar && scheduleState == nil {
+            do {
+                scheduleState = try state.makeScheduleState()
+                calendarIssue = nil
+            } catch { calendarIssue = "Could not open the calendar. Try again." }
+        }
+        scheduleState?.refreshToday()
     }
 
     private func updateBrowserVisibility() {
         historyState?.setVisible(month: isWindowVisible && route == .history,
                                  day: isWindowVisible && (route == .history || route == .unfinishedDay))
         unfinishedState?.setVisible(isWindowVisible && route == .unfinished)
+        scheduleState?.setVisible(isWindowVisible && route == .calendar)
         reconcileUnfinishedSelection()
     }
 

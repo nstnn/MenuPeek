@@ -137,6 +137,7 @@ final class DailyNotesStateTests: XCTestCase {
             ("hidden window", .list(.today), { state, _ in state.taskWindowPresentation.setWindowVisible(false, state: state) }),
             ("wrong list", .list(.later), { _, _ in }),
             ("History", .list(.today), { state, _ in _ = state.taskWindowPresentation.showHistory(state: state) }),
+            ("Calendar", .list(.today), { state, _ in _ = state.taskWindowPresentation.showCalendar(state: state) }),
             ("Today edit", .list(.today), { state, _ in state.beginEditing(id: task.id) }),
             ("Later edit", .list(.today), { state, _ in state.beginEditingLater(id: later.id) }),
             ("deletion", .list(.today), { state, _ in _ = state.taskWindowPresentation.requestDeletion(id: task.id, state: state) }),
