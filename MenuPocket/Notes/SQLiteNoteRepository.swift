@@ -1309,3 +1309,154 @@ final class SQLiteNoteRepository: NoteRepository {
                        message: String(cString: sqlite3_errmsg(database)))
     }
 }
+
+// MARK: - Calendar blocks
+
+/// Kept in this file so the block operations share the connection's private
+/// statement, binding, transaction and error helpers. Writes run inside
+/// `BEGIN IMMEDIATE`, so each one commits whole or leaves saved blocks unchanged.
+extension SQLiteNoteRepository: ScheduleRepository {
+    private static let scheduleBlockColumns =
+        "id, title, day_key, start_minute, end_minute, created_at"
+
+    /// One statement gives a coherent snapshot through `schedule_blocks_day_key_idx`.
+    /// Rows outside the range are not read, so they cannot fail this read.
+    func scheduleBlocks(in range: HistoryDayRange) throws -> [ScheduleBlock] {
+        let statement = try prepare(
+            """
+            SELECT \(Self.scheduleBlockColumns) FROM schedule_blocks
+            WHERE day_key >= ? AND day_key < ?
+            ORDER BY day_key ASC, start_minute ASC, end_minute ASC, created_at ASC, id ASC
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(range.start.key, at: 1, to: statement)
+        try bind(range.end.key, at: 2, to: statement)
+
+        var blocks: [ScheduleBlock] = []
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { break }
+            try check(step, expected: SQLITE_ROW, operation: "read schedule blocks")
+            let block = try scheduleBlock(from: statement)
+            guard range.contains(block.day) else { throw ScheduleRepositoryError.invalidRow }
+            blocks.append(block)
+        }
+        // SQL already returns this order; sorting again pins the documented
+        // contract even where two stored instants convert to the same Date.
+        return blocks.sorted(by: ScheduleBlock.isOrderedBefore)
+    }
+
+    func addScheduleBlock(_ block: ScheduleBlock) throws {
+        // A non-finite instant would save a row that every later read refuses.
+        guard block.createdAt.timeIntervalSince1970.isFinite else {
+            throw ScheduleRepositoryError.invalidRow
+        }
+        try transaction {
+            // Checked first so a duplicate is reported as such, never as a
+            // generic constraint failure, and the saved block is never replaced.
+            if try scheduleBlockExists(block.id) {
+                throw ScheduleRepositoryError.duplicateID(block.id)
+            }
+            let statement = try prepare(
+                "INSERT INTO schedule_blocks (\(Self.scheduleBlockColumns)) VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            defer { sqlite3_finalize(statement) }
+            try bind(block.id.uuidString, at: 1, to: statement)
+            try bindScheduleContent(block.content, startingAt: 2, to: statement)
+            try bindInstant(block.createdAt, at: 6, to: statement)
+            try check(sqlite3_step(statement), expected: SQLITE_DONE, operation: "insert schedule block")
+        }
+    }
+
+    func updateScheduleBlock(id: UUID, to content: ScheduleBlockContent) throws -> ScheduleBlock {
+        try transaction {
+            // Reading the saved row keeps its creation instant exactly as stored,
+            // and refuses to overwrite (and so silently repair) a malformed row.
+            let saved = try requireScheduleBlock(id)
+            let statement = try prepare(
+                "UPDATE schedule_blocks SET title = ?, day_key = ?, start_minute = ?, end_minute = ? WHERE id = ?"
+            )
+            defer { sqlite3_finalize(statement) }
+            try bindScheduleContent(content, startingAt: 1, to: statement)
+            try bind(id.uuidString, at: 5, to: statement)
+            try executeWrite(statement, id: id, operation: "update schedule block",
+                             notFound: ScheduleRepositoryError.notFound(id))
+            return saved.replacingContent(content)
+        }
+    }
+
+    func deleteScheduleBlock(id: UUID) throws {
+        try transaction {
+            let statement = try prepare("DELETE FROM schedule_blocks WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, at: 1, to: statement)
+            try executeWrite(statement, id: id, operation: "delete schedule block",
+                             notFound: ScheduleRepositoryError.notFound(id))
+        }
+    }
+
+    private func scheduleBlockExists(_ id: UUID) throws -> Bool {
+        let statement = try prepare("SELECT 1 FROM schedule_blocks WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, at: 1, to: statement)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return false }
+        try check(step, expected: SQLITE_ROW, operation: "check schedule block ID")
+        return true
+    }
+
+    private func requireScheduleBlock(_ id: UUID) throws -> ScheduleBlock {
+        let statement = try prepare(
+            "SELECT \(Self.scheduleBlockColumns) FROM schedule_blocks WHERE id = ?"
+        )
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, at: 1, to: statement)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { throw ScheduleRepositoryError.notFound(id) }
+        try check(step, expected: SQLITE_ROW, operation: "read schedule block")
+        return try scheduleBlock(from: statement)
+    }
+
+    /// Binds title, day key, start and end to four consecutive parameters.
+    private func bindScheduleContent(_ content: ScheduleBlockContent, startingAt index: Int32,
+                                     to statement: OpaquePointer) throws {
+        try bind(content.title, at: index, to: statement)
+        try bind(content.dayKey, at: index + 1, to: statement)
+        try check(sqlite3_bind_int64(statement, index + 2, Int64(content.startMinute)),
+                  operation: "bind start_minute")
+        try check(sqlite3_bind_int64(statement, index + 3, Int64(content.endMinute)),
+                  operation: "bind end_minute")
+    }
+
+    /// Decodes one row through the validating `ScheduleBlock` initialiser. Any
+    /// value that SQLite or validation would have to coerce, trim or normalise
+    /// (a REAL minute, a padded title, a lowercase ID) is an invalid row.
+    private func scheduleBlock(from statement: OpaquePointer) throws -> ScheduleBlock {
+        do {
+            let idText = try text(at: 0, from: statement)
+            let title = try text(at: 1, from: statement)
+            let dayKey = try text(at: 2, from: statement)
+            guard let id = UUID(uuidString: idText), id.uuidString == idText,
+                  sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
+                  sqlite3_column_type(statement, 4) == SQLITE_INTEGER,
+                  sqlite3_column_type(statement, 5) == SQLITE_FLOAT,
+                  let createdAt = try instant(at: 5, from: statement) else {
+                throw ScheduleRepositoryError.invalidRow
+            }
+            let day = try GregorianDay(key: dayKey)
+            let block = try ScheduleBlock(
+                id: id, title: title, day: day,
+                startMinute: Int(sqlite3_column_int64(statement, 3)),
+                endMinute: Int(sqlite3_column_int64(statement, 4)),
+                createdAt: createdAt
+            )
+            guard block.title == title, block.dayKey == dayKey else {
+                throw ScheduleRepositoryError.invalidRow
+            }
+            return block
+        } catch {
+            throw ScheduleRepositoryError.invalidRow
+        }
+    }
+}

@@ -2460,3 +2460,272 @@ extension SQLiteNoteRepositoryTests {
         )
     }
 }
+
+// MARK: - Calendar block storage
+
+extension SQLiteNoteRepositoryTests {
+    func testScheduleBlocksRoundTripAndSurviveClosingAndReopening() throws {
+        let deepWork = try block("Deep work ' quote 📝", day: "2026-11-16", 540, 600,
+                                 createdAt: 1_763_280_000.5)
+        let lunch = try block("Lunch", day: "2026-11-18", 720, 780, createdAt: 1_763_280_001)
+        let fullDay = try block("Off", day: "2026-11-22", 0, 1440, createdAt: 3)
+        let week = try range("2026-11-16", "2026-11-23")
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try store.scheduleBlocks(in: week), [])
+            for saved in [fullDay, deepWork, lunch] { try store.addScheduleBlock(saved) }
+            XCTAssertEqual(try store.scheduleBlocks(in: week), [deepWork, lunch, fullDay])
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.scheduleBlocks(in: week), [deepWork, lunch, fullDay])
+        XCTAssertEqual(try rawRows("SELECT id, title, day_key, start_minute, end_minute, typeof(created_at) FROM schedule_blocks WHERE id = '\(deepWork.id.uuidString)'"),
+                       [[deepWork.id.uuidString, "Deep work ' quote 📝", "2026-11-16", "540", "600", "real"]])
+    }
+
+    func testScheduleBlocksReadInDayStartEndCreationThenIDOrder() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let firstID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let secondID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        let expected = [
+            try block("Monday late", day: "2026-11-16", 1380, 1440, createdAt: 1),
+            try block("Tuesday 9-10 earlier", day: "2026-11-17", 540, 600, createdAt: 5),
+            try block("Tuesday 9-10 later, first ID", day: "2026-11-17", 540, 600, createdAt: 9, id: firstID),
+            try block("Tuesday 9-10 later, second ID", day: "2026-11-17", 540, 600, createdAt: 9, id: secondID),
+            try block("Tuesday 9-11", day: "2026-11-17", 540, 660, createdAt: 2),
+            try block("Tuesday 10-11", day: "2026-11-17", 600, 660, createdAt: 0),
+            try block("Wednesday", day: "2026-11-18", 0, 15, createdAt: 0)
+        ]
+        // Insertion (rowid) order deliberately differs from every sort key.
+        for index in [5, 3, 6, 0, 2, 4, 1] { try store.addScheduleBlock(expected[index]) }
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-16", "2026-11-23")), expected)
+    }
+
+    func testScheduleRangeIncludesStartDayAndExcludesEndDayUsingDayIndex() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let before = try block("Sunday before", day: "2026-11-15", 1425, 1440, createdAt: 1)
+        let first = try block("Monday", day: "2026-11-16", 0, 15, createdAt: 2)
+        let last = try block("Sunday", day: "2026-11-22", 1425, 1440, createdAt: 3)
+        let after = try block("Next Monday", day: "2026-11-23", 0, 15, createdAt: 4)
+        let leap = try block("Leap day", day: "2024-02-29", 60, 120, createdAt: 5)
+        for saved in [after, last, before, first, leap] { try store.addScheduleBlock(saved) }
+
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-16", "2026-11-23")), [first, last])
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-16", "2026-11-17")), [first])
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-17", "2026-11-22")), [])
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-15", "2026-11-24")),
+                       [before, first, last, after])
+        XCTAssertEqual(try store.scheduleBlocks(in: .month(containing: GregorianDay(key: "2024-02-01"))), [leap])
+
+        let plan = try rawRows("""
+            EXPLAIN QUERY PLAN SELECT id, title, day_key, start_minute, end_minute, created_at
+            FROM schedule_blocks WHERE day_key >= '2026-11-16' AND day_key < '2026-11-23'
+            ORDER BY day_key ASC, start_minute ASC, end_minute ASC, created_at ASC, id ASC
+            """)
+        XCTAssertTrue(plan.contains { row in
+            (row.last ?? nil)?.contains("USING INDEX schedule_blocks_day_key_idx (day_key>? AND day_key<?)") == true
+        }, "\(plan)")
+    }
+
+    func testUpdateReplacesEachFieldKeepsIdentityAndCreationAndSurvivesReopen() throws {
+        let original = try block("Plan", day: "2026-11-16", 540, 600, createdAt: 1_763_280_000.25)
+        let week = try range("2026-11-16", "2026-11-23")
+        let edits: [(title: String, day: String, start: Int, end: Int)] = [
+            ("Plan the week", "2026-11-16", 540, 600),
+            ("Plan the week", "2026-11-20", 540, 600),
+            ("Plan the week", "2026-11-20", 480, 600),
+            ("Plan the week", "2026-11-20", 480, 1440),
+            ("  Trimmed title  ", "2026-11-17", 0, 15)
+        ]
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.addScheduleBlock(original)
+            for edit in edits {
+                let content = try ScheduleBlockContent(title: edit.title, day: GregorianDay(key: edit.day),
+                                                       startMinute: edit.start, endMinute: edit.end)
+                let saved = try store.updateScheduleBlock(id: original.id, to: content)
+                XCTAssertEqual(saved, ScheduleBlock(id: original.id, content: content,
+                                                    createdAt: original.createdAt))
+                XCTAssertEqual(try store.scheduleBlocks(in: week), [saved], edit.title)
+            }
+        }
+        let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+        XCTAssertEqual(try reopened.scheduleBlocks(in: week), [
+            try block("Trimmed title", day: "2026-11-17", 0, 15, createdAt: 1_763_280_000.25, id: original.id)
+        ])
+        XCTAssertEqual(try rawRows("SELECT COUNT(*) FROM schedule_blocks"), [["1"]])
+    }
+
+    func testDeleteRemovesOnlyTheBlockAndSurvivesReopen() throws {
+        let kept = try block("Kept", day: "2026-11-16", 540, 600, createdAt: 1)
+        let removed = try block("Removed", day: "2026-11-16", 540, 600, createdAt: 2)
+        let week = try range("2026-11-16", "2026-11-23")
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            try store.addScheduleBlock(kept)
+            try store.addScheduleBlock(removed)
+            try store.deleteScheduleBlock(id: removed.id)
+            XCTAssertEqual(try store.scheduleBlocks(in: week), [kept])
+        }
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).scheduleBlocks(in: week), [kept])
+    }
+
+    func testMissingDuplicateAndUnstorableBlocksThrowWithoutChangingSavedRows() throws {
+        let saved = try block("Saved", day: "2026-11-16", 540, 600, createdAt: 1)
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.addScheduleBlock(saved)
+        let before = try rawRows("SELECT rowid, * FROM schedule_blocks")
+        let missing = UUID()
+        let content = try ScheduleBlockContent(title: "Other", day: GregorianDay(key: "2026-11-17"),
+                                               startMinute: 0, endMinute: 15)
+
+        XCTAssertThrowsError(try store.updateScheduleBlock(id: missing, to: content)) {
+            XCTAssertEqual($0 as? ScheduleRepositoryError, .notFound(missing))
+        }
+        XCTAssertThrowsError(try store.deleteScheduleBlock(id: missing)) {
+            XCTAssertEqual($0 as? ScheduleRepositoryError, .notFound(missing))
+        }
+        XCTAssertThrowsError(try store.addScheduleBlock(ScheduleBlock(id: saved.id, content: content,
+                                                                       createdAt: Date(timeIntervalSince1970: 9)))) {
+            XCTAssertEqual($0 as? ScheduleRepositoryError, .duplicateID(saved.id))
+        }
+        for instant in [Double.infinity, -Double.infinity] {
+            XCTAssertThrowsError(try store.addScheduleBlock(
+                ScheduleBlock(id: UUID(), content: content, createdAt: Date(timeIntervalSince1970: instant))
+            )) {
+                XCTAssertEqual($0 as? ScheduleRepositoryError, .invalidRow)
+            }
+        }
+        XCTAssertEqual(try rawRows("SELECT rowid, * FROM schedule_blocks"), before)
+        XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-16", "2026-11-23")), [saved])
+    }
+
+    func testScheduleWriteFailuresRollBackThenRetrySafely() throws {
+        let saved = try block("Saved", day: "2026-11-16", 540, 600, createdAt: 1)
+        let added = try block("Added", day: "2026-11-17", 540, 600, createdAt: 2)
+        let week = try range("2026-11-16", "2026-11-23")
+        let content = try ScheduleBlockContent(title: "Edited", day: GregorianDay(key: "2026-11-18"),
+                                               startMinute: 600, endMinute: 660)
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        try store.addScheduleBlock(saved)
+        try executeRaw(
+            """
+            CREATE TRIGGER reject_block_insert BEFORE INSERT ON schedule_blocks
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            CREATE TRIGGER reject_block_update BEFORE UPDATE ON schedule_blocks
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            CREATE TRIGGER reject_block_delete BEFORE DELETE ON schedule_blocks
+            BEGIN SELECT RAISE(ABORT, 'write rejected'); END;
+            """
+        )
+        let before = try rawRows("SELECT rowid, * FROM schedule_blocks")
+        let writes: [() throws -> Void] = [
+            { try store.addScheduleBlock(added) },
+            { _ = try store.updateScheduleBlock(id: saved.id, to: content) },
+            { try store.deleteScheduleBlock(id: saved.id) }
+        ]
+        for write in writes {
+            XCTAssertThrowsError(try write()) { error in
+                guard case SQLiteNoteStoreError.databaseError = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM schedule_blocks"), before)
+        }
+
+        // No transaction is left open: the same connection writes once the cause is gone.
+        try executeRaw("DROP TRIGGER reject_block_insert; DROP TRIGGER reject_block_update; DROP TRIGGER reject_block_delete;")
+        try store.addScheduleBlock(added)
+        let edited = try store.updateScheduleBlock(id: saved.id, to: content)
+        try store.deleteScheduleBlock(id: added.id)
+        XCTAssertEqual(try SQLiteNoteRepository(databaseURL: databaseURL).scheduleBlocks(in: week), [edited])
+    }
+
+    func testMalformedScheduleRowsAreReadErrorsWithoutRepairOrSkipping() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let valid = try block("Valid", day: "2026-11-16", 540, 600, createdAt: 1)
+        try store.addScheduleBlock(valid)
+        let week = try range("2026-11-16", "2026-11-23")
+        let badID = "00000000-0000-0000-0000-0000000000D1"
+        let content = try ScheduleBlockContent(title: "Edited", day: GregorianDay(key: "2026-11-17"),
+                                               startMinute: 0, endMinute: 15)
+        let cases: [(name: String, values: String)] = [
+            ("off-grid start", "('\(badID)', 'T', '2026-11-17', 545, 600, 1.0)"),
+            ("off-grid end", "('\(badID)', 'T', '2026-11-17', 540, 610, 1.0)"),
+            ("zero length", "('\(badID)', 'T', '2026-11-17', 600, 600, 1.0)"),
+            ("reversed", "('\(badID)', 'T', '2026-11-17', 660, 600, 1.0)"),
+            ("past midnight", "('\(badID)', 'T', '2026-11-17', 1425, 1455, 1.0)"),
+            ("negative start", "('\(badID)', 'T', '2026-11-17', -15, 600, 1.0)"),
+            ("real minute", "('\(badID)', 'T', '2026-11-17', 540.5, 600, 1.0)"),
+            ("text minute", "('\(badID)', 'T', '2026-11-17', 'nine', 600, 1.0)"),
+            ("text created_at", "('\(badID)', 'T', '2026-11-17', 540, 600, 'soon')"),
+            ("infinite created_at", "('\(badID)', 'T', '2026-11-17', 540, 600, 1e999)"),
+            ("blob title", "('\(badID)', X'54', '2026-11-17', 540, 600, 1.0)"),
+            ("blank title", "('\(badID)', '   ', '2026-11-17', 540, 600, 1.0)"),
+            ("untrimmed title", "('\(badID)', ' T', '2026-11-17', 540, 600, 1.0)"),
+            ("multiline title", "('\(badID)', 'A' || char(10) || 'B', '2026-11-17', 540, 600, 1.0)"),
+            ("invalid day", "('\(badID)', 'T', '2026-11-17x', 540, 600, 1.0)"),
+            ("lowercase id", "('\(badID.lowercased())', 'T', '2026-11-17', 540, 600, 1.0)"),
+            ("non-UUID id", "('block-1', 'T', '2026-11-17', 540, 600, 1.0)")
+        ]
+        for testCase in cases {
+            // Written by another connection after this one opened and validated the store.
+            try executeRaw("PRAGMA ignore_check_constraints = ON; INSERT INTO schedule_blocks (\(Self.blockColumns)) VALUES \(testCase.values);")
+            let rows = try rawRows("SELECT rowid, * FROM schedule_blocks ORDER BY rowid")
+            XCTAssertThrowsError(try store.scheduleBlocks(in: week), testCase.name) {
+                XCTAssertEqual($0 as? ScheduleRepositoryError, .invalidRow, testCase.name)
+            }
+            // A malformed row outside the requested range does not fail that read.
+            XCTAssertEqual(try store.scheduleBlocks(in: range("2026-11-16", "2026-11-17")), [valid], testCase.name)
+            // Updating a malformed row would silently repair it, so it is refused.
+            // (A row whose ID is not the canonical spelling cannot be addressed at all.)
+            let addressable = !["lowercase id", "non-UUID id"].contains(testCase.name)
+            let id = try XCTUnwrap(UUID(uuidString: badID))
+            XCTAssertThrowsError(try store.updateScheduleBlock(id: id, to: content), testCase.name) {
+                XCTAssertEqual($0 as? ScheduleRepositoryError,
+                               addressable ? .invalidRow : .notFound(id), testCase.name)
+            }
+            XCTAssertEqual(try rawRows("SELECT rowid, * FROM schedule_blocks ORDER BY rowid"), rows, testCase.name)
+            try executeRaw("DELETE FROM schedule_blocks WHERE rowid != (SELECT MIN(rowid) FROM schedule_blocks)")
+        }
+        XCTAssertEqual(try store.scheduleBlocks(in: week), [valid])
+    }
+
+    func testScheduleWritesLeaveTasksLaterAndCategoriesUnchanged() throws {
+        let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+        let work = try store.createCategory(name: "Work")
+        try store.add(note("Today task", day: "2026-11-16", createdAt: 1, categoryID: work.id))
+        try store.add(note("Other day", day: "2026-11-17", createdAt: 2))
+        try store.addLater(later("Someday", createdAt: 3, categoryID: work.id))
+        let tables = ["notes", "later_tasks", "categories"]
+        func snapshot() throws -> [[[String?]]] {
+            try tables.map { try rawRows("SELECT rowid, * FROM \($0) ORDER BY rowid") }
+        }
+        let rows = try snapshot()
+        let schema = try schemaSnapshot()
+
+        let first = try block("Block", day: "2026-11-16", 540, 600, createdAt: 4)
+        let second = try block("Second", day: "2026-11-17", 600, 660, createdAt: 5)
+        try store.addScheduleBlock(first)
+        try store.addScheduleBlock(second)
+        _ = try store.updateScheduleBlock(id: first.id, to: ScheduleBlockContent(
+            title: "Moved", day: GregorianDay(key: "2026-11-18"), startMinute: 0, endMinute: 1440))
+        try store.deleteScheduleBlock(id: second.id)
+
+        XCTAssertEqual(try snapshot(), rows)
+        XCTAssertEqual(try schemaSnapshot(), schema)
+        XCTAssertEqual(try store.notes(for: "2026-11-16").map(\.text), ["Today task"])
+        XCTAssertEqual(try store.laterTasks().map(\.text), ["Someday"])
+        XCTAssertEqual(try store.categories(), [work])
+        XCTAssertEqual(try store.incompleteCount(for: "2026-11-16"), 1)
+    }
+
+    private func block(_ title: String, day: String, _ start: Int, _ end: Int,
+                       createdAt: TimeInterval, id: UUID = UUID()) throws -> ScheduleBlock {
+        try ScheduleBlock(id: id, title: title, day: GregorianDay(key: day), startMinute: start,
+                          endMinute: end, createdAt: Date(timeIntervalSince1970: createdAt))
+    }
+
+    private func range(_ start: String, _ end: String) throws -> HistoryDayRange {
+        try HistoryDayRange(start: GregorianDay(key: start), end: GregorianDay(key: end))
+    }
+}
