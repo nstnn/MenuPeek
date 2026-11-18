@@ -7,7 +7,7 @@ The task window's whole content (rail, lists, composer, History, Categories and 
 - `zoom-commands`: the three View items and their shortcuts. They act only while the task window is on screen and no other MenuPocket window (Quick Add panel, a row popover) holds the keyboard; otherwise they are disabled.
 - `zoom-limits`: Zoom In disabled at 150 % or when the next level does not fit the screen; Zoom Out disabled at 80 %; Actual Size disabled at 100 %.
 - `zoom-persistence`: the zoom survives closing the window and relaunching; a missing or unrecognized stored value means 100 % and is not rewritten.
-- `zoom-window-floor`: the raised minimum content size and growth of a smaller window.
+- `zoom-window-floor`: the raised minimum content size and growth of a smaller window. Zooming back out (or Actual Size) returns a grown window to the size it had before it grew, keeping its top-left corner; a manual resize in between keeps the user's size instead. A window launched at a saved zoom that grew it returns to the default 1000 × 700 pt.
 - `zoom-indicator`: each zoom change shows a pill at the top center of the task window naming the new level ("110%"; "100% Actual Size" at the default). It keeps one size at every zoom, ignores the pointer, fades out about 1.2 s after the last change, and VoiceOver announces "Zoom 110%". A disabled command (at a limit) changes nothing and shows nothing.
 - `zoom-interaction`: text fields, the row `…` popover anchor, drag handles and drop targets keep working at every level. Popovers and sheets are separate windows and are not scaled.
 
@@ -26,6 +26,7 @@ Preconditions:
 - **Interaction at zoom.** At 150 %, follow the add, edit and row `…` steps from [Today](today-tasks.md): `key cmd+n`, `type`, `key return` saves the row (check `db.txt`); `press "label=Actions for task: Buy coffee beans"` opens the popover next to its `…` button (screenshot); `key escape` closes it. Pointer drags are Not tested through AX.
 - **Indicator.** Right after `key cmd+equal`, `$F ax <run> find id=zoomIndicator` reports label `Zoom 110%` (screenshot shows the pill at the top center); after `key cmd+0` it reports `Zoom 100%` and the screenshot shows "Actual Size". About 2 s later `find id=zoomIndicator` finds nothing.
 - **Zoom out and reset.** `key cmd+0`: `frame id=todayTab` matches the baseline and the key is gone from `defaults.plist`. `key cmd+minus` twice reaches 80 %, the frame is about 0.8 × baseline, and `menu-path View "Zoom Out"` exits 4.
+- **Shrink back.** At 100 %, resize the window to its 800 × 560 pt content minimum, then `key cmd+equal`: `windows` shows 880 × 616 pt of content; `key cmd+0` returns it to 800 × 560 with the same top edge. Repeat, but resize by hand between the two keys: the window keeps the hand-picked size.
 - **Persistence.** At a non-100 % level, `$F stop <run>`, snapshot, relaunch the same run without reseeding: `frame id=todayTab` matches the level before stopping.
 - **Other window key.** Turn Quick Add on in Settings, open the panel (`$F quickadd <run>`), and check that `menu-path View "Zoom In"` exits 4 and the task window's frames do not change.
 

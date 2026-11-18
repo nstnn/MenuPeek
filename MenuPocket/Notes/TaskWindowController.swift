@@ -605,6 +605,14 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     let zoom: TaskWindowZoom
     private var isTerminating = false
 
+    /// The content size before a zoom grew the window, and the size it grew to.
+    /// Zooming back out returns to `original`; a manual resize drops it.
+    private struct ZoomRestore {
+        var original: NSSize
+        var grown: NSSize
+    }
+    private var zoomRestore: ZoomRestore?
+
     init(state: DailyNotesState, model: AppModel? = nil, zoom: TaskWindowZoom = TaskWindowZoom(),
          onSettings: @escaping () -> Void) {
         self.state = state
@@ -633,6 +641,10 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
         window.setContentSize(NSSize(width: max(Self.initialContentSize.width, minimum.width),
                                      height: max(Self.initialContentSize.height, minimum.height)))
         window.contentMinSize = minimum
+        let startSize = window.contentRect(forFrameRect: window.frame).size
+        if !Self.sameSize(startSize, Self.initialContentSize) {
+            zoomRestore = ZoomRestore(original: Self.initialContentSize, grown: startSize)
+        }
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -702,15 +714,30 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// Raises the window's minimum to the new zoom and grows the window,
-    /// keeping its top-left corner, when it is now smaller than that.
+    /// keeping its top-left corner, when it is now smaller than that. Zooming
+    /// back out returns the window to the size it had before it grew, unless
+    /// the window was resized by hand in between.
     private func applyZoomToWindow() {
         guard let window else { return }
         let minimum = minimumContentSize
         window.contentMinSize = minimum
+        let current = window.contentRect(forFrameRect: window.frame).size
+        if let restore = zoomRestore, !Self.sameSize(current, restore.grown) {
+            zoomRestore = nil
+        }
+        let original = zoomRestore?.original ?? current
+        let target = NSSize(width: max(original.width, minimum.width),
+                            height: max(original.height, minimum.height))
+        if !Self.sameSize(current, target) {
+            setContentSizeKeepingTopLeft(target, of: window)
+        }
+        let reached = window.contentRect(forFrameRect: window.frame).size
+        zoomRestore = Self.sameSize(reached, original) ? nil : ZoomRestore(original: original, grown: reached)
+    }
+
+    private func setContentSizeKeepingTopLeft(_ size: NSSize, of window: NSWindow) {
         let content = window.contentRect(forFrameRect: window.frame)
-        guard content.width < minimum.width || content.height < minimum.height else { return }
-        let grown = NSSize(width: max(content.width, minimum.width), height: max(content.height, minimum.height))
-        var frame = window.frameRect(forContentRect: NSRect(origin: content.origin, size: grown))
+        var frame = window.frameRect(forContentRect: NSRect(origin: content.origin, size: size))
         frame.origin.y = window.frame.maxY - frame.height
         if let screen = window.screen {
             let visible = screen.visibleFrame
@@ -719,6 +746,10 @@ final class TaskWindowController: NSWindowController, NSWindowDelegate {
             frame.origin.y = max(frame.origin.y, visible.minY)
         }
         window.setFrame(frame, display: true, animate: false)
+    }
+
+    private static func sameSize(_ a: NSSize, _ b: NSSize) -> Bool {
+        abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5
     }
 
     /// Bring the retained window forward even when active work prevents Today

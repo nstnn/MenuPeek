@@ -89,4 +89,56 @@ final class TaskWindowZoomTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: key))
         window.close()
     }
+
+    func testZoomingBackOutRestoresTheSizeTheWindowHadBeforeItGrew() throws {
+        let (controller, window) = try makeController()
+        window.setContentSize(TaskWindowController.minimumContentSize)
+        let top = window.frame.maxY
+
+        controller.zoomIn()
+        XCTAssertEqual(contentSize(window), NSSize(width: 880, height: 616))
+        XCTAssertEqual(window.frame.maxY, top, accuracy: 0.5, "The top edge stays put")
+        controller.zoomOut()
+        XCTAssertEqual(contentSize(window), TaskWindowController.minimumContentSize)
+
+        controller.zoomIn()
+        controller.resetZoom()
+        XCTAssertEqual(contentSize(window), TaskWindowController.minimumContentSize)
+        XCTAssertEqual(window.frame.maxY, top, accuracy: 0.5)
+        window.close()
+    }
+
+    func testAManualResizeAfterGrowingKeepsTheUsersSize() throws {
+        let (controller, window) = try makeController()
+        window.setContentSize(TaskWindowController.minimumContentSize)
+        controller.zoomIn()
+        window.setContentSize(NSSize(width: 950, height: 650))
+        controller.zoomOut()
+        XCTAssertEqual(contentSize(window), NSSize(width: 950, height: 650))
+        window.close()
+    }
+
+    func testALargerWindowIsNotResizedByZoom() throws {
+        let (controller, window) = try makeController()
+        let start = contentSize(window)
+        controller.zoomIn()
+        controller.zoomOut()
+        controller.zoomOut()
+        XCTAssertEqual(contentSize(window), start)
+        window.close()
+    }
+
+    private func makeController() throws -> (TaskWindowController, NSWindow) {
+        let state = DailyNotesState(repositoryFactory: { throw CocoaError(.fileNoSuchFile) },
+                                    notificationCenter: NotificationCenter(),
+                                    workspaceNotificationCenter: NotificationCenter(),
+                                    categoryPreferences: isolatedCategoryPreferences())
+        let controller = TaskWindowController(state: state, zoom: TaskWindowZoom(userDefaults: isolatedDefaults()),
+                                              onSettings: {})
+        return (controller, try XCTUnwrap(controller.window))
+    }
+
+    private func contentSize(_ window: NSWindow) -> NSSize {
+        window.contentRect(forFrameRect: window.frame).size
+    }
 }
