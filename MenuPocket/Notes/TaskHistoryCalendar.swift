@@ -4,7 +4,9 @@ extension GregorianDay {
     /// Days since 1970-01-01 in the proleptic Gregorian calendar (H. Hinnant's
     /// days_from_civil). Pure civil arithmetic: no time zone, DST, or Julian
     /// cutover, so it agrees with GregorianDay's own leap rule for 0001...9999.
-    var civilDayNumber: Int {
+    var civilDayNumber: Int { Self.civilDayNumber(year: year, month: month, day: day) }
+
+    static func civilDayNumber(year: Int, month: Int, day: Int) -> Int {
         let y = month <= 2 ? year - 1 : year
         let era = (y >= 0 ? y : y - 399) / 400
         let yearOfEra = y - era * 400
@@ -15,6 +17,46 @@ extension GregorianDay {
 
     /// 1 = Sunday ... 7 = Saturday, matching Calendar.Component.weekday.
     var weekday: Int { ((civilDayNumber % 7 + 11) % 7) + 1 }
+
+    /// Days since the most recent `firstWeekday` (1 = Sunday), in 0...6. This is
+    /// both a week's start offset and a month grid's leading padding.
+    func weekdayOffset(from firstWeekday: Int) -> Int { (weekday - firstWeekday + 7) % 7 }
+
+    private static let firstCivilDayNumber = civilDayNumber(year: 1, month: 1, day: 1)
+    private static let lastCivilDayNumber = civilDayNumber(year: 9999, month: 12, day: 31)
+
+    /// A canonical key from numeric parts; invalid parts throw like `init(key:)`.
+    init(year: Int, month: Int, day: Int) throws {
+        guard (1...9999).contains(year), (1...12).contains(month), (1...31).contains(day) else {
+            throw TaskHistoryDomainError.invalidDayKey("\(year)-\(month)-\(day)")
+        }
+        try self.init(key: String(format: "%04d-%02d-%02d", locale: Locale(identifier: "en_US_POSIX"),
+                                  year, month, day))
+    }
+
+    /// Inverse of `civilDayNumber` (H. Hinnant's civil_from_days). A day outside
+    /// 0001-01-01...9999-12-31 throws instead of wrapping or overflowing.
+    init(civilDayNumber number: Int) throws {
+        guard (Self.firstCivilDayNumber...Self.lastCivilDayNumber).contains(number) else {
+            throw TaskHistoryDomainError.invalidRange
+        }
+        let z = number + 719_468
+        let era = (z >= 0 ? z : z - 146_096) / 146_097
+        let dayOfEra = z - era * 146_097
+        let yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+        let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+        let shiftedMonth = (5 * dayOfYear + 2) / 153
+        let day = dayOfYear - (153 * shiftedMonth + 2) / 5 + 1
+        let month = shiftedMonth < 10 ? shiftedMonth + 3 : shiftedMonth - 9
+        try self.init(year: yearOfEra + era * 400 + (month <= 2 ? 1 : 0), month: month, day: day)
+    }
+
+    /// The civil day `days` away; throws outside the storable years.
+    func adding(days: Int) throws -> GregorianDay {
+        let (number, overflow) = civilDayNumber.addingReportingOverflow(days)
+        guard !overflow else { throw TaskHistoryDomainError.invalidRange }
+        return try GregorianDay(civilDayNumber: number)
+    }
 }
 
 extension HistoryDayRange {
@@ -24,8 +66,16 @@ extension HistoryDayRange {
     /// The day of this month nearest to `preferred`, clamped to 1...dayCount
     /// (for example, the 31st becomes February 28 or 29).
     func day(clampedTo preferred: Int) throws -> GregorianDay {
-        try GregorianDay(key: String(format: "%04d-%02d-%02d", locale: Locale(identifier: "en_US_POSIX"),
-                                     start.year, start.month, min(max(preferred, 1), dayCount)))
+        try GregorianDay(year: start.year, month: start.month, day: min(max(preferred, 1), dayCount))
+    }
+
+    /// Blank cells before the first day in a seven-column grid whose first
+    /// column is `firstWeekday` (1 = Sunday).
+    func leadingPadding(firstWeekday: Int) -> Int { start.weekdayOffset(from: firstWeekday) }
+
+    /// Blank cells after the last day so the final row is complete.
+    func trailingPadding(firstWeekday: Int) -> Int {
+        (7 - (leadingPadding(firstWeekday: firstWeekday) + dayCount) % 7) % 7
     }
 }
 
@@ -110,8 +160,7 @@ struct HistoryMonthGrid: Equatable {
                 }
             }
         }
-        let leading = (month.start.weekday - firstWeekday + 7) % 7
-        var cells = (0..<leading).map(HistoryCalendarCell.padding)
+        var cells = (0..<month.leadingPadding(firstWeekday: firstWeekday)).map(HistoryCalendarCell.padding)
         for number in 1...month.dayCount {
             let day = try month.day(clampedTo: number)
             let availability: HistoryDayAvailability = if let byDay {
@@ -122,7 +171,9 @@ struct HistoryMonthGrid: Equatable {
             cells.append(.day(HistoryCalendarDay(day: day, availability: availability, isToday: day == today,
                                                  isSelected: day == selectedDay, isFuture: day > today)))
         }
-        while !cells.count.isMultiple(of: 7) { cells.append(.padding(cells.count)) }
+        let trailingStart = cells.count
+        cells += (trailingStart..<trailingStart + month.trailingPadding(firstWeekday: firstWeekday))
+            .map(HistoryCalendarCell.padding)
         self.month = month
         self.firstWeekday = firstWeekday
         self.cells = cells
