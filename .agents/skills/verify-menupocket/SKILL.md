@@ -39,6 +39,7 @@ Launch is ready when it prints `Ready: PID <pid>, status item: … title="1/4" �
 
 - **`--seed empty`** (the default) gives a fresh schema-v6 store created by the production migrations: Today shows `0/0` and an empty state.
 - **`--seed basic`** adds categories `Work` and `Errands`. Today has `Review pull request` (Work), `Write release notes` (Work, completed), `Buy coffee beans` (Errands), and `Water the plants` (General). Yesterday has `Call the dentist` (unfinished) and `Send weekly report` (completed). Three days ago has `Renew library books` (unfinished). Later has `Plan the team offsite` (Work) and `Read the SQLite docs` (General).
+- **`--seed calendar`** is `basic` plus eleven Calendar blocks in the week (Monday first) that contains the fixture's today: Monday `Standup` 09:00–09:15 and `Deep work` 09:30–12:00; today `Design review` 10:00–11:00 and `Pairing` 10:30–11:30 (overlap), `Lunch` 12:00–13:00 and `Focus` 13:00–14:30 (back to back); Thursday `Interviews` 14:00–16:00, `Sync` 14:30–15:30 and `Retro` 15:00–16:00 (three-way overlap); Friday `Quarterly planning with the whole product team` 13:00–15:00; Sunday `Wind down` 23:45–24:00. When today is Monday or Thursday its blocks share that day.
 - **Seeding** happens only when the run's database does not exist yet. Relaunching the same run keeps every change, which is how persistence is checked.
 - **`--now 2026-10-08T16:00:00Z --tz America/Toronto`** fixes the clock for date-sensitive checks. Without it the fixture uses the real clock.
 

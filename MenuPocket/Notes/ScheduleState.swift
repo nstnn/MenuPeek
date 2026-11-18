@@ -95,6 +95,12 @@ final class ScheduleState {
 
     func isToday(_ day: GregorianDay) -> Bool { day == today }
 
+    /// The civil day and minute now, on the same clock and time zone as Today.
+    /// Read by the current-time line on each tick; never changes the period.
+    func currentTime() -> ScheduleCurrentTime? {
+        ScheduleCurrentTime(instant: noteDay.now(), calendar: noteDay.calendar)
+    }
+
     /// The loaded blocks on one day, in repository order.
     func blocks(on day: GregorianDay) -> [ScheduleBlock] {
         blocks?.filter { $0.day == day } ?? []

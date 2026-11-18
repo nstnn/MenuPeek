@@ -80,6 +80,18 @@ final class ScheduleStateTests: XCTestCase {
         return block
     }
 
+    // MARK: - Current time
+
+    func testCurrentTimeUsesTheTodayClockWithoutReading() throws {
+        let state = try makeState()
+        clock.now = "2026-11-18T16:45:00Z"
+        let now = try XCTUnwrap(state.currentTime())
+        XCTAssertEqual(now.day, try day("2026-11-18"))
+        XCTAssertEqual(now.minute, 16 * 60 + 45, accuracy: 0.0001)
+        XCTAssertEqual(repository.reads, [])
+        XCTAssertEqual(state.content, .notLoaded)
+    }
+
     // MARK: - Loading and visibility
 
     func testStartsOnThisWeekAndReadsOnlyWhileVisible() throws {

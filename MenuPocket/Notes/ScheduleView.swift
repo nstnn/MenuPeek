@@ -3,9 +3,10 @@ import SwiftUI
 /// The Calendar pane in the task window's right column: the visible period's
 /// title, the Day/Week/Month switch, Previous/Today/Next, and the body below.
 ///
-/// The time grid and month cells arrive in later tasks; until then the body is a
-/// short summary of the loaded period. A failed read never shows an empty
-/// calendar: it shows the period's load message with Retry.
+/// Day and Week show the loaded blocks on a time grid (`ScheduleTimeGridView`).
+/// Month cells arrive in a later task; until then Month shows a short summary
+/// of the loaded period. A failed read never shows an empty calendar: it shows
+/// the period's load message with Retry.
 struct ScheduleView: View {
     /// nil when the Calendar state could not be created; `issue` explains why.
     let schedule: ScheduleState?
@@ -30,10 +31,16 @@ struct ScheduleView: View {
             .padding(.top, 30)
             .padding(.bottom, 20)
             Rectangle().fill(DaybookPalette.rule(colorScheme)).frame(height: 1).accessibilityHidden(true)
-            content
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if let schedule, schedule.mode != .month, let blocks = schedule.blocks {
+                ScheduleTimeGridView(schedule: schedule, blocks: blocks)
+                    .padding(.leading, 12)
+                    .padding(.trailing, 20)
+            } else {
+                content
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background { DaybookPalette.canvas(colorScheme) }
