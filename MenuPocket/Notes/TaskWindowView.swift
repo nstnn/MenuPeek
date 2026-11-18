@@ -712,12 +712,16 @@ struct TaskWindowView: View {
 
     @ViewBuilder
     private var recoveryNotice: some View {
-        if let notice = isLater ? state.laterRefreshNotice : state.refreshNotice,
-           notice != "Moved task to Today." {
+        let notice = isLater ? state.laterRefreshNotice : state.refreshNotice
+        let recovered = isLater ? state.laterRecoveredEdit : state.recoveredEdit
+        let visibleNotice = notice == "Moved task to Today." ? nil : notice
+        if visibleNotice != nil || recovered != nil {
             VStack(alignment: .leading, spacing: 8) {
-                Text(notice)
-                    .font(.callout.monospaced())
-                if let recovered = isLater ? state.laterRecoveredEdit : state.recoveredEdit {
+                if let visibleNotice {
+                    Text(visibleNotice)
+                        .font(.callout.monospaced())
+                }
+                if let recovered {
                     Text("Unsaved edit")
                         .font(.callout.weight(.semibold).monospaced())
                     Text(recovered.text)

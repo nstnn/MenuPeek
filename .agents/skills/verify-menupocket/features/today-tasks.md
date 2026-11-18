@@ -13,6 +13,7 @@ The Today tab of the task window lists the current local day's tasks in category
 - `today-actions-popover` opens the row `…` as a Daybook popover (`id=taskActionsPopover`) below the button: Edit, Move Up, Move Down, a Move To list, and Delete… in red. Items are buttons `id=taskAction-edit`, `-moveUp`, `-moveDown`, `-moveTo-general`/`-moveTo-<category UUID>`, `-moveToToday` (Later), and `-delete`. Unavailable moves and the current group are `[disabled]`.
 - `today-keyboard` routes Command-N (add), Command-1/Command-2 (tabs), and Command-W (close; the app keeps running).
 - `today-persist` keeps saved tasks, order, and completion across quit and relaunch.
+- `today-day-change` refreshes Today without a date-change banner, cancels stale row actions, and keeps new-task drafts and selectable unsaved edit recovery.
 
 ## How to get to it (user POV)
 
@@ -39,6 +40,7 @@ Preconditions:
 - **Keyboard routes.** Run `$F ax <run> key cmd+2`: `value id=laterTab` has value `1`. Run `$F ax <run> key cmd+1`: `todayTab` has value `1`. Run `$F ax <run> key cmd+n`: `id=newTaskDraft` appears. Run `$F ax <run> key escape` to close it.
 - **Actions popover.** Run `$F ax <run> press "label=Actions for task: Review pull request"` and `$F ax <run> wait id=taskActionsPopover 3`. `find id^=taskAction-` lists Edit, Move Up, Move Down, `Move to General`, `Move to Work`, `Move to Errands`, and Delete…; `value id=taskAction-moveTo-<Work UUID>` is `[disabled]` with value `Current group`. Capture it with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/actions-popover.png id=taskActionsPopover`. Run `$F ax <run> key escape` and `$F ax <run> gone id=taskActionsPopover`: nothing changes in `db.txt`. Keyboard: `$F ax <run> focus "label=Actions for task: Review pull request"`, `key space` opens it with Edit highlighted, `key down` moves the highlight, `key return` acts on it. Clicking outside or on `…` again closes it without acting; pointer hover and outside clicks need a pointer and are Not tested through AX.
 - **Persistence.** Run `$F stop <run>`, `$F snapshot <run> stopped`, `$F launch <run>`, and `$F snapshot <run> relaunched`. The two `db.txt` files are identical, and the window shows the same rows and progress.
+- **Day change.** On a fresh basic seed, open the composer and type a draft. Run `$F next-day <run>`: Today and the menu bar show `0/0`, the draft remains, and `id=todayRecoveryNotice` is absent. Save explicitly and confirm the new row belongs to the new day. Edit that row, replace its text without saving, and run `next-day` again. The edit controls disappear; `id=todayRecoveryNotice` contains “Unsaved edit”, the unsaved text, and its category, without a date-change message. The saved row remains unchanged on its original day. Run another `next-day` and confirm recovery remains available. Capture before/after snapshots. This clock advance is simulated, not a genuine midnight transition.
 - **Proof.** Capture `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/today.png`. Together with the snapshots and `actions.log`, it shows the action, the row, the count, and the stored state.
 
 ## Gotchas
