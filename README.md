@@ -1,12 +1,13 @@
 # MenuPocket
 
-A native macOS task app with a daily checklist, a Later list, and progress in your menu bar.
+A native macOS task app with a daily checklist, a Later list, a time-block calendar, and progress in your menu bar.
 Built with SwiftUI, AppKit, and SQLite. The repository is named `MenuPeek`; the app is `MenuPocket`.
 
 ## Features
 
 - **Today & Later:** manage today's tasks and keep an undated list for another time.
 - **Categories:** organize tasks into collapsible groups and reorder Today tasks or categories.
+- **Calendar:** plan your day in Day, Week, or Month view with time blocks you add yourself.
 - **History:** browse past days and continue unfinished tasks without changing their original progress.
 - **Menu bar:** see today's completed/total count; right-click for a quick look.
 - **Quick Add:** capture a task from any app with Control-Option-N after enabling it in Settings.
@@ -41,13 +42,17 @@ Add tasks to Today or Later, check them off, and use each row's **…** menu to 
 Move an unfinished Later task to Today when you're ready. Past tasks stay on their assigned day;
 use **Continue today** in History to create a new attempt.
 
+Open **Calendar** at the bottom of the sidebar to plan time blocks. Choose **New block**, click an empty
+slot, or drag on the grid to add one; drag a block to move it or its lower edge to resize it. Blocks
+are separate from tasks and stay within one day.
+
 **Shortcuts:** ⌘N add task · ⌘1/⌘2 Today/Later · ⌘, Settings · ⌘+/⌘−/⌘0 zoom.
 
 Closing the window keeps the app and menu bar count running. Use **⌘Q** to quit.
 
 ## Local by design
 
-Tasks stay in a local SQLite database inside the app's sandbox. Preferences stay on your Mac.
+Tasks and calendar blocks stay in a local SQLite database inside the app's sandbox. Preferences stay on your Mac.
 No account or external service is required. Open at Login and Quick Add are optional settings.
 
 ## Documentation
