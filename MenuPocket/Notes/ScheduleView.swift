@@ -9,7 +9,8 @@ import SwiftUI
 /// message with Retry.
 ///
 /// The block editor opens from the New block button, a click on an empty grid
-/// slot, or a click or Return on a block. The open request lives in the window
+/// slot, a drag on empty grid space (with the drawn times), or a click or
+/// Return on a block. Dragging a block's lower edge saves its new end directly. The open request lives in the window
 /// presentation, which treats Calendar as busy while it is open; focus returns
 /// to the opener when it closes.
 struct ScheduleView: View {
@@ -23,6 +24,9 @@ struct ScheduleView: View {
     var onOpenEditor: (ScheduleEditorRequest) -> Void = { _ in }
     /// Closes the editor with this ID; false when it was no longer open.
     var onCloseEditor: (UUID) -> Bool = { _ in false }
+    /// Whether a grid drag may start: false while a task edit or a
+    /// confirmation is open, like opening the editor.
+    var canStartDrag: () -> Bool = { true }
     @FocusState private var focus: ScheduleFocusTarget?
     /// The open editor's current draft, so the grid preview follows its fields.
     @State private var liveDraft: (id: UUID, draft: ScheduleBlockDraft)?
@@ -35,7 +39,8 @@ struct ScheduleView: View {
         return ScheduleEditorContext(request: editor, draft: draft, open: onOpenEditor,
                                      openFromClick: openEditorFromClick, finish: finishEditor,
                                      dismissed: dismissEditor,
-                                     updateDraft: { id, draft in liveDraft = (id, draft) })
+                                     updateDraft: { id, draft in liveDraft = (id, draft) },
+                                     canDrag: canStartDrag)
     }
 
     // Split so older Swift type checkers can check each piece in reasonable time.
@@ -318,13 +323,16 @@ final class ScheduleEditorContext {
     /// The popover closed itself (Escape it handled, or a click outside).
     let dismissed: (ScheduleEditorRequest) -> Void
     let updateDraft: (UUID, ScheduleBlockDraft) -> Void
+    /// Whether a grid drag may start now.
+    let canDrag: () -> Bool
 
     init(request: ScheduleEditorRequest?, draft: ScheduleBlockDraft?,
          open: @escaping (ScheduleEditorRequest) -> Void,
          openFromClick: @escaping (ScheduleEditorRequest) -> Void,
          finish: @escaping (ScheduleEditorRequest, ScheduleEditorOutcome) -> Void,
          dismissed: @escaping (ScheduleEditorRequest) -> Void,
-         updateDraft: @escaping (UUID, ScheduleBlockDraft) -> Void) {
+         updateDraft: @escaping (UUID, ScheduleBlockDraft) -> Void,
+         canDrag: @escaping () -> Bool = { true }) {
         self.request = request
         self.draft = draft
         self.open = open
@@ -332,6 +340,7 @@ final class ScheduleEditorContext {
         self.finish = finish
         self.dismissed = dismissed
         self.updateDraft = updateDraft
+        self.canDrag = canDrag
     }
 
     /// Where the grid draws the dashed preview: the new block (from a slot or

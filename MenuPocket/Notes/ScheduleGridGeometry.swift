@@ -216,7 +216,7 @@ enum ScheduleDragPlanner {
 // MARK: - Slot hit-testing
 
 /// The empty-grid click target. A plain click opens the editor on the slot
-/// under the pointer; TASK-011's drag-to-create replaces this one entry point.
+/// under the pointer; a drag from the same point draws a block instead.
 enum ScheduleSlotHitTest {
     /// The day and slot start under `point`, measured from the top-left of the
     /// first day column at the 00:00 line. Nil above or below the day, or with

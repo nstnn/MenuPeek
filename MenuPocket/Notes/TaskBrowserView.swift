@@ -66,7 +66,8 @@ struct TaskBrowserView: View {
                                         onRetry: { presentation.retryCalendar(state: state) },
                                         editor: presentation.scheduleEditor,
                                         onOpenEditor: { presentation.openScheduleEditor($0, state: state) },
-                                        onCloseEditor: { presentation.closeScheduleEditor(id: $0) }))
+                                        onCloseEditor: { presentation.closeScheduleEditor(id: $0) },
+                                        canStartDrag: { presentation.canNavigate(state: state) }))
         case .history, .unfinished, .unfinishedDay: return AnyView(browserContent)
         }
     }
