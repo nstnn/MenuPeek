@@ -241,6 +241,19 @@ final class DailyNotesState {
         try UnfinishedTasksState(dailyState: self, noteDay: day)
     }
 
+    func makeScheduleState() throws -> ScheduleState {
+        try ScheduleState(dailyState: self, noteDay: day)
+    }
+
+    /// The Calendar shares the task store's one connection. A store without
+    /// Calendar support reads as unavailable rather than empty.
+    func scheduleRepository() throws -> any ScheduleRepository {
+        guard let repository = try openRepository() as? any ScheduleRepository else {
+            throw ScheduleStateError.repositoryUnavailable
+        }
+        return repository
+    }
+
     // App lifecycle consumers can refresh without creating a view.
     func startup() { refresh() }
     func windowWillOpen() { refresh() }

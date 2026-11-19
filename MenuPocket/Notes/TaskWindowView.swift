@@ -59,7 +59,7 @@ struct TaskWindowView: View {
     }
 
     private enum FocusControl: Hashable {
-        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete, history, yesterday
+        case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete, calendar, history, yesterday
         case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
@@ -175,6 +175,8 @@ struct TaskWindowView: View {
                     await Task.yield()
                     guard presentation.route == .today, detailContent == nil, focusRequestID == requestID else { return }
                     if isLater { focusSelectedList(); return }
+                    // Returning focuses the sidebar entry that opened the pane.
+                    if old == .calendar { focusedControl = .calendar; return }
                     focusedControl = state.availableProgress == nil ? .retry
                         : (presentation.historyEntry == .yesterday && state.yesterdayIncompleteCount > 0 ? .yesterday : .history)
                 }
@@ -472,6 +474,10 @@ struct TaskWindowView: View {
             daybookProgress
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 4) {
+                calendarButton
+                Rectangle().fill(daybookRule).frame(height: 1)
+                    .padding(.vertical, 4)
+                    .accessibilityHidden(true)
                 historyButton
                 categoryManagerButton
                 Button(action: onSettings) {
@@ -583,7 +589,7 @@ struct TaskWindowView: View {
 
     private var historyButton: some View {
         Button { openHistory(.calendar) } label: {
-            Label("History", systemImage: "calendar")
+            Label("History", systemImage: "clock.arrow.circlepath")
         }
         .focusable()
         .keyboardFocusAppearance()
@@ -593,10 +599,30 @@ struct TaskWindowView: View {
             return .handled
         }
         .disabled(!canOpenHistory)
-        .foregroundStyle(presentation.route != .today ? daybookAccent : Color.secondary)
+        .foregroundStyle(presentation.isShowingHistory ? daybookAccent : Color.secondary)
         .help("View task history")
         .accessibilityLabel("View task history")
         .accessibilityIdentifier("taskHistoryEntry")
+    }
+
+    /// Calendar sits beside Today and Later rather than under Today, so it opens
+    /// from either list and leaves the selected list as it was.
+    private var calendarButton: some View {
+        Button(action: openCalendar) {
+            Label("Calendar", systemImage: "calendar")
+        }
+        .focusable()
+        .keyboardFocusAppearance()
+        .focused($focusedControl, equals: .calendar)
+        .onKeyPress(keys: [.space, .return]) { _ in
+            openCalendar()
+            return .handled
+        }
+        .disabled(!presentation.canShowCalendar(state: state))
+        .foregroundStyle(presentation.isShowingCalendar ? daybookAccent : Color.secondary)
+        .help("Open Calendar")
+        .accessibilityLabel("Open Calendar")
+        .accessibilityIdentifier("calendarEntry")
     }
 
     private var categoryManagerButton: some View {
@@ -1170,6 +1196,13 @@ struct TaskWindowView: View {
         // History always belongs to Today; the shared rail offers it from either list.
         guard presentation.selectDestination(.today, state: state),
               presentation.showHistory(state: state, entry: entry) else { return }
+        focusRequestID = UUID()
+        focusedControl = nil
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    private func openCalendar() {
+        guard presentation.showCalendar(state: state) else { return }
         focusRequestID = UUID()
         focusedControl = nil
         NSApp.keyWindow?.makeFirstResponder(nil)

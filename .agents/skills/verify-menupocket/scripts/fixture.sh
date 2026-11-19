@@ -1,7 +1,7 @@
 #!/bin/bash
 # verify-menupocket fixture control. Run from anywhere:
 #   fixture.sh build                          compile a fixture app + mpax driver, print RUN=<id>
-#   fixture.sh launch <run> [--seed empty|basic] [--now ISO8601] [--tz ZONE]
+#   fixture.sh launch <run> [--seed empty|basic|category-reordering|calendar] [--now ISO8601] [--tz ZONE]
 #   fixture.sh doctor <run>                   read-only health check
 #   fixture.sh ax <run> <mpax command...>     drive the fixture (logged to actions.log)
 #   fixture.sh snapshot <run> <label>         DB rows, defaults, AX tree, screenshot -> evidence

@@ -6,7 +6,7 @@ import Foundation
 // Quick Add panel against isolated storage:
 //   --data DIR             fixture.sqlite, day-offset, and the fail-open flag live here
 //   --defaults-suite NAME  every preference, category choice, and onboarding marker
-//   --seed empty|basic|category-reordering (only on a new database)
+//   --seed empty|basic|category-reordering|calendar (only on a new database)
 //   --now ISO8601          optional fixed instant (default: the real clock)
 //   --tz IDENTIFIER        optional time zone (default: the Mac's)
 // System boundaries are faked: login items always report disabled, and the
@@ -108,6 +108,40 @@ private func seedCategoryReordering(_ repository: SQLiteNoteRepository, day: Not
     }
 }
 
+/// `basic` plus Calendar blocks in the week (Monday first) that contains the
+/// fixture's today, so the seeded week is always the one Calendar opens on.
+/// Covers a 15-minute block, a two-way and a three-way overlap, back-to-back
+/// blocks, a long title, and a block that ends at 24:00.
+private func seedCalendar(_ repository: SQLiteNoteRepository, day: NoteDay) throws {
+    try seedBasic(repository, day: day)
+    let today = try GregorianDay(key: day.keys().today)
+    let monday = try today.adding(days: -today.weekdayOffset(from: ScheduleCalendar.firstWeekday))
+    let now = day.now()
+    var created = 0
+    func add(_ title: String, _ weekday: Int, _ start: String, _ end: String) throws {
+        func minute(_ text: String) -> Int {
+            let parts = text.split(separator: ":").compactMap { Int($0) }
+            return parts[0] * 60 + parts[1]
+        }
+        created += 1
+        try repository.addScheduleBlock(ScheduleBlock(
+            id: UUID(), title: title, day: monday.adding(days: weekday),
+            startMinute: minute(start), endMinute: minute(end),
+            createdAt: now.addingTimeInterval(TimeInterval(created))))
+    }
+    try add("Standup", 0, "09:00", "09:15")
+    try add("Deep work", 0, "09:30", "12:00")
+    try add("Design review", today.weekdayOffset(from: ScheduleCalendar.firstWeekday), "10:00", "11:00")
+    try add("Pairing", today.weekdayOffset(from: ScheduleCalendar.firstWeekday), "10:30", "11:30")
+    try add("Lunch", today.weekdayOffset(from: ScheduleCalendar.firstWeekday), "12:00", "13:00")
+    try add("Focus", today.weekdayOffset(from: ScheduleCalendar.firstWeekday), "13:00", "14:30")
+    try add("Interviews", 3, "14:00", "16:00")
+    try add("Sync", 3, "14:30", "15:30")
+    try add("Retro", 3, "15:00", "16:00")
+    try add("Quarterly planning with the whole product team", 4, "13:00", "15:00")
+    try add("Wind down", 6, "23:45", "24:00")
+}
+
 @main struct FixtureMain {
     @MainActor static func main() throws {
         let options = Options(arguments: CommandLine.arguments)
@@ -139,6 +173,7 @@ private func seedCategoryReordering(_ repository: SQLiteNoteRepository, day: Not
             let repository = try SQLiteNoteRepository(databaseURL: database)
             if isNew, options.seed == "basic" { try seedBasic(repository, day: day) }
             if isNew, options.seed == "category-reordering" { try seedCategoryReordering(repository, day: day) }
+            if isNew, options.seed == "calendar" { try seedCalendar(repository, day: day) }
         }
         log("database \(database.path) new=\(isNew) seed=\(isNew ? options.seed : "kept") today=\(day.keys().today)")
 

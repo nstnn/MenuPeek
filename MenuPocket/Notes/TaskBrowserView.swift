@@ -59,14 +59,23 @@ struct TaskBrowserView: View {
                 SettingsView(model: model, onQuit: { NSApplication.shared.terminate(nil) })
             })
         }
-        return presentation.route == .today ? nil : AnyView(browserContent)
+        switch presentation.route {
+        case .today: return nil
+        case .calendar:
+            return AnyView(ScheduleView(schedule: presentation.scheduleState, issue: presentation.calendarIssue,
+                                        onRetry: { presentation.retryCalendar(state: state) },
+                                        editor: presentation.scheduleEditor,
+                                        onOpenEditor: { presentation.openScheduleEditor($0, state: state) },
+                                        onCloseEditor: { presentation.closeScheduleEditor(id: $0) }))
+        case .history, .unfinished, .unfinishedDay: return AnyView(browserContent)
+        }
     }
 
     private func goBack() {
         switch presentation.route {
         case .unfinishedDay: presentation.backToUnfinished(state: state)
         case .unfinished: presentation.backToHistory(state: state)
-        case .history, .today: presentation.showToday(state: state)
+        case .history, .today, .calendar: presentation.showToday(state: state)
         }
     }
 
@@ -74,7 +83,7 @@ struct TaskBrowserView: View {
         switch presentation.route {
         case .unfinishedDay: "Back to Unfinished"
         case .unfinished: "Back to History"
-        case .history, .today: "Back to Today"
+        case .history, .today, .calendar: "Back to Today"
         }
     }
 

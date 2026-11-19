@@ -148,6 +148,277 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testCalendarOpensFromTodayAndLaterAndEverySidebarEntryLeavesIt() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let controller = try XCTUnwrap(fixture.delegate.taskWindowController)
+        let window = try XCTUnwrap(controller.window)
+        let presentation = controller.presentation
+        fixture.state.draft = "Keep this draft"
+
+        // From Today: Calendar replaces the right column only; Today stays selected.
+        XCTAssertTrue(presentation.canShowCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertEqual(presentation.route, .calendar)
+        XCTAssertTrue(presentation.isShowingCalendar)
+        XCTAssertFalse(presentation.isShowingHistory, "History must not highlight while Calendar is open")
+        XCTAssertEqual(presentation.selectedDestination, .today)
+        XCTAssertNil(presentation.historyState, "Calendar does not create History")
+        let schedule = try XCTUnwrap(presentation.scheduleState)
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state), "reopening the open pane is a no-op")
+        XCTAssertTrue(presentation.scheduleState === schedule)
+
+        // Today leaves Calendar.
+        XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+
+        // From Later: Later stays selected underneath, unlike History.
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertFalse(presentation.canBrowse(state: fixture.state))
+        XCTAssertTrue(presentation.canShowCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertEqual(presentation.route, .calendar)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+        XCTAssertTrue(presentation.scheduleState === schedule, "the state is kept for the session")
+        // Later leaves Calendar.
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertEqual(presentation.selectedDestination, .later)
+
+        // History leaves Calendar, and Calendar leaves History.
+        XCTAssertTrue(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.showHistory(state: fixture.state))
+        XCTAssertEqual(presentation.route, .history)
+        XCTAssertTrue(presentation.isShowingHistory)
+        XCTAssertFalse(presentation.isShowingCalendar)
+        XCTAssertTrue(presentation.showUnfinished(state: fixture.state))
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertEqual(presentation.route, .calendar)
+        XCTAssertFalse(presentation.isShowingHistory)
+
+        // Categories and Settings leave Calendar; Calendar leaves both.
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertTrue(presentation.isManagingCategories)
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertFalse(presentation.isManagingCategories)
+        XCTAssertEqual(presentation.route, .calendar)
+        fixture.delegate.showSettings()
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertTrue(presentation.isShowingSettings)
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertFalse(presentation.isShowingSettings)
+        XCTAssertEqual(presentation.route, .calendar)
+
+        // The native add command and reopening the window return to the list.
+        fixture.delegate.addTask()
+        XCTAssertEqual(presentation.route, .today)
+        presentation.consumeNewTaskRequest(in: .today)
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        window.close()
+        fixture.delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true)
+        XCTAssertEqual(presentation.route, .today)
+        XCTAssertTrue(controller.window === window)
+        XCTAssertEqual(fixture.state.draft, "Keep this draft")
+    }
+
+    @MainActor
+    func testCalendarWaitsForEditDeletionRenameAndRemovalLikeHistory() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.repository.allowAdd = true
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController).presentation
+        fixture.state.draft = "Task"
+        XCTAssertTrue(fixture.state.addDraft())
+        let note = try XCTUnwrap(fixture.state.notes.first)
+        let category = try XCTUnwrap(fixture.state.createCategory(name: "Work"))
+
+        func assertBlocked(_ reason: String, file: StaticString = #filePath, line: UInt = #line) {
+            let route = presentation.route
+            XCTAssertFalse(presentation.canShowCalendar(state: fixture.state), reason, file: file, line: line)
+            XCTAssertFalse(presentation.showCalendar(state: fixture.state), reason, file: file, line: line)
+            XCTAssertEqual(presentation.route, route, reason, file: file, line: line)
+            XCTAssertEqual(presentation.canShowCalendar(state: fixture.state),
+                           presentation.canNavigate(state: fixture.state), reason, file: file, line: line)
+        }
+
+        fixture.state.beginEditing(id: note.id)
+        assertBlocked("Today edit")
+        fixture.state.cancelEditing()
+
+        XCTAssertTrue(presentation.requestDeletion(id: note.id, state: fixture.state))
+        assertBlocked("deletion confirmation")
+        presentation.cancelDeletion()
+
+        XCTAssertTrue(presentation.showCategoryManager(state: fixture.state))
+        presentation.setManagerRenaming(category.id)
+        assertBlocked("category rename")
+        presentation.setManagerRenaming(nil)
+        XCTAssertTrue(presentation.requestCategoryRemoval(id: category.id, state: fixture.state))
+        assertBlocked("category removal confirmation")
+        presentation.cancelCategoryRemoval()
+
+        // An idle category pane may be left, as for History.
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertEqual(presentation.route, .calendar)
+
+        // Later edits block it as well.
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        fixture.state.laterDraft = "Later task"
+        XCTAssertTrue(fixture.state.addLaterDraft())
+        let later = try XCTUnwrap(fixture.state.laterTasks.first)
+        fixture.state.beginEditingLater(id: later.id)
+        assertBlocked("Later edit")
+        fixture.state.cancelEditingLater()
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+
+        presentation.stopForTermination()
+        XCTAssertFalse(presentation.canShowCalendar(state: fixture.state))
+    }
+
+    @MainActor
+    func testOpenBlockEditorKeepsCalendarBusyUntilItCloses() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController).presentation
+        let draft = ScheduleBlockDraft(newOn: try GregorianDay(key: "2026-11-18"), startMinute: 600)
+        let request = ScheduleEditorRequest(origin: .newBlockButton, draft: draft)
+
+        XCTAssertFalse(presentation.openScheduleEditor(request, state: fixture.state), "only on the Calendar")
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.openScheduleEditor(request, state: fixture.state))
+        XCTAssertEqual(presentation.scheduleEditor, request)
+
+        // Busy like a task edit: every sidebar destination and task command waits.
+        XCTAssertFalse(presentation.canNavigate(state: fixture.state))
+        XCTAssertFalse(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertFalse(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertFalse(presentation.canAddTask(to: .today, state: fixture.state))
+        fixture.delegate.showSettings()
+        fixture.delegate.addTask()
+        XCTAssertEqual(presentation.route, .calendar)
+        XCTAssertFalse(presentation.isShowingSettings)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+
+        let other = ScheduleEditorRequest(origin: .newBlockButton, draft: draft)
+        XCTAssertFalse(presentation.openScheduleEditor(other, state: fixture.state), "one editor at a time")
+        XCTAssertFalse(presentation.closeScheduleEditor(id: other.id), "a stale close changes nothing")
+        XCTAssertEqual(presentation.scheduleEditor, request)
+        XCTAssertTrue(presentation.closeScheduleEditor(id: request.id))
+        XCTAssertNil(presentation.scheduleEditor)
+        XCTAssertTrue(presentation.canNavigate(state: fixture.state))
+
+        // Hiding the window drops the popover, so Calendar is never left busy.
+        XCTAssertTrue(presentation.openScheduleEditor(other, state: fixture.state))
+        presentation.setWindowVisible(false, state: fixture.state)
+        XCTAssertNil(presentation.scheduleEditor)
+        presentation.setWindowVisible(true, state: fixture.state)
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertFalse(presentation.openScheduleEditor(request, state: fixture.state), "Calendar is no longer shown")
+
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.openScheduleEditor(request, state: fixture.state))
+        presentation.stopForTermination()
+        XCTAssertNil(presentation.scheduleEditor)
+    }
+
+    @MainActor
+    func testCalendarReadsOnlyWhileShownAndHeaderFollowsNavigation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = "AppConfigurationTests.Calendar.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try SQLiteNoteRepository(databaseURL: directory.appendingPathComponent("notes.sqlite"))
+        let state = DailyNotesState(repositoryFactory: { store }, notificationCenter: NotificationCenter(),
+                                    workspaceNotificationCenter: NotificationCenter(),
+                                    categoryPreferences: TaskCategoryPreferences(userDefaults: defaults))
+        state.startup()
+        let presentation = state.taskWindowPresentation
+
+        // A hidden window creates the state but never reads.
+        XCTAssertTrue(presentation.showCalendar(state: state))
+        let schedule = try XCTUnwrap(presentation.scheduleState)
+        XCTAssertEqual(schedule.content, .notLoaded)
+        XCTAssertEqual(schedule.mode, .week)
+        presentation.setWindowVisible(true, state: state)
+        XCTAssertEqual(schedule.content, .loaded([]))
+
+        // Previous, Next, Today and the view switch each change the header.
+        let thisWeek = schedule.header.text
+        XCTAssertTrue(schedule.showPrevious())
+        XCTAssertNotEqual(schedule.header.text, thisWeek)
+        XCTAssertEqual(schedule.content, .loaded([]))
+        XCTAssertTrue(schedule.showNext())
+        XCTAssertEqual(schedule.header.text, thisWeek)
+        XCTAssertTrue(schedule.showNext())
+        XCTAssertNotEqual(schedule.header.text, thisWeek)
+        XCTAssertTrue(schedule.showToday())
+        XCTAssertEqual(schedule.header.text, thisWeek)
+        XCTAssertTrue(schedule.setMode(.day))
+        XCTAssertNotEqual(schedule.header.text, thisWeek)
+        XCTAssertEqual(schedule.mode, .day)
+        XCTAssertTrue(schedule.setMode(.month))
+        XCTAssertNil(schedule.header.detail)
+        XCTAssertTrue(schedule.setMode(.week))
+        XCTAssertEqual(schedule.header.text, thisWeek)
+
+        // Leaving hides it: a write elsewhere is not read until Calendar returns.
+        XCTAssertTrue(presentation.showToday(state: state))
+        let today = schedule.today
+        let content = try ScheduleBlockContent(title: "Focus", day: today, startMinute: 540, endMinute: 600)
+        let block = ScheduleBlock(id: UUID(), content: content,
+                                  createdAt: Date(timeIntervalSince1970: 1_790_000_000))
+        try store.addScheduleBlock(block)
+        XCTAssertTrue(schedule.showNext())
+        XCTAssertEqual(schedule.content, .notLoaded, "a hidden Calendar does not read")
+        XCTAssertTrue(schedule.showToday())
+        XCTAssertTrue(presentation.showHistory(state: state))
+        XCTAssertEqual(schedule.content, .notLoaded, "History does not make Calendar read")
+        XCTAssertTrue(presentation.showCalendar(state: state))
+        XCTAssertEqual(schedule.blocks, [block])
+
+        // A closed window stops reads; Retry reads the visible period again.
+        presentation.setWindowVisible(false, state: state)
+        XCTAssertTrue(schedule.showNext())
+        XCTAssertEqual(schedule.content, .notLoaded)
+        presentation.setWindowVisible(true, state: state)
+        XCTAssertEqual(schedule.content, .loaded([]))
+        presentation.retryCalendar(state: state)
+        XCTAssertEqual(schedule.content, .loaded([]))
+        state.stopForTermination()
+    }
+
+    @MainActor
+    func testCalendarWithoutBlockStorageShowsUnavailableAndRetry() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController).presentation
+        // The task-only fixture store has no Calendar table support.
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        let schedule = try XCTUnwrap(presentation.scheduleState)
+        XCTAssertNil(presentation.calendarIssue)
+        XCTAssertEqual(schedule.content, .unavailable)
+        XCTAssertEqual(schedule.loadMessage, "Could not load this week. Try again.")
+        presentation.retryCalendar(state: fixture.state)
+        XCTAssertEqual(schedule.content, .unavailable)
+        XCTAssertTrue(schedule.setMode(.month))
+        XCTAssertEqual(schedule.loadMessage, "Could not load this month. Try again.")
+        XCTAssertNil(presentation.browserIssue, "a Calendar failure is not a History failure")
+    }
+
+    @MainActor
     func testBrowserNativeTodayCommandsWindowReuseAndTermination() async throws {
         let fixture = try AppLifecycleFixture(context: .login)
         defer { fixture.cleanup() }
