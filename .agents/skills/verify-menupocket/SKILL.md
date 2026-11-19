@@ -119,7 +119,7 @@ Evidence goes to `build/verify-menupocket/evidence/<run>/`. It is ignored by Git
 
 - `identity.json` records which source and binary were verified.
 - `actions.log` has every `ax`, signal, `fail-open`, launch, and stop, with its result.
-- `snapshots/NN-<label>/` holds `db.txt` (schema version, categories, every task with its rowid, day, `display_order`, completion, and category, plus Later rows), `defaults.plist`, `preferences.json` (decoded `AppPreferences`), `ax-tree.txt`, and `window.png`. Create one with `fixture.sh snapshot <run> <label>`.
+- `snapshots/NN-<label>/` holds `db.txt` (schema version, categories, every task with its rowid, day, `display_order`, completion, and category, plus Later rows and Calendar `schedule_blocks` rows in day and start order), `defaults.plist`, `preferences.json` (decoded `AppPreferences`), `ax-tree.txt`, and `window.png`. Create one with `fixture.sh snapshot <run> <label>`.
 - `fixture.log`, `build.log`, and `cleanup.txt` are copied in at stop or cleanup.
 
 Proof standards:
