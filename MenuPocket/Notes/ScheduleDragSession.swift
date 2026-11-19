@@ -13,6 +13,9 @@ struct ScheduleDragSession: Equatable, Sendable {
         case create(day: GregorianDay)
         /// Dragging the lower edge of a saved block.
         case resize(ScheduleBlock)
+        /// Dragging a saved block's body. `days` are the visible columns,
+        /// `columnWidth` their width: the column under the pointer picks the day.
+        case move(ScheduleBlock, days: [GregorianDay], columnWidth: CGFloat)
     }
 
     /// Movement below this distance (in points) is a click, not a drag.
@@ -49,6 +52,16 @@ struct ScheduleDragSession: Equatable, Sendable {
         return ScheduleDragSession(kind: .resize(block), anchor: point)
     }
 
+    /// A drag that starts on `block`'s body at `point`. The grab offset inside
+    /// the block is kept: the block follows the pointer's travel, so it does
+    /// not jump to put its top under the pointer. Nil with no columns.
+    static func move(_ block: ScheduleBlock, at point: CGPoint, columnWidth: CGFloat,
+                     days: [GregorianDay]) -> ScheduleDragSession? {
+        guard point.x.isFinite, point.y.isFinite, !days.isEmpty,
+              columnWidth.isFinite, columnWidth > 0 else { return nil }
+        return ScheduleDragSession(kind: .move(block, days: days, columnWidth: columnWidth), anchor: point)
+    }
+
     mutating func update(to point: CGPoint) {
         guard point.x.isFinite, point.y.isFinite else { return }
         current = point
@@ -74,12 +87,26 @@ struct ScheduleDragSession: Equatable, Sendable {
             guard let content = ScheduleDragPlanner.resize(block, endMinute: Double(block.endMinute) + travel)
             else { return nil }
             return .resize(block: block, to: content)
+        case let .move(block, days, columnWidth):
+            // Vertical travel moves the start, like the resize edge. The day is
+            // the visible column under the pointer, clamped to the first and
+            // last column, so a move never leaves the shown period.
+            guard let column = ScheduleGridGeometry.columnIndex(atX: current.x, columnWidth: columnWidth,
+                                                                columnCount: days.count) else { return nil }
+            let travel = metrics.minute(atOffset: current.y) - metrics.minute(atOffset: anchor.y)
+            guard let content = ScheduleDragPlanner.move(block, to: days[column],
+                                                         startMinute: Double(block.startMinute) + travel)
+            else { return nil }
+            return .move(block: block, to: content)
         }
     }
 
-    /// The block being resized, so the grid can dim it under the preview.
-    var resizingBlockID: UUID? {
-        if case let .resize(block) = kind { block.id } else { nil }
+    /// The saved block being resized or moved, so the grid can dim it under the preview.
+    var draggedBlockID: UUID? {
+        switch kind {
+        case .create: nil
+        case let .resize(block), let .move(block, _, _): block.id
+        }
     }
 }
 
@@ -89,25 +116,28 @@ enum ScheduleDragResult: Equatable, Sendable {
     case create(day: GregorianDay, span: ScheduleTimeSpan)
     /// Save these values for `block` (only its end differs).
     case resize(block: ScheduleBlock, to: ScheduleBlockContent)
+    /// Save these values for `block` (its day and start may differ; the
+    /// duration and title are kept).
+    case move(block: ScheduleBlock, to: ScheduleBlockContent)
 
     var day: GregorianDay {
         switch self {
         case let .create(day, _): day
-        case let .resize(_, content): content.day
+        case let .resize(_, content), let .move(_, content): content.day
         }
     }
 
     var startMinute: Int {
         switch self {
         case let .create(_, span): span.startMinute
-        case let .resize(_, content): content.startMinute
+        case let .resize(_, content), let .move(_, content): content.startMinute
         }
     }
 
     var endMinute: Int {
         switch self {
         case let .create(_, span): span.endMinute
-        case let .resize(_, content): content.endMinute
+        case let .resize(_, content), let .move(_, content): content.endMinute
         }
     }
 
@@ -116,10 +146,22 @@ enum ScheduleDragResult: Equatable, Sendable {
         "\(ScheduleBlockContent.clockText(minute: startMinute))–\(ScheduleBlockContent.clockText(minute: endMinute))"
     }
 
-    /// False for a resize that ends where the block already ends: nothing to save.
+    /// The saved block and its new values, for a resize or a move; nil for a
+    /// drawn block, which the editor saves.
+    var savedBlockChange: (block: ScheduleBlock, content: ScheduleBlockContent)? {
+        switch self {
+        case .create: nil
+        case let .resize(block, content), let .move(block, content): (block, content)
+        }
+    }
+
+    /// False for a resize or move that leaves the block where it is saved:
+    /// nothing to save.
     var changesSavedBlock: Bool {
-        guard case let .resize(block, content) = self else { return true }
-        return content.endMinute != block.endMinute
+        guard let change = savedBlockChange else { return true }
+        return change.content.day != change.block.day
+            || change.content.startMinute != change.block.startMinute
+            || change.content.endMinute != change.block.endMinute
     }
 }
 

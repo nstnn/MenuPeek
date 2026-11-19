@@ -16,7 +16,7 @@ struct ScheduleTimeGridView: View {
     /// Width of the scroll content. It is narrower than the pane by a legacy
     /// (always shown) scroller, which the header row leaves room for.
     @State private var scrollContentWidth: CGFloat = 0
-    /// Why the last resize was not saved; cleared when the next drag starts.
+    /// Why the last resize or move was not saved; cleared when the next drag starts.
     @State private var dragMessage: String?
 
     var body: some View {
@@ -205,8 +205,8 @@ private struct ScheduleGridBody: View {
             }
             ForEach(Array(model.days.enumerated()), id: \.element.id) { index, day in
                 ScheduleDayColumn(day: day, columnWidth: columnWidth, focus: focus,
-                                  resizingID: dragResult == nil ? nil : drag.session?.resizingBlockID,
-                                  resize: resizeHandlers,
+                                  draggedID: dragResult == nil ? nil : drag.session?.draggedBlockID,
+                                  drag: blockDragHandlers,
                                   onOpen: { editor.open(.edit($0)) },
                                   onClick: { editor.openFromClick(.edit($0)) })
                 .offset(x: CGFloat(index) * columnWidth)
@@ -240,28 +240,38 @@ private struct ScheduleGridBody: View {
         return true
     }
 
-    private var resizeHandlers: ScheduleResizeHandlers {
-        ScheduleResizeHandlers(
-            changed: { block, point in
-                drag.track(to: point) { canDrag() ? ScheduleDragSession.resize(block, at: point) : nil }
+    private var blockDragHandlers: ScheduleBlockDragHandlers {
+        let days = model.days.map(\.day)
+        let width = columnWidth
+        return ScheduleBlockDragHandlers(
+            changed: { part, block, point in
+                drag.track(to: point) {
+                    guard canDrag() else { return nil }
+                    switch part {
+                    case .lowerEdge: return ScheduleDragSession.resize(block, at: point)
+                    case .body: return ScheduleDragSession.move(block, at: point, columnWidth: width, days: days)
+                    }
+                }
             },
             ended: { point in
                 guard let finished = drag.finish(at: point) else { return false }
                 guard let result = finished.result(metrics: ScheduleTimeGridSize.metrics) else {
-                    // The pointer never moved far enough: a click on the edge.
+                    // The pointer never moved far enough: a click on the block.
                     return true
                 }
-                if case let .resize(block, content) = result, result.changesSavedBlock,
-                   case let .failure(failure) = schedule.update(id: block.id, to: content) {
-                    // The block keeps its saved size: the state did not change.
+                if let change = result.savedBlockChange, result.changesSavedBlock,
+                   case let .failure(failure) = schedule.update(id: change.block.id, to: change.content) {
+                    // The block keeps its saved place and size: the state did not change.
                     dragMessage = failure.message
                 }
                 return false
             })
     }
 
-    /// Where the drag preview sits: the drawn span across its day's column, or
-    /// the resized block in its own overlap column.
+    /// Where the drag preview sits: the drawn span or the moved block across
+    /// its day's whole column (the overlap layout is redone only after saving,
+    /// so the preview does not reshuffle other blocks), or the resized block in
+    /// its own overlap column.
     private func dragRect(for result: ScheduleDragResult) -> CGRect? {
         guard let index = model.columnIndex(of: result.day) else { return nil }
         let metrics = ScheduleTimeGridSize.metrics
@@ -378,7 +388,7 @@ private struct ScheduleDragPreview: View {
     }
 }
 
-/// Why the last resize was not saved, above the grid.
+/// Why the last resize or move was not saved, above the grid.
 private struct ScheduleDragMessage: View {
     let message: String
     @Environment(\.colorScheme) private var colorScheme
@@ -394,9 +404,17 @@ private struct ScheduleDragMessage: View {
     }
 }
 
-/// What a block's lower-edge handle reports, in grid coordinates.
-private struct ScheduleResizeHandlers {
-    let changed: (ScheduleBlock, CGPoint) -> Void
+/// Which part of a block a drag started on.
+private enum ScheduleBlockDragPart {
+    /// The body moves the block.
+    case body
+    /// The lower-edge strip resizes it.
+    case lowerEdge
+}
+
+/// What a block's body and lower-edge drags report, in grid coordinates.
+private struct ScheduleBlockDragHandlers {
+    let changed: (ScheduleBlockDragPart, ScheduleBlock, CGPoint) -> Void
     /// Returns true when the gesture was a click, so the block opens instead.
     let ended: (CGPoint) -> Bool
 }
@@ -461,9 +479,9 @@ private struct ScheduleDayColumn: View {
     let day: ScheduleGridDay
     let columnWidth: CGFloat
     var focus: FocusState<ScheduleFocusTarget?>.Binding
-    /// The block under a live resize preview; drawn faded.
-    let resizingID: UUID?
-    let resize: ScheduleResizeHandlers
+    /// The block under a live resize or move preview; drawn faded.
+    let draggedID: UUID?
+    let drag: ScheduleBlockDragHandlers
     let onOpen: (ScheduleBlock) -> Void
     let onClick: (ScheduleBlock) -> Void
 
@@ -476,9 +494,9 @@ private struct ScheduleDayColumn: View {
                                   size: CGSize(width: max(rect.width - 3, 1), height: max(rect.height - 2, 1)),
                                   focus: focus, onOpen: { onOpen(placement.block) },
                                   onClick: { onClick(placement.block) },
-                                  onResizeChanged: { resize.changed(placement.block, $0) },
-                                  onResizeEnded: { if resize.ended($0) { onClick(placement.block) } })
-                    .opacity(resizingID == placement.id ? 0.35 : 1)
+                                  onDragChanged: { drag.changed($0, placement.block, $1) },
+                                  onDragEnded: { if drag.ended($0) { onClick(placement.block) } })
+                    .opacity(draggedID == placement.id ? 0.35 : 1)
                     .offset(x: rect.minX + 1, y: rect.minY + 1)
             }
         }
@@ -494,6 +512,8 @@ private struct ScheduleDayColumn: View {
 /// A saved block: title first, then the time range when there is room. Text
 /// truncates inside the block's frame; the full text is in the tooltip and
 /// the spoken label. A click, Return or Space (or AXPress) opens it in the editor.
+/// Dragging the body moves it; dragging the lower-edge strip resizes it. A
+/// press that does not travel `ScheduleDragSession.minimumDistance` is a click.
 private struct ScheduleBlockView: View {
     let block: ScheduleBlock
     let size: CGSize
@@ -501,9 +521,10 @@ private struct ScheduleBlockView: View {
     /// Return, Space and AXPress.
     let onOpen: () -> Void
     let onClick: () -> Void
-    /// The lower-edge handle's drag, in grid coordinates.
-    let onResizeChanged: (CGPoint) -> Void
-    let onResizeEnded: (CGPoint) -> Void
+    /// A body or lower-edge drag, in grid coordinates. The end handler opens
+    /// the block when the gesture turned out to be a click.
+    let onDragChanged: (ScheduleBlockDragPart, CGPoint) -> Void
+    let onDragEnded: (CGPoint) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     /// The lower-edge strip that resizes. A 15-minute block keeps most of its
@@ -531,7 +552,7 @@ private struct ScheduleBlockView: View {
             .clipShape(shape)
             .contentShape(shape)
             .help(ScheduleBlockText.tooltip(block))
-            .onTapGesture(perform: onClick)
+            .gesture(moveGesture)
             .overlay(alignment: .bottom) { resizeHandle }
             .focusable()
             .keyboardFocusAppearance()
@@ -556,6 +577,23 @@ private struct ScheduleBlockView: View {
         return NSCursor.resizeUpDown
     }
 
+    /// Dragging the body moves the block; a press that does not travel is a
+    /// click and opens it. The closed hand shows only once the press has
+    /// become a drag, so a click never flashes it.
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(ScheduleGridBody.gridSpace))
+            .onChanged { value in
+                if hypot(value.translation.width, value.translation.height) >= ScheduleDragSession.minimumDistance {
+                    NSCursor.closedHand.set()
+                }
+                onDragChanged(.body, value.location)
+            }
+            .onEnded { value in
+                NSCursor.arrow.set()
+                onDragEnded(value.location)
+            }
+    }
+
     /// Dragging this strip moves the block's end; a click on it opens the block.
     private var resizeHandle: some View {
         Color.clear
@@ -573,11 +611,11 @@ private struct ScheduleBlockView: View {
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(ScheduleGridBody.gridSpace))
                     .onChanged {
                         Self.resizeCursor.set()
-                        onResizeChanged($0.location)
+                        onDragChanged(.lowerEdge, $0.location)
                     }
                     .onEnded {
                         NSCursor.arrow.set()
-                        onResizeEnded($0.location)
+                        onDragEnded($0.location)
                     })
             .accessibilityHidden(true)
     }
