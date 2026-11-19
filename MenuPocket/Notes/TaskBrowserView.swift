@@ -63,7 +63,10 @@ struct TaskBrowserView: View {
         case .today: return nil
         case .calendar:
             return AnyView(ScheduleView(schedule: presentation.scheduleState, issue: presentation.calendarIssue,
-                                        onRetry: { presentation.retryCalendar(state: state) }))
+                                        onRetry: { presentation.retryCalendar(state: state) },
+                                        editor: presentation.scheduleEditor,
+                                        onOpenEditor: { presentation.openScheduleEditor($0, state: state) },
+                                        onCloseEditor: { presentation.closeScheduleEditor(id: $0) }))
         case .history, .unfinished, .unfinishedDay: return AnyView(browserContent)
         }
     }

@@ -36,7 +36,7 @@ Each feature file starts with an H1 title and a paragraph describing the user-vi
 - [Today tasks](./today-tasks.md): add, complete, edit, and delete Today tasks, the composer, and keyboard routes.
 - [Later list](./later-list.md): the undated Later tab, its remaining count, and Move to Today.
 - [Categories](./categories.md): Manage categories (create, rename, remove), the category picker, group collapse, and row Move To.
-- [Calendar](./calendar.md): the sidebar Calendar entry and route, the Day/Week/Month header with Previous/Today/Next, the Day and Week time grid (blocks, overlaps, Today marker, current-time line), and Unavailable/Retry.
+- [Calendar](./calendar.md): the sidebar Calendar entry and route, the Day/Week/Month header with Previous/Today/Next, the Day and Week time grid (blocks, overlaps, Today marker, current-time line), the block editor (create, edit, delete, validation, write failure), and Unavailable/Retry.
 - [History](./history.md): the calendar, day detail and filters, Unfinished from previous days, yesterday entry, and explicit Continue today.
 - [Menu bar count and glance](./menu-bar.md): the status item's saved progress, click to Today, the right-click quick look, and Unavailable/Retry.
 - [Task window zoom](./window-zoom.md): View > Zoom In (⌘+ / ⌘=), Zoom Out (⌘−), Actual Size (⌘0), the saved zoom, and the window's raised minimum.

@@ -9,6 +9,8 @@ import SwiftUI
 struct ScheduleTimeGridView: View {
     let schedule: ScheduleState
     let blocks: [ScheduleBlock]
+    let editor: ScheduleEditorContext
+    var focus: FocusState<ScheduleFocusTarget?>.Binding
     @Environment(\.colorScheme) private var colorScheme
     /// Width of the scroll content. It is narrower than the pane by a legacy
     /// (always shown) scroller, which the header row leaves room for.
@@ -34,7 +36,7 @@ struct ScheduleTimeGridView: View {
             ScheduleDayHeaderRow(days: model.days, columnWidth: columnWidth)
             Rectangle().fill(DaybookPalette.rule(colorScheme)).frame(height: 1).accessibilityHidden(true)
             ScheduleGridScrollView(schedule: schedule, model: model, columnWidth: columnWidth,
-                                   contentWidth: $scrollContentWidth)
+                                   editor: editor, focus: focus, contentWidth: $scrollContentWidth)
         }
         .frame(width: width, alignment: .topLeading)
     }
@@ -92,6 +94,8 @@ private struct ScheduleGridScrollView: View {
     let schedule: ScheduleState
     let model: ScheduleTimeGridModel
     let columnWidth: CGFloat
+    let editor: ScheduleEditorContext
+    var focus: FocusState<ScheduleFocusTarget?>.Binding
     @Binding var contentWidth: CGFloat
 
     var body: some View {
@@ -101,7 +105,8 @@ private struct ScheduleGridScrollView: View {
                     ScheduleHourAnchors()
                     HStack(alignment: .top, spacing: 0) {
                         ScheduleHourGutter()
-                        ScheduleGridBody(schedule: schedule, model: model, columnWidth: columnWidth)
+                        ScheduleGridBody(schedule: schedule, model: model, columnWidth: columnWidth,
+                                         editor: editor, focus: focus)
                     }
                     .padding(.vertical, ScheduleTimeGridSize.verticalInset)
                 }
@@ -151,11 +156,15 @@ private struct ScheduleHourGutter: View {
     }
 }
 
-/// Lines, today's tint, the day columns and the current-time line.
+/// Lines, today's tint, the empty-slot click target, the day columns and the
+/// current-time line. The block editor's popover for grid openings is anchored
+/// here, on the clicked slot or the edited block.
 private struct ScheduleGridBody: View {
     let schedule: ScheduleState
     let model: ScheduleTimeGridModel
     let columnWidth: CGFloat
+    let editor: ScheduleEditorContext
+    var focus: FocusState<ScheduleFocusTarget?>.Binding
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -169,13 +178,102 @@ private struct ScheduleGridBody: View {
                     .accessibilityHidden(true)
             }
             ScheduleGridLines(columnCount: model.days.count, columnWidth: columnWidth)
+            ScheduleSlotClickTarget(days: model.days.map(\.day), columnWidth: columnWidth) { day, minute in
+                editor.openFromClick(.slot(day: day, startMinute: minute))
+            }
+            if let draft = editor.previewDraft, let rect = previewRect(for: draft) {
+                ScheduleSlotPreview(rect: rect)
+            }
             ForEach(Array(model.days.enumerated()), id: \.element.id) { index, day in
-                ScheduleDayColumn(day: day, columnWidth: columnWidth)
-                    .offset(x: CGFloat(index) * columnWidth)
+                ScheduleDayColumn(day: day, columnWidth: columnWidth, focus: focus,
+                                  onOpen: { editor.open(.edit($0)) },
+                                  onClick: { editor.openFromClick(.edit($0)) })
+                .offset(x: CGFloat(index) * columnWidth)
             }
             ScheduleCurrentTimeLine(schedule: schedule, model: model, columnWidth: columnWidth)
         }
         .frame(width: columnWidth * CGFloat(model.days.count), height: height, alignment: .topLeading)
+        .popover(item: editor.binding(where: \.isOnGrid),
+                 attachmentAnchor: .rect(.rect(editor.request.map(anchorRect(for:)) ?? .zero)),
+                 arrowEdge: .trailing) { request in
+            ScheduleBlockEditor(schedule: schedule, request: request,
+                                onDraftChange: { editor.updateDraft(request.id, $0) },
+                                onClose: { editor.finish(request, $0) })
+                .id(request.id)
+        }
+    }
+
+    /// The draft's span in its day's column, or nil when that day is not shown.
+    private func previewRect(for draft: ScheduleBlockDraft) -> CGRect? {
+        guard let index = model.columnIndex(of: draft.day) else { return nil }
+        let metrics = ScheduleTimeGridSize.metrics
+        let top = metrics.offset(forMinute: draft.startMinute)
+        return CGRect(x: CGFloat(index) * columnWidth, y: top, width: columnWidth,
+                      height: metrics.offset(forMinute: draft.endMinute) - top)
+    }
+
+    /// The edited block's rectangle, or the new block's one-hour span in the
+    /// clicked day's column, in this view's coordinates.
+    private func anchorRect(for request: ScheduleEditorRequest) -> CGRect {
+        let metrics = ScheduleTimeGridSize.metrics
+        switch request.origin {
+        case let .block(id):
+            for (index, day) in model.days.enumerated() {
+                guard let placement = day.placements.first(where: { $0.id == id }) else { continue }
+                return metrics.rect(for: placement, columnWidth: columnWidth)
+                    .offsetBy(dx: CGFloat(index) * columnWidth, dy: 0)
+            }
+        case let .slot(day, _):
+            if let index = model.columnIndex(of: day) {
+                let top = metrics.offset(forMinute: request.draft.startMinute)
+                return CGRect(x: CGFloat(index) * columnWidth, y: top, width: columnWidth,
+                              height: metrics.offset(forMinute: request.draft.endMinute) - top)
+            }
+        case .newBlockButton:
+            break
+        }
+        return CGRect(x: 0, y: 0, width: 1, height: 1)
+    }
+}
+
+/// The one place a plain click on empty grid space is turned into a day and
+/// 15-minute slot (`ScheduleSlotHitTest`). Blocks sit above it and take their
+/// own clicks. TASK-011's drag-to-create replaces this view.
+private struct ScheduleSlotClickTarget: View {
+    let days: [GregorianDay]
+    let columnWidth: CGFloat
+    let onSlot: (GregorianDay, Int) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: columnWidth * CGFloat(days.count), height: ScheduleTimeGridSize.metrics.dayHeight)
+            .contentShape(Rectangle())
+            .onTapGesture(coordinateSpace: .local) { location in
+                guard let slot = ScheduleSlotHitTest.slot(at: location, columnWidth: columnWidth, days: days,
+                                                          metrics: ScheduleTimeGridSize.metrics) else { return }
+                onSlot(slot.day, slot.startMinute)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A dashed outline of where the open editor's block will be saved: a new
+/// block, or an edited block whose day or times changed.
+private struct ScheduleSlotPreview: View {
+    let rect: CGRect
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .strokeBorder(DaybookPalette.accent(colorScheme), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            .background {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(DaybookPalette.accent(colorScheme).opacity(0.08))
+            }
+            .frame(width: max(rect.width - 3, 1), height: max(rect.height - 2, 1))
+            .offset(x: rect.minX + 1, y: rect.minY + 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -218,6 +316,9 @@ private struct ScheduleGridLines: View {
 private struct ScheduleDayColumn: View {
     let day: ScheduleGridDay
     let columnWidth: CGFloat
+    var focus: FocusState<ScheduleFocusTarget?>.Binding
+    let onOpen: (ScheduleBlock) -> Void
+    let onClick: (ScheduleBlock) -> Void
 
     var body: some View {
         let metrics = ScheduleTimeGridSize.metrics
@@ -225,7 +326,9 @@ private struct ScheduleDayColumn: View {
             ForEach(day.placements) { placement in
                 let rect = metrics.rect(for: placement, columnWidth: columnWidth)
                 ScheduleBlockView(block: placement.block,
-                                  size: CGSize(width: max(rect.width - 3, 1), height: max(rect.height - 2, 1)))
+                                  size: CGSize(width: max(rect.width - 3, 1), height: max(rect.height - 2, 1)),
+                                  focus: focus, onOpen: { onOpen(placement.block) },
+                                  onClick: { onClick(placement.block) })
                     .offset(x: rect.minX + 1, y: rect.minY + 1)
             }
         }
@@ -240,10 +343,14 @@ private struct ScheduleDayColumn: View {
 
 /// A saved block: title first, then the time range when there is room. Text
 /// truncates inside the block's frame; the full text is in the tooltip and
-/// the spoken label.
+/// the spoken label. A click, Return or Space (or AXPress) opens it in the editor.
 private struct ScheduleBlockView: View {
     let block: ScheduleBlock
     let size: CGSize
+    var focus: FocusState<ScheduleFocusTarget?>.Binding
+    /// Return, Space and AXPress.
+    let onOpen: () -> Void
+    let onClick: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     /// Below this height only one line (the title) is drawn.
@@ -265,10 +372,18 @@ private struct ScheduleBlockView: View {
             .clipShape(shape)
             .contentShape(shape)
             .help(ScheduleBlockText.tooltip(block))
+            .onTapGesture(perform: onClick)
             .focusable()
             .keyboardFocusAppearance()
+            .focused(focus, equals: .block(block.id))
+            .onKeyPress(keys: [.return, .space]) { _ in
+                onOpen()
+                return .handled
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(ScheduleBlockText.accessibilityLabel(block))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onOpen() }
             .accessibilityIdentifier(ScheduleBlockText.identifier(block))
     }
 

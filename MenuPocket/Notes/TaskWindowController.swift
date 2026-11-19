@@ -19,6 +19,9 @@ final class TaskWindowPresentation {
     private(set) var scheduleState: ScheduleState?
     /// Set when the Calendar state could not be created; the pane offers Retry.
     private(set) var calendarIssue: String?
+    /// The open Calendar block editor. While it is open the Calendar is busy,
+    /// like a task edit: navigation and task commands wait for Save or Cancel.
+    private(set) var scheduleEditor: ScheduleEditorRequest?
     /// The top visible group is a fallback if retained scroll content disappears.
     var todayScrollAnchor: TaskGroupID?
     private(set) var todayScrollRestoreID: UUID?
@@ -76,6 +79,25 @@ final class TaskWindowPresentation {
         cancelMovement()
         route = .calendar
         refreshBrowser(state: state)
+        return true
+    }
+
+    /// Opens the block editor on the visible Calendar. Refused while another
+    /// editor, a task edit or a confirmation is open.
+    @discardableResult
+    func openScheduleEditor(_ request: ScheduleEditorRequest, state: DailyNotesState) -> Bool {
+        guard route == .calendar, !isShowingSettings, !isManagingCategories, scheduleState != nil,
+              canNavigate(state: state) else { return false }
+        scheduleEditor = request
+        return true
+    }
+
+    /// Closes the editor opened by `id`. Returns false, changing nothing, when
+    /// that opening is no longer the open editor.
+    @discardableResult
+    func closeScheduleEditor(id: UUID) -> Bool {
+        guard scheduleEditor?.id == id else { return false }
+        scheduleEditor = nil
         return true
     }
 
@@ -140,7 +162,11 @@ final class TaskWindowPresentation {
     func setWindowVisible(_ visible: Bool, state: DailyNotesState) {
         guard !isTerminating else { return }
         isWindowVisible = visible
-        if !visible { cancelCategoryMovement() }
+        if !visible {
+            cancelCategoryMovement()
+            // A hidden window's popover is gone; do not leave Calendar busy.
+            scheduleEditor = nil
+        }
         refreshBrowser(state: state)
     }
 
@@ -193,6 +219,7 @@ final class TaskWindowPresentation {
     func stopForTermination() {
         isTerminating = true
         isWindowVisible = false
+        scheduleEditor = nil
         cancelMovement()
         updateBrowserVisibility()
     }
@@ -322,14 +349,16 @@ final class TaskWindowPresentation {
 
     private func hasGuardedInteraction(state: DailyNotesState) -> Bool {
         state.editingNoteID != nil || state.editingLaterTaskID != nil ||
-            deletionTarget != nil || isManagingCategories
+            deletionTarget != nil || isManagingCategories || scheduleEditor != nil
     }
 
     /// Sidebar destinations remain available from an idle category pane.
-    /// Rename and removal confirmation must finish before leaving it.
+    /// Rename and removal confirmation must finish before leaving it, and an
+    /// open Calendar block editor must be saved or cancelled.
     func canNavigate(state: DailyNotesState) -> Bool {
         !isTerminating && state.editingNoteID == nil && state.editingLaterTaskID == nil &&
-            deletionTarget == nil && managerRenamingID == nil && categoryRemovalTarget == nil
+            deletionTarget == nil && managerRenamingID == nil && categoryRemovalTarget == nil &&
+            scheduleEditor == nil
     }
 
     private func leaveAuxiliaryPane() {

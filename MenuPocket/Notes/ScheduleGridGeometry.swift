@@ -212,3 +212,22 @@ enum ScheduleDragPlanner {
                                          startMinute: start, endMinute: start + duration)
     }
 }
+
+// MARK: - Slot hit-testing
+
+/// The empty-grid click target. A plain click opens the editor on the slot
+/// under the pointer; TASK-011's drag-to-create replaces this one entry point.
+enum ScheduleSlotHitTest {
+    /// The day and slot start under `point`, measured from the top-left of the
+    /// first day column at the 00:00 line. Nil above or below the day, or with
+    /// no columns.
+    static func slot(at point: CGPoint, columnWidth: CGFloat, days: [GregorianDay],
+                     metrics: ScheduleGridMetrics) -> (day: GregorianDay, startMinute: Int)? {
+        guard point.y >= 0, point.y < metrics.dayHeight,
+              let column = ScheduleGridGeometry.columnIndex(atX: point.x, columnWidth: columnWidth,
+                                                            columnCount: days.count),
+              let minute = ScheduleGridGeometry.slotStartMinute(containing: metrics.minute(atOffset: point.y))
+        else { return nil }
+        return (days[column], minute)
+    }
+}

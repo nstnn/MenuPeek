@@ -281,6 +281,55 @@ final class AppConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testOpenBlockEditorKeepsCalendarBusyUntilItCloses() throws {
+        let fixture = try AppLifecycleFixture(context: .manual)
+        defer { fixture.cleanup() }
+        fixture.launch()
+        let presentation = try XCTUnwrap(fixture.delegate.taskWindowController).presentation
+        let draft = ScheduleBlockDraft(newOn: try GregorianDay(key: "2026-11-18"), startMinute: 600)
+        let request = ScheduleEditorRequest(origin: .newBlockButton, draft: draft)
+
+        XCTAssertFalse(presentation.openScheduleEditor(request, state: fixture.state), "only on the Calendar")
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.openScheduleEditor(request, state: fixture.state))
+        XCTAssertEqual(presentation.scheduleEditor, request)
+
+        // Busy like a task edit: every sidebar destination and task command waits.
+        XCTAssertFalse(presentation.canNavigate(state: fixture.state))
+        XCTAssertFalse(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertFalse(presentation.selectDestination(.today, state: fixture.state))
+        XCTAssertFalse(presentation.showHistory(state: fixture.state))
+        XCTAssertFalse(presentation.showCategoryManager(state: fixture.state))
+        XCTAssertFalse(presentation.canAddTask(to: .today, state: fixture.state))
+        fixture.delegate.showSettings()
+        fixture.delegate.addTask()
+        XCTAssertEqual(presentation.route, .calendar)
+        XCTAssertFalse(presentation.isShowingSettings)
+        XCTAssertEqual(presentation.selectedDestination, .today)
+
+        let other = ScheduleEditorRequest(origin: .newBlockButton, draft: draft)
+        XCTAssertFalse(presentation.openScheduleEditor(other, state: fixture.state), "one editor at a time")
+        XCTAssertFalse(presentation.closeScheduleEditor(id: other.id), "a stale close changes nothing")
+        XCTAssertEqual(presentation.scheduleEditor, request)
+        XCTAssertTrue(presentation.closeScheduleEditor(id: request.id))
+        XCTAssertNil(presentation.scheduleEditor)
+        XCTAssertTrue(presentation.canNavigate(state: fixture.state))
+
+        // Hiding the window drops the popover, so Calendar is never left busy.
+        XCTAssertTrue(presentation.openScheduleEditor(other, state: fixture.state))
+        presentation.setWindowVisible(false, state: fixture.state)
+        XCTAssertNil(presentation.scheduleEditor)
+        presentation.setWindowVisible(true, state: fixture.state)
+        XCTAssertTrue(presentation.selectDestination(.later, state: fixture.state))
+        XCTAssertFalse(presentation.openScheduleEditor(request, state: fixture.state), "Calendar is no longer shown")
+
+        XCTAssertTrue(presentation.showCalendar(state: fixture.state))
+        XCTAssertTrue(presentation.openScheduleEditor(request, state: fixture.state))
+        presentation.stopForTermination()
+        XCTAssertNil(presentation.scheduleEditor)
+    }
+
+    @MainActor
     func testCalendarReadsOnlyWhileShownAndHeaderFollowsNavigation() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
