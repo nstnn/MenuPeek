@@ -3,10 +3,10 @@ import SwiftUI
 /// The Calendar pane in the task window's right column: the visible period's
 /// title, the Day/Week/Month switch, Previous/Today/Next, and the body below.
 ///
-/// Day and Week show the loaded blocks on a time grid (`ScheduleTimeGridView`).
-/// Month cells arrive in a later task; until then Month shows a short summary
-/// of the loaded period. A failed read never shows an empty calendar: it shows
-/// the period's load message with Retry.
+/// Day and Week show the loaded blocks on a time grid (`ScheduleTimeGridView`);
+/// Month shows a day grid (`ScheduleMonthView`) whose cells open Day view.
+/// A failed read never shows an empty calendar: it shows the period's load
+/// message with Retry.
 ///
 /// The block editor opens from the New block button, a click on an empty grid
 /// slot, or a click or Return on a block. The open request lives in the window
@@ -55,10 +55,8 @@ struct ScheduleView: View {
             .padding(.top, 30)
             .padding(.bottom, 20)
             Rectangle().fill(DaybookPalette.rule(colorScheme)).frame(height: 1).accessibilityHidden(true)
-            if let schedule, schedule.mode != .month, let blocks = schedule.blocks {
-                ScheduleTimeGridView(schedule: schedule, blocks: blocks, editor: editorContext, focus: $focus)
-                    .padding(.leading, 12)
-                    .padding(.trailing, 20)
+            if let schedule, let blocks = schedule.blocks {
+                loaded(schedule: schedule, blocks: blocks)
             } else {
                 content
                     .padding(.horizontal, 28)
@@ -73,29 +71,33 @@ struct ScheduleView: View {
     }
 
     @ViewBuilder
+    private func loaded(schedule: ScheduleState, blocks: [ScheduleBlock]) -> some View {
+        if schedule.mode == .month {
+            ScheduleMonthView(schedule: schedule, blocks: blocks)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+        } else {
+            ScheduleTimeGridView(schedule: schedule, blocks: blocks, editor: editorContext, focus: $focus)
+                .padding(.leading, 12)
+                .padding(.trailing, 20)
+        }
+    }
+
+    /// Everything except a loaded period: nothing yet, or Unavailable with Retry.
+    @ViewBuilder
     private var content: some View {
         if let schedule {
             switch schedule.content {
-            case .notLoaded:
+            case .notLoaded, .loaded:
+                // A loaded period is drawn by `loaded(schedule:blocks:)`.
                 Color.clear.frame(height: 0)
-            case let .loaded(blocks):
-                placeholder(blocks: blocks, mode: schedule.mode)
             case .unavailable:
                 unavailable(message: schedule.loadMessage ?? "Could not load the calendar. Try again.")
             }
         } else {
             unavailable(message: issue ?? "Could not open the calendar. Try again.")
         }
-    }
-
-    private func placeholder(blocks: [ScheduleBlock], mode: ScheduleViewMode) -> some View {
-        let unit = Self.unit(for: mode)
-        let summary = blocks.isEmpty ? "No blocks this \(unit)"
-            : "\(blocks.count) \(blocks.count == 1 ? "block" : "blocks") this \(unit)"
-        return Text(summary)
-            .font(.system(size: 14, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("schedulePlaceholder")
     }
 
     private func unavailable(message: String) -> some View {
