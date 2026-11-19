@@ -129,7 +129,7 @@ final class ScheduleDragSessionTests: XCTestCase {
 
     private func resize(_ block: ScheduleBlock, grabbedAt y: CGFloat, to end: CGFloat) throws -> ScheduleDragResult? {
         var session = try XCTUnwrap(ScheduleDragSession.resize(block, at: CGPoint(x: 30, y: y)))
-        XCTAssertEqual(session.resizingBlockID, block.id)
+        XCTAssertEqual(session.draggedBlockID, block.id)
         session.update(to: CGPoint(x: 30, y: end))
         return session.result(metrics: metrics)
     }
@@ -176,8 +176,99 @@ final class ScheduleDragSessionTests: XCTestCase {
 
     func testCreateIsNotAResize() throws {
         let session = try XCTUnwrap(create(from: CGPoint(x: 10, y: 600), to: CGPoint(x: 10, y: 660)))
-        XCTAssertNil(session.resizingBlockID)
+        XCTAssertNil(session.draggedBlockID)
         XCTAssertTrue(try XCTUnwrap(session.result(metrics: metrics)).changesSavedBlock)
+    }
+
+    // MARK: Move
+
+    private func move(_ block: ScheduleBlock, grabbedAt start: CGPoint, to end: CGPoint) throws -> ScheduleDragResult? {
+        var session = try XCTUnwrap(ScheduleDragSession.move(block, at: start, columnWidth: columnWidth, days: week))
+        XCTAssertEqual(session.draggedBlockID, block.id)
+        session.update(to: end)
+        return session.result(metrics: metrics)
+    }
+
+    func testMovingTenToElevenToTwoThirtyNextDay() throws {
+        // Grabbed 20 minutes into Monday 10:00–11:00, dropped in Tuesday's column
+        // 270 minutes lower: Tuesday 14:30–15:30.
+        let saved = try block(600, 660)
+        let result = try XCTUnwrap(try move(saved, grabbedAt: CGPoint(x: 40, y: 620), to: CGPoint(x: 160, y: 890)))
+        guard case let .move(original, content) = result else { return XCTFail("not a move") }
+        XCTAssertEqual(original, saved)
+        XCTAssertEqual(content.title, "Focus")
+        XCTAssertEqual(content.day, tuesday)
+        XCTAssertEqual(content.startMinute, 870)
+        XCTAssertEqual(content.endMinute, 930)
+        XCTAssertEqual(result.timeText, "14:30–15:30")
+        XCTAssertTrue(result.changesSavedBlock)
+        XCTAssertEqual(result.savedBlockChange?.block, saved)
+        XCTAssertEqual(result.savedBlockChange?.content, content)
+    }
+
+    func testMoveKeepsTheGrabOffsetAndSnaps() throws {
+        // Grabbed near the bottom of the block: 37 pt of travel moves the start
+        // 37 minutes, snapped to 10:30, not the pointer's own 11:37.
+        let result = try move(try block(600, 660), grabbedAt: CGPoint(x: 10, y: 655), to: CGPoint(x: 10, y: 692))
+        XCTAssertEqual(result?.day, monday)
+        XCTAssertEqual(result?.startMinute, 630)
+        XCTAssertEqual(result?.endMinute, 690)
+        let up = try move(try block(600, 660), grabbedAt: CGPoint(x: 10, y: 630), to: CGPoint(x: 10, y: 538))
+        XCTAssertEqual(up?.startMinute, 510)
+        XCTAssertEqual(up?.endMinute, 570)
+    }
+
+    func testMoveClampsAtBothEndsOfTheDay() throws {
+        let top = try move(try block(60, 150), grabbedAt: CGPoint(x: 10, y: 100), to: CGPoint(x: 10, y: -400))
+        XCTAssertEqual(top?.startMinute, 0)
+        XCTAssertEqual(top?.endMinute, 90)
+        let bottom = try move(try block(1200, 1290), grabbedAt: CGPoint(x: 10, y: 1250),
+                              to: CGPoint(x: 10, y: 2000))
+        XCTAssertEqual(bottom?.startMinute, 1350)
+        XCTAssertEqual(bottom?.endMinute, 1440)
+    }
+
+    func testMoveDayIsClampedToTheVisibleColumns() throws {
+        let saved = try block(600, 660, day: tuesday)
+        let left = try move(saved, grabbedAt: CGPoint(x: 150, y: 620), to: CGPoint(x: -300, y: 620))
+        XCTAssertEqual(left?.day, monday)
+        let right = try move(saved, grabbedAt: CGPoint(x: 150, y: 620), to: CGPoint(x: 900, y: 680))
+        XCTAssertEqual(right?.day, tuesday)
+        XCTAssertEqual(right?.startMinute, 660)
+        // Day view: one column, so only the time changes.
+        var day = try XCTUnwrap(ScheduleDragSession.move(saved, at: CGPoint(x: 50, y: 620), columnWidth: 200,
+                                                         days: [tuesday]))
+        day.update(to: CGPoint(x: 600, y: 740))
+        XCTAssertEqual(day.result(metrics: metrics)?.day, tuesday)
+        XCTAssertEqual(day.result(metrics: metrics)?.startMinute, 720)
+    }
+
+    func testMoveBackToTheSavedPlaceChangesNothing() throws {
+        let result = try XCTUnwrap(try move(try block(600, 660), grabbedAt: CGPoint(x: 10, y: 620),
+                                            to: CGPoint(x: 10, y: 626)))
+        XCTAssertEqual(result.startMinute, 600)
+        XCTAssertFalse(result.changesSavedBlock)
+        let otherDay = try XCTUnwrap(try move(try block(600, 660), grabbedAt: CGPoint(x: 10, y: 620),
+                                              to: CGPoint(x: 110, y: 620)))
+        XCTAssertTrue(otherDay.changesSavedBlock, "same time on another day is a change")
+    }
+
+    func testMoveUnderTheMinimumIsAClick() throws {
+        // A plain click on the body: no result, so the block opens in the editor.
+        XCTAssertNil(try move(try block(600, 660), grabbedAt: CGPoint(x: 10, y: 620), to: CGPoint(x: 12, y: 622)))
+    }
+
+    func testMoveIsRefusedWithoutColumnsOrWithBadPoints() throws {
+        let saved = try block(600, 660)
+        XCTAssertNil(ScheduleDragSession.move(saved, at: CGPoint(x: 10, y: 620), columnWidth: columnWidth, days: []))
+        XCTAssertNil(ScheduleDragSession.move(saved, at: CGPoint(x: 10, y: 620), columnWidth: 0, days: week))
+        XCTAssertNil(ScheduleDragSession.move(saved, at: CGPoint(x: CGFloat.nan, y: 620), columnWidth: columnWidth,
+                                              days: week))
+    }
+
+    func testCreateHasNoSavedBlockChange() throws {
+        let session = try XCTUnwrap(create(from: CGPoint(x: 10, y: 600), to: CGPoint(x: 10, y: 660)))
+        XCTAssertNil(try XCTUnwrap(session.result(metrics: metrics)).savedBlockChange)
     }
 
     // MARK: Auto-scroll
@@ -227,6 +318,59 @@ final class ScheduleResizeSaveTests: XCTestCase {
         XCTAssertEqual(ScheduleCommandFailure.update.message, "Could not save block changes. Try again.")
         XCTAssertEqual(state.blocks?.first?.endMinute, 735, "the block keeps its saved size")
         XCTAssertEqual(repository.blocks.first?.endMinute, 735)
+    }
+}
+
+/// A move saves the new day and times through the same update command; a
+/// failed save or an Escape leaves the saved row where it was.
+@MainActor
+final class ScheduleMoveSaveTests: XCTestCase {
+    func testMoveSaveFailedSaveAndEscape() throws {
+        let monday = try GregorianDay(key: "2026-11-16")
+        let tuesday = try GregorianDay(key: "2026-11-17")
+        let repository = InMemoryScheduleRepository()
+        let saved = try ScheduleBlock(id: UUID(), title: "Focus", day: monday, startMinute: 600, endMinute: 660,
+                                      createdAt: Date(timeIntervalSince1970: 0))
+        repository.blocks = [saved]
+        let state = try ScheduleState(noteDay: ScheduleDragTestClock.noteDay, repository: { repository })
+        state.setVisible(true)
+        XCTAssertTrue(state.showDay(monday))
+        let metrics = ScheduleTimeGridSize.metrics
+        let width: CGFloat = 100
+        let top = metrics.offset(forMinute: 600)
+        let dropped = CGPoint(x: 150, y: top + 10 + metrics.offset(forMinute: 270))
+
+        // Escape: the controller drops the session, so nothing reaches the state.
+        let controller = ScheduleGridDragController()
+        controller.track(to: CGPoint(x: 40, y: top + 10)) {
+            ScheduleDragSession.move(saved, at: CGPoint(x: 40, y: top + 10), columnWidth: width,
+                                     days: [monday, tuesday])
+        }
+        controller.track(to: dropped) { nil }
+        XCTAssertNotNil(controller.session?.result(metrics: metrics))
+        controller.cancel()
+        XCTAssertNil(controller.finish(at: dropped))
+        XCTAssertEqual(repository.blocks, [saved])
+
+        var session = try XCTUnwrap(ScheduleDragSession.move(saved, at: CGPoint(x: 40, y: top + 10),
+                                                             columnWidth: width, days: [monday, tuesday]))
+        session.update(to: dropped)
+        let change = try XCTUnwrap(session.result(metrics: metrics)?.savedBlockChange)
+
+        // A failed write keeps the saved row and the published block.
+        repository.failWrites = true
+        XCTAssertEqual(state.update(id: change.block.id, to: change.content).failureValue, .update)
+        XCTAssertEqual(repository.blocks, [saved])
+        XCTAssertEqual(state.blocks, [saved])
+
+        repository.failWrites = false
+        let moved = try state.update(id: change.block.id, to: change.content).get()
+        XCTAssertEqual(moved.id, saved.id)
+        XCTAssertEqual(moved.day, tuesday)
+        XCTAssertEqual(moved.startMinute, 870)
+        XCTAssertEqual(moved.endMinute, 930)
+        XCTAssertEqual(repository.blocks.first?.day, tuesday)
+        XCTAssertEqual(repository.blocks.first?.startMinute, 870)
     }
 }
 
