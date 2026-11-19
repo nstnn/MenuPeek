@@ -225,6 +225,31 @@ final class ScheduleStateTests: XCTestCase {
         XCTAssertEqual(repository.reads.last, try range("2026-11-02", "2026-11-09"))
     }
 
+    func testMonthLoadsWithOneRangeReadAndGroupsItsBlocksByDay() throws {
+        try seed("Review", "2026-11-18", 600, 660)
+        try seed("Standup", "2026-11-18", 540, 555)
+        try seed("Retro", "2026-11-26", 900, 960)
+        try seed("Next month", "2026-12-01", 600, 660)
+        let state = try makeState()
+        state.setMode(.month)
+        state.setVisible(true)
+
+        XCTAssertEqual(repository.reads, [try range("2026-11-01", "2026-12-01")])
+        let model = try ScheduleMonthModel(grid: state.period.monthGrid(), blocks: XCTUnwrap(state.blocks),
+                                           today: state.today, selectedDay: state.selectedDay)
+        XCTAssertEqual(model.day(try day("2026-11-18"))?.blocks.map(\.title), ["Standup", "Review"])
+        XCTAssertEqual(model.day(try day("2026-11-26"))?.blocks.map(\.title), ["Retro"])
+        XCTAssertEqual(model.days.flatMap(\.blocks).count, 3)
+        XCTAssertEqual(repository.reads.count, 1, "building the cells reads nothing")
+
+        state.showNext()
+        XCTAssertEqual(repository.reads.last, try range("2026-12-01", "2027-01-01"))
+        XCTAssertEqual(state.blocks?.map(\.title), ["Next month"])
+        state.showPrevious()
+        state.showPrevious()
+        XCTAssertEqual(repository.reads.last, try range("2026-10-01", "2026-11-01"))
+    }
+
     func testANewPeriodNeverShowsTheOldPeriodsBlocks() throws {
         try seed("This week", "2026-11-18", 0, 60)
         let state = try makeState()
