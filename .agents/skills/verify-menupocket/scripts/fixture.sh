@@ -203,6 +203,9 @@ SELECT n.rowid, n.id, n.day_key, n.display_order, n.text, n.completed_at IS NOT 
   FROM notes n LEFT JOIN categories c ON c.id = n.category_id ORDER BY n.day_key, n.display_order;
 SELECT l.rowid, l.text, l.completed_at IS NOT NULL AS done, COALESCE(c.name, 'General') AS category
   FROM later_tasks l LEFT JOIN categories c ON c.id = l.category_id ORDER BY l.rowid;
+SELECT rowid, id, day_key, start_minute, end_minute,
+       printf('%02d:%02d-%02d:%02d', start_minute / 60, start_minute % 60, end_minute / 60, end_minute % 60) AS times, title
+  FROM schedule_blocks ORDER BY day_key, start_minute, created_at, id;
 SQL
             echo "-- a query failed (schema changed?); full dump follows" >>"$out/db.txt"
             sqlite3 -readonly -cmd ".timeout 5000" "$data/fixture.sqlite" .dump >>"$out/db.txt"
