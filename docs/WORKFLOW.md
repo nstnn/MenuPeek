@@ -136,6 +136,16 @@ For documentation-only changes, review links, commands, behavior descriptions, a
 
 Before first launching a v5 build on real data, quit every MenuPocket copy and make a consistent recoverable SQLite backup using the procedure under [Schema v3 upgrade preparation](#schema-v3-upgrade-preparation). Record source version, backup location/integrity and the target build. V5 only adds nullable notes.continued_on to v4; it does not rewrite existing rows or ranks. A v1–v4 binary cannot reopen v5. Do not hand-edit the version or restore an old backup without a separate deliberate decision about losing newer changes. Fixture verification does not authorize opening the user's database or installing a release.
 
+## Schema v6 upgrade preparation
+
+Schema v6 adds only the empty `schedule_blocks` table and its `day_key` index for the Calendar; it does not rewrite task, Later, or category rows, ranks, or rowids. Known unversioned/v1–v5 stores reach v6 in the existing single upgrade transaction, and a failed step rolls back schema, data, and version. Before first launching a v6 build on real data, quit every MenuPocket copy and make a consistent recoverable SQLite backup using the procedure under [Schema v3 upgrade preparation](#schema-v3-upgrade-preparation). Record the source version, backup location and integrity, and the target build.
+
+The upgrade is one-way. A v1–v5 binary refuses a v6 database, so once a v6 build has opened the file, an older build cannot be used with it. Do not hand-edit the version or drop the table to go back; restoring the pre-upgrade backup is a separate deliberate decision that loses Calendar blocks and every other post-backup change. A v6 build refuses version 7+ and leaves that file untouched. Fixture verification does not authorize opening the user's database or installing a release.
+
 ## Continue today verification
 
 Run SQLiteNoteRepositoryTests and TaskHistoryIntegrationTests for continuation batches, stale/completed/duplicate/date guards, write/COMMIT rollback and retry, reopen, migration and progress preservation; then run the shared-scheme full suite. Follow the [History feature recipe](../.agents/skills/verify-menupocket/features/history.md) on a fresh isolated fixture. Observe selection, keyboard activation, saved source marker/new attempts, Today/menu bar count, unchanged old progress, Unfinished/reminder removal, changed-data quit/relaunch, and cleanup. Record native/system limits separately in [continuation handoff](TASK_CONTINUATION_HANDOFF.md).
+
+## Calendar verification
+
+Run every `Schedule*` test class, `SQLiteNoteRepositoryTests`, and `AppConfigurationTests` first, then the full shared-scheme suite. Follow the [Calendar feature recipe](../.agents/skills/verify-menupocket/features/calendar.md) on a fresh fixture launched with `--seed calendar` and a fixed `--now`; its `db.txt` snapshots end with the `schedule_blocks` rows. The harness cannot post pointer clicks on the grid or pointer drags, so slot clicks, drawing, resizing, and moving are user-operated or Not tested; record which. Record results and limits in the [Calendar handoff](CALENDAR_HANDOFF.md).

@@ -1,9 +1,9 @@
 # MenuPocket documentation
 
-MenuPocket manages daily tasks in one desktop window, where Today tasks can be dragged or moved between categories, shows earlier days read-only in History, and shows saved progress in the menu bar. These tracked documents describe the current product and its verification evidence:
+MenuPocket manages daily tasks in one desktop window, where Today tasks can be dragged or moved between categories, shows earlier days read-only in History, plans time blocks in a local Day/Week/Month Calendar, and shows saved progress in the menu bar. These tracked documents describe the current product and its verification evidence:
 
 - [README](../README.md) — prerequisites, quick start, tests, and a short usage guide.
-- [Requirements](REQUIREMENTS.md) — desktop task behavior, Today/Later scope, read-only History/Unfinished/month calendar, task movement, and acceptance criteria.
+- [Requirements](REQUIREMENTS.md) — desktop task behavior, Today/Later scope, read-only History/Unfinished/month calendar, task movement, the Calendar of time blocks, and acceptance criteria.
 - [Architecture](ARCHITECTURE.md) — app composition, data flow, persistence, and system boundaries.
 - Diagrams for new developers — [architecture](diagrams/architecture.html), [database schema](diagrams/database-schema.html), [write path](diagrams/write-path.html), [entry points](diagrams/entry-points.html), and [task window navigation](diagrams/task-window-navigation.html). Each is a self-contained HTML page; open it locally in a browser.
 - [Workflow](WORKFLOW.md) — build, verification, and local Release steps.
@@ -17,6 +17,7 @@ MenuPocket manages daily tasks in one desktop window, where Today tasks can be d
 - [Settings shortcuts verification](SETTINGS_SHORTCUTS_VERIFICATION.md) — the read-only shortcut reference, focused tests, native Settings component evidence, keyboard/production limits, and temporary-app cleanup.
 
 - [Manual task continuation](TASK_CONTINUATION_HANDOFF.md) — Continue today, schema-v5 preservation, automated/native verification, review and cleanup.
+- [Calendar handoff](CALENDAR_HANDOFF.md) — Day/Week/Month time blocks, the one-way schema-v6 upgrade, automated and fixture evidence, and remaining Not tested checks.
 
 ## Historical evidence
 
@@ -34,6 +35,8 @@ The [menu bar glance plan](../plan/menu-bar-glance/menu-bar-glance.md) records t
 The [task movement plan](../plan/task-movement/task-movement.md) records saved reordering and category movement: task cards, evidence, and handoff. It is implemented and merged; automated checks and CI pass, and native fixture results are partial, with several merged-build drag scenarios, the minimum window, Light appearance, VoiceOver, and macOS 14 Not tested.
 
 The [category reordering plan](../plan/category-reordering/category-reordering.md) records the implemented mouse hold/drop feature, final automated integration and partial native session. Its TASK-011 reviews the exact feature and delivers current documentation while keeping required unobserved cases open. Current category ordering assumptions live in [Requirements](REQUIREMENTS.md#category-reordering-contract), with evidence in the tracked reordering handoff; earlier local plans and dated records retain their original results.
+
+The [Calendar plan](../plan/calendar/README.md) records the local Calendar's 15 task cards and their handoff notes. It is implemented and merged; native acceptance is partial (see the [Calendar handoff](CALENDAR_HANDOFF.md)).
 
 The [task-categories plan](../plan/task-categories/task-categories.md) defines the category implementation and acceptance sequence. The [desktop task-management plan](../plan/desktop-task-management/desktop-task-management.md) defines the preceding desktop increment. The earlier [Notes MVP design](../plan/mvp/NOTES_MVP_PLAN.md) and [task cards](../plan/mvp/NOTES_MVP_TASKS.md) describe the superseded compact panel. The [initial roadmap](../plan/init/master_plan.md) records the historical demo-shell phase.
 
