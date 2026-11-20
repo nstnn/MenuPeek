@@ -13,6 +13,7 @@ struct ScheduleMonthView: View {
     let schedule: ScheduleState
     let blocks: [ScheduleBlock]
     @FocusState private var focusedDay: GregorianDay?
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         let model = (try? schedule.period.monthGrid()).map {
@@ -30,13 +31,14 @@ struct ScheduleMonthView: View {
     }
 
     private func open(_ day: GregorianDay) {
+        guard isEnabled else { return }
         schedule.showDay(day)
     }
 
     /// Arrow keys move focus by a day or a week. Leaving the month steps to the
     /// previous or next month first, then focuses the same target day there.
     private func moveFocus(from day: GregorianDay, by step: Int) {
-        guard let target = try? day.adding(days: step) else { return }
+        guard isEnabled, let target = try? day.adding(days: step) else { return }
         if schedule.period.contains(target) {
             focusedDay = target
             return
