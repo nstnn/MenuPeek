@@ -157,3 +157,9 @@ SQLite schema validation now reads Calendar text with the same byte-counted UTF-
 - **Automated — Pass.** The shared `MenuPocket` scheme passed 279 focused tests and all 617 tests with native Undo run separately, on macOS 26.6.2 with Xcode 27.0. The regression reopens a file with NUL at the start, middle and end of saved titles and compares the file bytes. A separate malformed-row case rejects a line break after NUL.
 - **Native fixture — Pass.** In agent-operated run `20261119-171213`, the Calendar editor saved a title beginning with NUL via an Accessibility text setter. After a full quit and relaunch, the status item showed `1/4`, Today and Later listed the seeded tasks, and Calendar showed the same block. SQLite confirmed identical block ID, title bytes, day, and minutes, unchanged task, Later and category rows, `integrity_check = ok` and schema v6. Evidence is under `build/verify-menupocket/evidence/20261119-171213/`.
 - **Installed app and personal database — Not tested.** This regression used the isolated fixture and XCTest stores.
+
+## Calendar navigation while editing — 2026-11-19
+
+- **Native fixture — Pass.** Agent-operated run `20261119-223957` reproduced the original sequence with Pairing open. Accessibility presses on Previous, Today, Next and the Month segment left Week 47 and the editor open. Escape restored focus to Pairing, confirmed by Return reopening it. The period controls worked after dismissal. A Month cell stayed disabled with New block open and opened Day after Cancel. SQLite snapshots before and after matched. Evidence is under `build/verify-menupocket/evidence/20261119-223957/`.
+- **Automated — Pass.** The shared `MenuPocket` scheme passed 279 focused tests and all 617 tests with native Undo run separately, on macOS 26.6.2 with Xcode 27.0.
+- **Physical outside click and VoiceOver — Not tested.** The native sequence used Accessibility presses and fixture-targeted Escape and Return.

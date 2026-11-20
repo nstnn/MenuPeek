@@ -79,6 +79,7 @@ struct ScheduleView: View {
     private func loaded(schedule: ScheduleState, blocks: [ScheduleBlock]) -> some View {
         if schedule.mode == .month {
             ScheduleMonthView(schedule: schedule, blocks: blocks)
+                .disabled(editor != nil)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
@@ -168,6 +169,8 @@ private struct ScheduleHeaderView: View {
     let editor: ScheduleEditorContext
     var focus: FocusState<ScheduleFocusTarget?>.Binding
 
+    private var canChangePeriod: Bool { editor.request == nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
@@ -176,6 +179,7 @@ private struct ScheduleHeaderView: View {
                 newBlockButton
             }
             controls
+                .disabled(!canChangePeriod)
         }
     }
 
@@ -236,17 +240,17 @@ private struct ScheduleHeaderView: View {
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 Button { schedule.showPrevious() } label: { Image(systemName: "chevron.left") }
-                    .scheduleKeyAction { schedule.showPrevious() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showPrevious() }
                     .help("Previous \(unit)")
                     .accessibilityLabel("Previous \(unit)")
                     .accessibilityIdentifier("schedulePrevious")
                 Button("Today") { schedule.showToday() }
-                    .scheduleKeyAction { schedule.showToday() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showToday() }
                     .help("Show today")
                     .accessibilityLabel("Show today")
                     .accessibilityIdentifier("scheduleToday")
                 Button { schedule.showNext() } label: { Image(systemName: "chevron.right") }
-                    .scheduleKeyAction { schedule.showNext() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showNext() }
                     .help("Next \(unit)")
                     .accessibilityLabel("Next \(unit)")
                     .accessibilityIdentifier("scheduleNext")
@@ -265,6 +269,7 @@ private struct ScheduleHeaderView: View {
         .focusable()
         .keyboardFocusAppearance()
         .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+            guard canChangePeriod else { return .ignored }
             let modes = ScheduleViewMode.allCases
             let index = modes.firstIndex(of: schedule.mode) ?? 0
             let next = min(max(index + (press.key == .rightArrow ? 1 : -1), 0), modes.count - 1)
@@ -279,10 +284,11 @@ private struct ScheduleHeaderView: View {
 
 private extension View {
     /// Space and Return act like a click, matching the other Daybook controls.
-    func scheduleKeyAction(_ action: @escaping () -> Void) -> some View {
+    func scheduleKeyAction(enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
         focusable()
             .keyboardFocusAppearance()
             .onKeyPress(keys: [.space, .return]) { _ in
+                guard enabled else { return .ignored }
                 action()
                 return .handled
             }
