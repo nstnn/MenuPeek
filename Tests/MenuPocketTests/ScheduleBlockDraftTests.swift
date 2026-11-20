@@ -231,14 +231,31 @@ final class ScheduleBlockDraftTests: XCTestCase {
         let id = UUID()
         let saved = UUID()
         let slot = ScheduleEditorOrigin.slot(day: try day("2026-11-18"), startMinute: 600)
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.newBlockButton, .cancelled), .newBlock)
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.newBlockButton, .saved(saved)), .newBlock)
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .cancelled), .block(id))
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .saved(id)), .block(id))
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .deleted), .newBlock)
-        XCTAssertEqual(ScheduleFocusTarget.afterEditor(slot, .saved(saved)), .block(saved))
-        XCTAssertNil(ScheduleFocusTarget.afterEditor(slot, .cancelled))
+        let shown: (UUID) -> Bool = { _ in true }
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.newBlockButton, .cancelled, isShown: shown), .newBlock)
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.newBlockButton, .saved(saved), isShown: shown), .newBlock)
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .cancelled, isShown: shown), .block(id))
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .saved(id), isShown: shown), .block(id))
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .deleted, isShown: shown), .newBlock)
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(slot, .saved(saved), isShown: shown), .block(saved))
+        XCTAssertNil(ScheduleFocusTarget.afterEditor(slot, .cancelled, isShown: shown))
         XCTAssertFalse(ScheduleEditorOrigin.newBlockButton.isOnGrid)
         XCTAssertTrue(ScheduleEditorOrigin.block(id).isOnGrid)
+    }
+
+    /// A save to a day outside the visible period reloads a grid without the
+    /// block, so focus goes to New block rather than to a missing view.
+    func testFocusGoesToNewBlockWhenTheSavedBlockLeftThePeriod() throws {
+        let id = UUID()
+        let other = UUID()
+        let slot = ScheduleEditorOrigin.slot(day: try day("2026-11-22"), startMinute: 600)
+        let onlyOther: (UUID) -> Bool = { $0 == other }
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .saved(id), isShown: onlyOther), .newBlock)
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(slot, .saved(id), isShown: onlyOther), .newBlock)
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(id), .cancelled, isShown: onlyOther), .newBlock,
+                       "a block removed while its editor was open has no view either")
+        XCTAssertNil(ScheduleFocusTarget.afterEditor(slot, .cancelled, isShown: onlyOther))
+        XCTAssertEqual(ScheduleFocusTarget.afterEditor(.block(other), .saved(other), isShown: onlyOther),
+                       .block(other))
     }
 }
