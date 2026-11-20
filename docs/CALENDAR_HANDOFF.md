@@ -149,3 +149,11 @@ The installed `/Applications/MenuPocket.app` (executable `169a8cd2…`, running 
 Every fixture run ends with its own `cleanup.txt`, which trashes and unregisters its temporary `MenuPocketVerify.app`. The card handoffs record trashing and unregistering the Debug test host after their hosted runs. No card or run reports opening the user's main app or saved database.
 
 TASK-015 used a separate `build/acceptance-015-DerivedData` so the user's `build/DerivedData` Debug app was not rebuilt. After the session its Debug test host and Release app were trashed and unregistered and the folder removed; the four fixture runs (144949, 145100, 145207, 145300) were cleaned with `fixture.sh cleanup` without warnings; the temporary v5 worktree was removed. Afterwards no fixture or test-host process remained, `/Applications/MenuPocket.app` had the same executable hash and PID, and the `build/DerivedData` Debug app was unchanged.
+
+## Calendar title reopen regression — 2026-11-19
+
+SQLite schema validation now reads Calendar text with the same byte-counted UTF-8 decoder as block queries. A v6 store with a previously saved title containing `U+0000` can reopen with the original title intact. The change requires no migration or data rewrite.
+
+- **Automated — Pass.** The shared `MenuPocket` scheme passed 279 focused tests and all 617 tests with native Undo run separately, on macOS 26.6.2 with Xcode 27.0. The regression reopens a file with NUL at the start, middle and end of saved titles and compares the file bytes. A separate malformed-row case rejects a line break after NUL.
+- **Native fixture — Pass.** In agent-operated run `20261119-171213`, the Calendar editor saved a title beginning with NUL via an Accessibility text setter. After a full quit and relaunch, the status item showed `1/4`, Today and Later listed the seeded tasks, and Calendar showed the same block. SQLite confirmed identical block ID, title bytes, day, and minutes, unchanged task, Later and category rows, `integrity_check = ok` and schema v6. Evidence is under `build/verify-menupocket/evidence/20261119-171213/`.
+- **Installed app and personal database — Not tested.** This regression used the isolated fixture and XCTest stores.
