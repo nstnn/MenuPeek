@@ -2381,6 +2381,7 @@ extension SQLiteNoteRepositoryTests {
             ("blank title", row("('00000000-0000-0000-0000-0000000000C1', '   ', '2026-11-16', 540, 600, 1.0)")),
             ("untrimmed title", row("('00000000-0000-0000-0000-0000000000C1', ' T', '2026-11-16', 540, 600, 1.0)")),
             ("multiline title", row("('00000000-0000-0000-0000-0000000000C1', 'A' || char(10) || 'B', '2026-11-16', 540, 600, 1.0)")),
+            ("line break after NUL", row("('00000000-0000-0000-0000-0000000000C1', 'A' || char(0) || char(10) || 'B', '2026-11-16', 540, 600, 1.0)")),
             ("non-UUID id", row("('block-1', 'T', '2026-11-16', 540, 600, 1.0)")),
             ("lowercase id", row("('00000000-0000-0000-0000-0000000000c1', 'T', '2026-11-16', 540, 600, 1.0)")),
             ("unknown extra table", "CREATE TABLE future_data (payload TEXT);")
@@ -2480,6 +2481,28 @@ extension SQLiteNoteRepositoryTests {
         XCTAssertEqual(try reopened.scheduleBlocks(in: week), [deepWork, lunch, fullDay])
         XCTAssertEqual(try rawRows("SELECT id, title, day_key, start_minute, end_minute, typeof(created_at) FROM schedule_blocks WHERE id = '\(deepWork.id.uuidString)'"),
                        [[deepWork.id.uuidString, "Deep work ' quote 📝", "2026-11-16", "540", "600", "real"]])
+    }
+
+    func testScheduleTitlesWithNULSurviveReopenWithoutRewritingDatabase() throws {
+        let week = try range("2026-11-16", "2026-11-23")
+        let saved = [
+            try block("\0Focus", day: "2026-11-16", 540, 600, createdAt: 1),
+            try block("Focus \0second 📝", day: "2026-11-16", 600, 660, createdAt: 2),
+            try block("Focus\0", day: "2026-11-16", 660, 720, createdAt: 3)
+        ]
+        do {
+            let store = try SQLiteNoteRepository(databaseURL: databaseURL)
+            for block in saved { try store.addScheduleBlock(block) }
+            XCTAssertEqual(try store.scheduleBlocks(in: week), saved)
+        }
+
+        // Reopen the exact file an earlier build could already write.
+        let bytes = try Data(contentsOf: databaseURL)
+        do {
+            let reopened = try SQLiteNoteRepository(databaseURL: databaseURL)
+            XCTAssertEqual(try reopened.scheduleBlocks(in: week), saved)
+        }
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytes)
     }
 
     func testScheduleBlocksReadInDayStartEndCreationThenIDOrder() throws {
