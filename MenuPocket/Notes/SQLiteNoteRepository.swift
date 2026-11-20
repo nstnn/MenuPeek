@@ -1072,11 +1072,17 @@ final class SQLiteNoteRepository: NoteRepository {
         ).isEmpty else {
             throw SQLiteNoteStoreError.incompatibleSchema("Invalid schedule block times")
         }
-        // Identity, title and day rules need Swift parsing; values were type-checked above.
-        for row in try schemaRows("SELECT id, title, day_key FROM schedule_blocks", in: database) {
-            guard let id = row[0], UUID(uuidString: id)?.uuidString == id,
-                  let title = row[1], (try? ScheduleBlockContent.validateTitle(title)) == title,
-                  let dayKey = row[2], (try? GregorianDay(key: dayKey))?.key == dayKey else {
+        // Use the same length-aware text reader as a Calendar query so validation
+        // checks the full value even when a title contains an embedded NUL.
+        let statement = try prepare("SELECT id, title, day_key FROM schedule_blocks", in: database)
+        defer { sqlite3_finalize(statement) }
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { break }
+            try check(step, expected: SQLITE_ROW, operation: "validate schedule blocks", in: database)
+            guard let id = try? text(at: 0, from: statement), UUID(uuidString: id)?.uuidString == id,
+                  let title = try? text(at: 1, from: statement), (try? ScheduleBlockContent.validateTitle(title)) == title,
+                  let dayKey = try? text(at: 2, from: statement), (try? GregorianDay(key: dayKey))?.key == dayKey else {
                 throw SQLiteNoteStoreError.incompatibleSchema("Invalid schedule block row")
             }
         }
@@ -1281,6 +1287,10 @@ final class SQLiteNoteRepository: NoteRepository {
     }
 
     private func text(at index: Int32, from statement: OpaquePointer) throws -> String {
+        try Self.text(at: index, from: statement)
+    }
+
+    private static func text(at index: Int32, from statement: OpaquePointer) throws -> String {
         guard sqlite3_column_type(statement, index) == SQLITE_TEXT,
               let bytes = sqlite3_column_text(statement, index),
               let value = String(bytes: UnsafeBufferPointer(

@@ -79,6 +79,7 @@ struct ScheduleView: View {
     private func loaded(schedule: ScheduleState, blocks: [ScheduleBlock]) -> some View {
         if schedule.mode == .month {
             ScheduleMonthView(schedule: schedule, blocks: blocks)
+                .disabled(editor != nil)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
@@ -121,7 +122,8 @@ struct ScheduleView: View {
 
     /// Closes the editor once, then puts focus back on what opened it: the
     /// New block button, the edited block, or the block a slot click created.
-    /// After a delete, focus goes to New block.
+    /// After a delete, or a save to a day outside the visible period, focus
+    /// goes to New block.
     /// A click outside a transient popover closes it and then reaches the grid.
     /// That click only closes the editor, as with the task actions popover:
     /// opening another popover while this one is still closing would leave it
@@ -144,7 +146,10 @@ struct ScheduleView: View {
         // The popover may report its own dismissal after Save already closed it.
         guard onCloseEditor(request.id) else { return }
         liveDraft = nil
-        guard let target = ScheduleFocusTarget.afterEditor(request.origin, outcome) else { return }
+        // A save has already reloaded the visible period, so `blocks` is what the grid draws.
+        let shown = Set(schedule?.blocks?.map(\.id) ?? [])
+        guard let target = ScheduleFocusTarget.afterEditor(request.origin, outcome,
+                                                            isShown: shown.contains) else { return }
         Task { @MainActor in
             // Let the popover close and the task window become key first.
             try? await Task.sleep(for: .milliseconds(60))
@@ -168,6 +173,8 @@ private struct ScheduleHeaderView: View {
     let editor: ScheduleEditorContext
     var focus: FocusState<ScheduleFocusTarget?>.Binding
 
+    private var canChangePeriod: Bool { editor.request == nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
@@ -176,6 +183,7 @@ private struct ScheduleHeaderView: View {
                 newBlockButton
             }
             controls
+                .disabled(!canChangePeriod)
         }
     }
 
@@ -236,17 +244,17 @@ private struct ScheduleHeaderView: View {
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 Button { schedule.showPrevious() } label: { Image(systemName: "chevron.left") }
-                    .scheduleKeyAction { schedule.showPrevious() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showPrevious() }
                     .help("Previous \(unit)")
                     .accessibilityLabel("Previous \(unit)")
                     .accessibilityIdentifier("schedulePrevious")
                 Button("Today") { schedule.showToday() }
-                    .scheduleKeyAction { schedule.showToday() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showToday() }
                     .help("Show today")
                     .accessibilityLabel("Show today")
                     .accessibilityIdentifier("scheduleToday")
                 Button { schedule.showNext() } label: { Image(systemName: "chevron.right") }
-                    .scheduleKeyAction { schedule.showNext() }
+                    .scheduleKeyAction(enabled: canChangePeriod) { schedule.showNext() }
                     .help("Next \(unit)")
                     .accessibilityLabel("Next \(unit)")
                     .accessibilityIdentifier("scheduleNext")
@@ -265,6 +273,7 @@ private struct ScheduleHeaderView: View {
         .focusable()
         .keyboardFocusAppearance()
         .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+            guard canChangePeriod else { return .ignored }
             let modes = ScheduleViewMode.allCases
             let index = modes.firstIndex(of: schedule.mode) ?? 0
             let next = min(max(index + (press.key == .rightArrow ? 1 : -1), 0), modes.count - 1)
@@ -279,10 +288,11 @@ private struct ScheduleHeaderView: View {
 
 private extension View {
     /// Space and Return act like a click, matching the other Daybook controls.
-    func scheduleKeyAction(_ action: @escaping () -> Void) -> some View {
+    func scheduleKeyAction(enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
         focusable()
             .keyboardFocusAppearance()
             .onKeyPress(keys: [.space, .return]) { _ in
+                guard enabled else { return .ignored }
                 action()
                 return .handled
             }
@@ -298,13 +308,18 @@ enum ScheduleFocusTarget: Hashable {
 
     /// The opener, or the saved block for a slot click; New block after a
     /// delete; nothing after cancelling a slot click (it had no focus).
-    static func afterEditor(_ origin: ScheduleEditorOrigin, _ outcome: ScheduleEditorOutcome) -> Self? {
-        switch (origin, outcome) {
+    /// A block that `isShown` says is not on the grid, such as one saved to a
+    /// day outside the visible period, has no view to focus: New block instead.
+    static func afterEditor(_ origin: ScheduleEditorOrigin, _ outcome: ScheduleEditorOutcome,
+                            isShown: (UUID) -> Bool) -> Self? {
+        let target: Self? = switch (origin, outcome) {
         case (.newBlockButton, _), (_, .deleted): .newBlock
         case let (_, .saved(id)): .block(id)
         case let (.block(id), .cancelled): .block(id)
         case (.slot, .cancelled): nil
         }
+        guard case let .block(id)? = target, !isShown(id) else { return target }
+        return .newBlock
     }
 }
 
