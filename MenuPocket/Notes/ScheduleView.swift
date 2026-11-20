@@ -122,7 +122,8 @@ struct ScheduleView: View {
 
     /// Closes the editor once, then puts focus back on what opened it: the
     /// New block button, the edited block, or the block a slot click created.
-    /// After a delete, focus goes to New block.
+    /// After a delete, or a save to a day outside the visible period, focus
+    /// goes to New block.
     /// A click outside a transient popover closes it and then reaches the grid.
     /// That click only closes the editor, as with the task actions popover:
     /// opening another popover while this one is still closing would leave it
@@ -145,7 +146,10 @@ struct ScheduleView: View {
         // The popover may report its own dismissal after Save already closed it.
         guard onCloseEditor(request.id) else { return }
         liveDraft = nil
-        guard let target = ScheduleFocusTarget.afterEditor(request.origin, outcome) else { return }
+        // A save has already reloaded the visible period, so `blocks` is what the grid draws.
+        let shown = Set(schedule?.blocks?.map(\.id) ?? [])
+        guard let target = ScheduleFocusTarget.afterEditor(request.origin, outcome,
+                                                            isShown: shown.contains) else { return }
         Task { @MainActor in
             // Let the popover close and the task window become key first.
             try? await Task.sleep(for: .milliseconds(60))
@@ -304,13 +308,18 @@ enum ScheduleFocusTarget: Hashable {
 
     /// The opener, or the saved block for a slot click; New block after a
     /// delete; nothing after cancelling a slot click (it had no focus).
-    static func afterEditor(_ origin: ScheduleEditorOrigin, _ outcome: ScheduleEditorOutcome) -> Self? {
-        switch (origin, outcome) {
+    /// A block that `isShown` says is not on the grid, such as one saved to a
+    /// day outside the visible period, has no view to focus: New block instead.
+    static func afterEditor(_ origin: ScheduleEditorOrigin, _ outcome: ScheduleEditorOutcome,
+                            isShown: (UUID) -> Bool) -> Self? {
+        let target: Self? = switch (origin, outcome) {
         case (.newBlockButton, _), (_, .deleted): .newBlock
         case let (_, .saved(id)): .block(id)
         case let (.block(id), .cancelled): .block(id)
         case (.slot, .cancelled): nil
         }
+        guard case let .block(id)? = target, !isShown(id) else { return target }
+        return .newBlock
     }
 }
 
