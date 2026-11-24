@@ -535,6 +535,7 @@ private struct ScheduleBlockView: View {
 
     /// Below this height only one line (the title) is drawn.
     private static let twoLineHeight: CGFloat = 28
+    private static let verticalPadding: CGFloat = 3
     private static let titleSize: CGFloat = 11
     /// Leading accent stripe and text inset, plus the trailing inset.
     private static let horizontalInsets: CGFloat = 9
@@ -542,11 +543,12 @@ private struct ScheduleBlockView: View {
     var body: some View {
         let accent = DaybookPalette.accent(colorScheme)
         let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        let usesCompactLayout = size.height < Self.twoLineHeight + 2 * Self.verticalPadding
         content
             .padding(.leading, 6)
             .padding(.trailing, Self.horizontalInsets - 6)
-            .padding(.vertical, size.height < Self.twoLineHeight ? 0 : 3)
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .padding(.vertical, usesCompactLayout ? 0 : Self.verticalPadding)
+            .frame(width: size.width, height: size.height, alignment: usesCompactLayout ? .leading : .topLeading)
             .background { shape.fill(accent.opacity(colorScheme == .dark ? 0.24 : 0.16)) }
             .overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: 2) }
             .clipShape(shape)
@@ -624,7 +626,6 @@ private struct ScheduleBlockView: View {
     private var content: some View {
         if size.height < Self.twoLineHeight {
             title(size: 10, lines: 1)
-                .frame(maxHeight: .infinity, alignment: .center)
         } else {
             VStack(alignment: .leading, spacing: 1) {
                 title(size: Self.titleSize, lines: titleLines)
@@ -636,7 +637,7 @@ private struct ScheduleBlockView: View {
     /// Lines left for the title above the time line, wrapping only whole words.
     private var titleLines: Int {
         ScheduleBlockText.titleLineLimit(block.title, textWidth: size.width - Self.horizontalInsets,
-                                         availableLines: max(1, Int((size.height - 6 - 13) / 13)),
+                                         availableLines: max(1, Int((size.height - 2 * Self.verticalPadding - 13) / 13)),
                                          characterWidth: Self.titleSize * 0.62)
     }
 
