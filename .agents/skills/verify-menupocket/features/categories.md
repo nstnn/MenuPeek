@@ -1,14 +1,14 @@
 # Categories
 
-Categories are shared by Today, Later, and every saved day. Manage categories opens the right-hand pane where a user creates, renames, and removes custom categories. General is built in and cannot be renamed or removed. Removing a category asks for confirmation, states how many tasks will move to General, and keeps every task. Tasks show in collapsible category groups whose `completed of total` counts include hidden rows.
+Categories are shared by Today, Later, and every saved day. Manage categories opens the right-hand pane where a user creates, renames, and removes custom categories. General is built in and cannot be renamed or removed. Removing a category asks for confirmation, states how many tasks will move to General, and keeps every task. Tasks show in collapsible category groups: Today headers count `completed of total`, including hidden rows, and Later headers count `N remaining`.
 
 ## Sub-features
 
-- `cat-create` adds a unique, nonblank, single-line name; duplicates (ignoring case) are rejected inline.
+- `cat-create` adds a unique, nonblank, single-line name; duplicates (ignoring case) are rejected inline, and `General` in any case is rejected as reserved.
 - `cat-rename` renames in place, and every group and picker shows the new name.
 - `cat-remove` confirms with a usage count, then moves those tasks to General.
 - `cat-picker` lists General and every saved category in the composer and edit Category popover (`id=categoryPopover`), with the current choice checked.
-- `cat-collapse` collapses or expands a group; the state survives relaunch.
+- `cat-collapse` collapses or expands a group; Today and Later keep separate states, and both survive relaunch.
 - `cat-move-to` moves a Today task to another category from its row menu (Move To).
 - `cat-manager-reorder` saves the shared custom-category order with a mouse drag/drop, including unused categories; General stays first.
 - `cat-compact-manager` keeps short catalogs at their content height, with row separators, a Built-in badge on General, persistent drag handles on custom rows, Done in the header, and the labeled creation field immediately below the list. Long catalogs scroll without pushing the creation controls out of the pane.
@@ -30,24 +30,24 @@ Preconditions:
 
 - **Open manager.** Run `$F ax <run> press id=manageCategories` and `$F ax <run> wait id=categoryList`. The right-hand pane, headed `Categories`, shows `id=generalCategory` with Built-in, rows `id^=categoryRow-`, a focused `id=newCategoryName`, a disabled `id=createCategory`, and `id=doneManagingCategories` in the header. Each custom row has Rename and `id=categoryActions-<UUID>` (`Actions for category: <name>`); Remove is only inside that popover. The Today/Later list is hidden from Accessibility while the pane is open: `find id=addTask` and `find id^=taskGroup-` return nothing (exit 2). The rail stays available. With a short catalog, check the screenshot: the list ends after its final row and the New category field follows it, leaving spare space on the canvas instead of inside a gray list.
 - **Create.** Run `$F ax <run> focus id=newCategoryName`, `$F ax <run> type "Health"`, and `$F ax <run> press id=createCategory`. `find "label=Rename Health"` matches, and the field is empty again. The snapshot's `categories` table has a `Health` row.
-- **Reject duplicate.** Type `work` and press Create. `value id=categoryNameError` reads `A category with this name already exists.`, and no row is added. Clear the field with `key cmd+a` before typing the next name.
+- **Reject duplicate.** Type `work` and press Create. `value id=categoryNameError` reads `A category with this name already exists.`, and no row is added. Type `general` instead: it reads `General is reserved for tasks without a category.` To clear the field before the next name, run `$F ax <run> activate`, `focus id=newCategoryName`, `key cmd+a`, `key cmd+x`, and check `value id=newCategoryName` is empty. Without `activate`, Command-A in this field was ignored on 2026-11-24 and the next name was appended (creating `generalwork`).
 - **Rename.** Run `$F ax <run> press "label=Rename Errands"`, `$F ax <run> wait id=renameCategoryName`, `$F ax <run> focus id=renameCategoryName`, `$F ax <run> key cmd+a`, `$F ax <run> type "Shopping"`, and `$F ax <run> press id=saveCategoryRename`. `wait "label=Rename Shopping"` succeeds. After `press id=doneManagingCategories`, `find "label~=Shopping\,"` matches the Today group header, for example `Shopping, 0 of 1 complete`.
 - **Remove.** Reopen the manager and run `$F ax <run> press "label=Actions for category: Work"`, wait for `id=categoryActionsPopover`, then press `label=Remove Work` (`id=removeCategory-<UUID>`). `id=categoryRemovalConfirmation` appears with text `4 tasks, across all saved days and Later, use this category…` (two Today tasks, yesterday's report, and the Later offsite task) and the buttons `id=cancelCategoryRemoval` and `id=confirmCategoryRemoval`. Cancel first and check focus returns to Work's actions trigger. Reopen and confirm. In `db.txt`, `Work` is gone and those four tasks show category `General` with unchanged rowids, text, completion, and day.
 - **Actions keyboard/cancel.** Tab to a category actions button and press Space or Return: its Daybook popover opens, without immediately opening removal confirmation. Escape closes only the popover. Reopen and choose Remove; the confirmation starts on Cancel. Rename still uses Return to save and Escape to cancel; other row actions remain disabled while renaming.
 - **Compact layout boundaries.** Check General-only, a short catalog, a long wrapped category name, and enough categories to scroll at normal and minimum supported sizes. The creation field, errors and Done stay reachable, no row action is clipped, and the final created/renamed row can be revealed. Check both Light and Dark using the app's own appearance setting; do not change the Mac's global appearance. Pair screenshots with AX trees and stored rows. These are required checks, not claims that a previous run passed.
-- **Collapse.** Run `$F ax <run> press id=taskGroup-general`. `value id=taskGroup-general` reads `Collapsed`, and its task rows are gone from `tree`, while `todayProgress` is unchanged. In `defaults.plist`, `local.menupocket.app.taskCategories.collapsedGroupIDs` contains `general`. Relaunch the run: the group is still collapsed.
+- **Collapse.** Run `$F ax <run> press id=taskGroup-general`. `value id=taskGroup-general` reads `Collapsed`, and its task rows are gone from `tree`, while `todayProgress` is unchanged. In `defaults.plist`, `local.menupocket.app.taskCategories.collapsedGroupIDs` contains `general` (Later uses `…taskCategories.later.collapsedGroupIDs`). Relaunch the run: the group is still collapsed.
 - **Move To.** Run `$F ax <run> press "label=Actions for task: Water the plants"`, then `$F ax <run> press id=taskAction-moveTo-<Errands category UUID>` or `press "role=AXButton,label=Move to Errands"` (the current category is `[disabled]` with the value `Current group`). The Errands header's count rises by one, for example `find "label~=Errands\, 0 of 2"`, and the snapshot shows the same rowid with category `Errands`.
 - **Proof.** Screenshot the pane with `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/categories-pane.png role=AXWindow` while it is open, plus before and after snapshots.
 
 ## Gotchas
 
-- While the pane is open, task commands including Command-N are disabled. Idle sidebar navigation returns to Today/Later or opens History/Settings. During rename or removal confirmation these destinations are disabled until Save/Cancel. `doneManagingCategories` also returns to the retained list.
+- While the pane is open, task commands including Command-N are disabled. Idle sidebar navigation returns to Today/Later or opens Calendar, History or Settings, closing the pane. The Today list's yesterday reminder and History's Review unfinished… are not on screen while the pane is open. During rename or removal confirmation these destinations are disabled until Save/Cancel. `doneManagingCategories` also returns to the retained list.
 - The popover's Move To items show the category name and are labeled `Move to <name>` for Accessibility. Open the right row's popover immediately before pressing.
 - A `Work` label can also match the Category popover's items, the Work group header, or a row popover's `Move to Work`. Use `id^=categoryOption-,label=Work` and close other popovers with `key escape` first.
 - Reordering categories by drag in the manager is pointer-only and cannot be driven here. Report it as Not tested, or give the user manual steps, and check `categories.creation_order` in `db.txt` for the stored order.
 - Removing a category changes saved data on every day. Use a fresh run when another recipe needs the seeded categories.
 
-## Category drag sources (TASK-006; immediate-drag revision)
+### Category drag sources (TASK-006; immediate-drag revision)
 
 Today/Later custom-group headers and only their outer padding (12 pt top/bottom, 16 pt sides) accept pointer drags after at least 4 pt movement, without a hold delay or source highlight. Today/Later have no category handle; the compact manager has a visible handle beside each custom name, with its source covering the handle/name area. The existing header Button still owns accessibility/keyboard disclosure. General has no source. Manage categories mounts the same source/target with its own idle-pane guards (TASK-008). Today/Later accept category drops through TASK-007; source start alone saves nothing.
 
@@ -61,7 +61,7 @@ On an isolated fixture, use actual pointer input with the window active:
 
 Take before/after SQLite and defaults snapshots; category ranks and task fields must be identical, and collapse defaults must match after explicitly restoring short-click checks. `mpax press` proves accessibility disclosure only; it cannot establish immediate pointer dragging or native drag. Hosted lifecycle tests are supporting evidence; unobserved physical gestures remain Not tested for TASK-010. Save the exact source/artifact identity and clean the fixture after every session.
 
-## Category drop routing (TASK-007)
+### Category drop routing (TASK-007)
 
 On Today/Later, press and immediately drag a custom header or its empty outer padding over the upper/lower half of another visible group. The accent insertion line appears at that group's top/bottom boundary, outside task rows. The gap after General offers before the first visible custom UUID; the upper half of General rejects drops. Gaps after custom groups offer after that UUID. Hidden categories remain in the full saved catalog with UUID anchors; they do not appear as empty targets. General has no category source. Task handles and targets remain separate.
 
@@ -75,9 +75,9 @@ Using an identified isolated fixture, take before/after snapshots for these phys
 
 `mpax` cannot generate category drags. Callback tests prove routing/authorization/storage dispatch, not native negotiation or physical scrolling. Record each physical case as observed Pass/Fail or Not tested; broader final acceptance remains TASK-010. Clean fixtures and Debug hosts even when access fails.
 
-## Manage categories mouse reorder (TASK-008)
+### Manage categories mouse reorder (TASK-008)
 
-The custom row's label and its vertical background padding accept the same immediate drag at 4 pt movement, without a timer or source highlight. Rename/Remove buttons and name fields retain ordinary input. General has no source; its lower half offers before the first custom UUID. Every custom row, including unused categories, offers before/after placement. Targets use the manager's scroll view for edge scrolling; a committed changed move reveals its row without changing field focus or drafts. No keyboard reorder actions are added.
+The custom row's handle and name area (not its outer padding) accepts the same immediate drag at 4 pt movement, without a timer or source highlight. Rename/Remove buttons and name fields retain ordinary input. General has no source; its lower half offers before the first custom UUID. Every custom row, including unused categories, offers before/after placement. Targets use the manager's scroll view for edge scrolling; a committed changed move reveals its row without changing field focus or drafts. No keyboard reorder actions are added.
 
 On an isolated basic fixture:
 
@@ -89,7 +89,7 @@ On an isolated basic fixture:
 
 Accessibility button/field checks establish ordinary controls only. Physical holds, target negotiation, scrolling/reveal, and preservation of the sheet draft through an actual native drop need observed pointer evidence; mark them Not tested when unavailable. Final physical acceptance remains TASK-010.
 
-## Integrated automated preservation (TASK-009)
+### Integrated automated preservation (TASK-009)
 
 `TaskHistoryIntegrationTests.testCommittedCategoryOrderReloadsRetainedHistoryAndPreservesTasksAcrossFailureRetryAndReopen` uses real SQLite and shared state with an isolated defaults suite. It seeds sparse category/task ranks, unused and long-name categories, General, completed Today/Later tasks and an older day. It checks stale/equivalent requests, a rank-write trigger failure and a reader-lock COMMIT failure before a successful retry; retained History, Today/Later groups and category options then consume the saved order. Explicit create/rename/remove operations are accounted for separately before reopening the changed database and defaults through fresh state. Raw rowids and every task field/rank, category non-rank fields, schema and preferences are compared.
 
