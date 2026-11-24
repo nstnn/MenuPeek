@@ -29,7 +29,7 @@ Preconditions:
 - **Theme.** Run `$F ax <run> press "role=AXRadioButton,label=Dark"`. Then `$F ax <run> screenshot build/verify-menupocket/evidence/<run>/settings-dark.png "role=AXWindow,label=MenuPocket Tasks"` and the task-window screenshot are dark, and the snapshot's `preferences.json` has `"theme":"dark"`. Relaunch the run: Dark is still selected.
 - **Quick Add on.** Run `$F ax <run> press id=quickAddToggle` (Accessibility label `Quick Add shortcut`; the visible text is `Shortcut`). `value id=quickAddToggle` is `1`, `runs/<run>/fixture.log` shows `hotkey registered (fake)`, and `preferences.json` has `"quickAddEnabled":true`.
 - **Panel saves.** Start a Today draft first (`press id=addTask`, `type "Half typed"`). Then run `$F quickadd <run>`, `$F ax <run> wait id=quickAddField`, `$F ax <run> focus id=quickAddField`, `$F ax <run> type "Quick added task"`, `$F ax <run> key return`, and `$F ax <run> gone id=quickAddField`. The status item reads `1/5`, `db.txt` has `Quick added task` for today in `General`, and `value id=newTaskDraft` still shows `Half typed`.
-- **Panel discards.** Run `$F quickadd <run>`, `$F ax <run> type "Throw away"`, `$F ax <run> key escape`, and `$F ax <run> gone id=quickAddField`. The count and rows are unchanged.
+- **Panel discards.** Run `$F quickadd <run>`, `$F ax <run> wait id=quickAddField`, `$F ax <run> type "Throw away"`, `$F ax <run> key escape`, and `$F ax <run> gone id=quickAddField`. The count and rows are unchanged.
 - **Quick Add off.** Press `id=quickAddToggle` again, then run `$F quickadd <run>`. The fixture log says `hotkey press ignored: Quick Add is off`, and no panel appears.
 - **Proof.** Snapshots before and after each toggle, `actions.log`, and the Settings screenshots.
 

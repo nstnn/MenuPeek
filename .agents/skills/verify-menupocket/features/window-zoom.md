@@ -26,12 +26,13 @@ Preconditions:
 - **Interaction at zoom.** At 150 %, follow the add, edit and row `…` steps from [Today](today-tasks.md): `key cmd+n`, `type`, `key return` saves the row (check `db.txt`); `press "label=Actions for task: Buy coffee beans"` opens the popover next to its `…` button (screenshot); `key escape` closes it. Pointer drags are Not tested through AX.
 - **Indicator.** Right after `key cmd+equal`, `$F ax <run> find id=zoomIndicator` reports label `Zoom 110%` (screenshot shows the pill at the top center); after `key cmd+0` it reports `Zoom 100%` and the screenshot shows "Actual Size". About 2 s later `find id=zoomIndicator` finds nothing.
 - **Zoom out and reset.** `key cmd+0`: `frame id=todayTab` matches the baseline and the key is gone from `defaults.plist`. `key cmd+minus` twice reaches 80 %, the frame is about 0.8 × baseline, and `menu-path View "Zoom Out"` exits 4.
-- **Shrink back.** At 100 %, resize the window to its 800 × 560 pt content minimum, then `key cmd+equal`: `windows` shows 880 × 616 pt of content; `key cmd+0` returns it to 800 × 560 with the same top edge. Repeat, but resize by hand between the two keys: the window keeps the hand-picked size.
+- **Shrink back (manual).** `mpax` cannot resize a window, so ask the user, or use an available native UI adapter, for the resizes here; otherwise report this step as Not tested. At 100 %, resize the window to its 800 × 560 pt content minimum, then `key cmd+equal`: `windows` shows 880 × 616 pt of content; `key cmd+0` returns it to 800 × 560 with the same top edge (unless the grown frame had to be pulled back onto the screen). Repeat, but resize by hand between the two keys: the window keeps the hand-picked size.
 - **Persistence.** At a non-100 % level, `$F stop <run>`, snapshot, relaunch the same run without reseeding: `frame id=todayTab` matches the level before stopping.
 - **Other window key.** Turn Quick Add on in Settings, open the panel (`$F quickadd <run>`), and check that `menu-path View "Zoom In"` exits 4 and the task window's frames do not change.
 
 ## Gotchas
 
 - `windows` reports CoreGraphics bounds including the title bar; compare content sizes, not raw bounds.
-- The window's minimum at 150 % is 1200 × 840 pt of content. On a screen whose visible area is smaller, 150 % (or 125 %) is skipped by design; record the screen size with the result.
+- The window's minimum at 150 % is 1200 × 840 pt of content. On a screen whose visible area (without the menu bar and Dock) cannot hold that content plus the title bar, 150 % (or 125 %) is skipped by design; record the screen size with the result.
+- `menu-path` presses an enabled item, so a `menu-path View "Zoom In"` or `"Actual Size"` probe changes the zoom when the item is not disabled. Only use it as a probe where the recipe expects exit 4 (`menu item … is disabled`).
 - Use `key cmd+equal` for Command-plus on US layouts; `cmd+shift+equal` exercises the `+` key equivalent itself.
