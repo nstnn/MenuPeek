@@ -4582,6 +4582,65 @@ final class DailyNotesStateTests: XCTestCase {
         XCTAssertEqual(state.laterRecoveredEdit?.categoryName, "Work")
         XCTAssertNotNil(state.laterRefreshNotice)
     }
+
+    func testTodayRecoveryPersistsUntilDismissedAndDismissChangesNothingElse() throws {
+        let old = Note(id: UUID(), text: "Old", dayKey: "2026-09-27", createdAt: Date(), completedAt: nil)
+        let store = FakeNoteRepository(notes: [old])
+        var current = instant("2026-09-27T23:59:00-04:00")
+        let state = makeState(store: store, now: { current })
+        state.startup()
+        state.beginEditing(id: old.id)
+        state.editDraft = "Unsaved"
+        current = instant("2026-09-28T00:01:00-04:00")
+        state.refresh()
+        XCTAssertEqual(state.recoveredEdit?.text, "Unsaved")
+
+        // A later successful edit and another day leave the recovery in place.
+        state.draft = "New"
+        XCTAssertTrue(state.addDraft())
+        let added = try XCTUnwrap(store.saved.last)
+        state.beginEditing(id: added.id)
+        state.editDraft = "New edited"
+        XCTAssertTrue(state.saveEdit())
+        current = instant("2026-09-29T08:00:00-04:00")
+        state.refresh()
+        XCTAssertEqual(state.recoveredEdit?.text, "Unsaved")
+
+        state.draft = "Draft kept"
+        let saved = store.saved
+        state.dismissRecovery(in: .today)
+        XCTAssertNil(state.recoveredEdit)
+        XCTAssertNil(state.refreshNotice)
+        XCTAssertEqual(state.draft, "Draft kept")
+        XCTAssertEqual(store.saved, saved)
+    }
+
+    func testDismissingOneListsRecoveryKeepsTheOther() throws {
+        let work = try TaskCategory(name: "Work", creationOrder: 0)
+        let task = Note(id: UUID(), text: "Today", dayKey: "2026-09-27", createdAt: Date(),
+                        completedAt: nil, categoryID: work.id)
+        let later = laterTask("Later task", createdAt: 2, categoryID: work.id)
+        let store = FakeNoteRepository(notes: [task], categories: [work], laterTasks: [later])
+        let state = makeState(store: store, now: { self.instant("2026-09-27T12:00:00-04:00") })
+        state.startup()
+        state.beginEditing(id: task.id)
+        state.editDraft = "Today text"
+        state.beginEditingLater(id: later.id)
+        state.laterEditDraft = "Later text"
+        XCTAssertTrue(state.removeCategory(id: work.id))
+        XCTAssertEqual(state.recoveredEdit?.text, "Today text")
+        XCTAssertEqual(state.laterRecoveredEdit?.text, "Later text")
+
+        state.dismissRecovery(in: .later)
+        XCTAssertNil(state.laterRecoveredEdit)
+        XCTAssertNil(state.laterRefreshNotice)
+        XCTAssertEqual(state.recoveredEdit?.text, "Today text")
+        XCTAssertNotNil(state.refreshNotice)
+
+        state.dismissRecovery(in: .today)
+        XCTAssertNil(state.recoveredEdit)
+        XCTAssertNil(state.refreshNotice)
+    }
 }
 
 private enum FakeFailure: Error { case failed }

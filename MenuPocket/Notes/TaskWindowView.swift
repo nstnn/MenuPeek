@@ -60,6 +60,7 @@ struct TaskWindowView: View {
 
     private enum FocusControl: Hashable {
         case add, manageCategories, retry, save, draft, category, cancelDelete, confirmDelete, calendar, history, yesterday
+        case dismissRecovery
         case edit(UUID)
         case group(TaskGroupID)
         case completion(UUID)
@@ -746,32 +747,56 @@ struct TaskWindowView: View {
         let recovered = isLater ? state.laterRecoveredEdit : state.recoveredEdit
         let visibleNotice = notice == "Moved task to Today." ? nil : notice
         if visibleNotice != nil || recovered != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                if let visibleNotice {
-                    Text(visibleNotice)
-                        .font(.callout.monospaced())
-                }
-                if let recovered {
-                    Text("Unsaved edit")
-                        .font(.callout.weight(.semibold).monospaced())
-                    Text(recovered.text)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    // The name captured at cancellation, so a removed category still shows.
-                    if let name = recovered.categoryID == nil ? TaskCategoryName.general : recovered.categoryName {
-                        Text("Category: \(name)")
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let visibleNotice {
+                        Text(visibleNotice)
                             .font(.callout.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let recovered {
+                        Text("Unsaved edit")
+                            .font(.callout.weight(.semibold).monospaced())
+                        Text(recovered.text)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // The name captured at cancellation, so a removed category still shows.
+                        if let name = recovered.categoryID == nil ? TaskCategoryName.general : recovered.categoryName {
+                            Text("Category: \(name)")
+                                .font(.callout.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Dismiss", action: dismissRecovery)
+                    .buttonStyle(.daybook)
+                    .focusable()
+                    .keyboardFocusAppearance()
+                    .focused($focusedControl, equals: .dismissRecovery)
+                    .onKeyPress(keys: [.space, .return]) { _ in
+                        dismissRecovery()
+                        return .handled
+                    }
+                    .overlay { focusOutline(focusedControl == .dismissRecovery) }
+                    .accessibilityLabel(recovered == nil ? "Dismiss notice" : "Dismiss unsaved edit")
+                    .accessibilityIdentifier(identifier("dismissTodayRecoveryNotice", "dismissLaterRecoveryNotice"))
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier(identifier("todayRecoveryNotice", "laterRecoveryNotice"))
         }
+    }
+
+    /// The button leaves with the card, so focus moves to the list's next control.
+    private func dismissRecovery() {
+        let wasFocused = focusedControl == .dismissRecovery
+        state.dismissRecovery(in: destination)
+        if wasFocused { focusedControl = isAvailable ? .add : .retry }
     }
 
     private var hasValidDrag: Bool {
