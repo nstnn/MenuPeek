@@ -117,6 +117,7 @@ struct SettingsView: View {
                                 shortcutGroup("History", shortcuts: SettingsShortcut.history)
                                 shortcutGroup("Category manager", shortcuts: SettingsShortcut.categories)
                                 shortcutGroup("Text editing", shortcuts: SettingsShortcut.textEditing)
+                                shortcutGroup("Window zoom", shortcuts: SettingsShortcut.zoom)
                                 shortcutGroup("Other app commands", shortcuts: SettingsShortcut.otherCommands)
                             }
                             .padding(.top, 12)
@@ -316,6 +317,11 @@ private struct SettingsShortcut {
         .init("Select all", ["⌘", "A"], "Command-A"),
         .init("Undo typing", ["⌘", "Z"], "Command-Z", note: "Undo and redo apply to text in the focused field."),
         .init("Redo typing", ["⇧", "⌘", "Z"], "Shift-Command-Z")
+    ]
+    static let zoom: [Self] = [
+        .init("Zoom in", ["⌘", "+"], "Command-plus", note: "Command-equals works too. Also in the View menu."),
+        .init("Zoom out", ["⌘", "−"], "Command-minus"),
+        .init("Actual size", ["⌘", "0"], "Command-zero")
     ]
     static let otherCommands: [Self] = [
         .init("Hide MenuPocket", ["⌘", "H"], "Command-H"),
