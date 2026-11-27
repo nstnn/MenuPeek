@@ -7,7 +7,7 @@ Settings is the right-hand pane in the reusable task window with Open at Login, 
 - `settings-open` opens or reuses the Settings pane from the Daybook Settings control, Command-comma, the app menu, or the glance.
 - `settings-theme` applies Light or Dark app-wide at once and keeps the choice across relaunch.
 - `settings-login` shows the Open at Login status (faked as disabled in the fixture).
-- `settings-shortcuts` shows the shortcut reference and the More keyboard controls disclosure.
+- `settings-shortcuts` shows the shortcut reference and the More keyboard controls disclosure, whose Window zoom group lists Zoom in (⌘+), Zoom out (⌘−), and Actual size (⌘0).
 - `quickadd-toggle` turns Quick Add on or off and saves `quickAddEnabled`.
 - `quickadd-panel` saves the panel text to Today/General, updates the count, and closes the panel.
 - `quickadd-discard` closes the panel with Escape without saving.

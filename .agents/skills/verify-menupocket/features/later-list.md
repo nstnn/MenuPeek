@@ -9,6 +9,7 @@ The Later tab holds undated tasks with only text and an optional category. Its m
 - `later-complete-edit-delete` works as in Today, inside Later.
 - `later-move-today` moves an unfinished task to the end of Today, keeps its text and category, and shows `Moved task to Today.`
 - `later-count-isolation` keeps the menu bar count unchanged for Later-only writes.
+- `later-recovery` shows `id=laterRecoveryNotice` when a Later edit loses its task or category, with its own `id=dismissLaterRecoveryNotice` button that clears only Later's notice.
 
 ## How to get to it (user POV)
 
@@ -36,4 +37,5 @@ Preconditions:
 - Later rows have no drag handle and no Move Up or Move Down. Reordering Later is out of scope, so don't report it as a failure.
 - The tab switch is refused while an edit, a deletion confirmation, a category rename or removal confirmation, or a Calendar block editor is open. `todayTab`/`laterTab` presses then do nothing. An idle Categories pane does not block it: the press closes the pane and switches.
 - Each tab keeps its own draft (in memory only, never in defaults) and its own remembered category. Later's keys in `defaults.plist` are `local.menupocket.app.taskCategories.later.lastUsedCategoryID` (written only after a successful add with a custom category; absent for General) and `…later.collapsedGroupIDs`. Check the Later keys, not the Today ones.
+- Later's recovery notice needs a lost edit target: the UI blocks category removal and day changes do not touch Later edits, so it appears only when a refresh no longer finds the edited row (for example after removing that `later_tasks` row from the run's own database while the fixture is stopped). Hosted tests cover its Dismiss behavior; record the native check as Not tested when it was not set up.
 - After Move to Today, the moved row belongs to Today's group for its category. Look for it with `press id=todayTab`, not in Later.

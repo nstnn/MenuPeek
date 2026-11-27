@@ -225,6 +225,44 @@ final class ScheduleStateTests: XCTestCase {
         XCTAssertEqual(repository.reads.last, try range("2026-11-02", "2026-11-09"))
     }
 
+    func testDayViewSteppingMovesTheSelectionToTheShownDay() throws {
+        let state = try makeState()
+        state.setVisible(true)
+        state.setMode(.month)
+        XCTAssertTrue(state.showDay(try day("2026-11-03")))
+        XCTAssertTrue(state.showNext())
+        XCTAssertEqual(state.selectedDay, try day("2026-11-04"))
+
+        // Week keeps the day the user was viewing, and Day returns to it.
+        XCTAssertTrue(state.setMode(.week))
+        XCTAssertEqual(state.selectedDay, try day("2026-11-04"))
+        XCTAssertTrue(state.setMode(.day))
+        XCTAssertEqual(state.period.anchor, try day("2026-11-04"))
+
+        XCTAssertTrue(state.showPrevious())
+        XCTAssertTrue(state.showPrevious())
+        XCTAssertEqual(state.selectedDay, try day("2026-11-02"))
+        XCTAssertTrue(state.setMode(.month))
+        XCTAssertEqual(state.selectedDay, try day("2026-11-02"))
+
+        XCTAssertTrue(state.setMode(.day))
+        XCTAssertTrue(state.showToday())
+        XCTAssertEqual(state.selectedDay, try day("2026-11-18"))
+    }
+
+    func testWeekAndMonthSteppingLeaveTheSelectionAlone() throws {
+        let state = try makeState()
+        state.setVisible(true)
+        state.setMode(.month)
+        let chosen = try day("2026-11-03")
+        XCTAssertTrue(state.showDay(chosen))
+        XCTAssertTrue(state.setMode(.week))
+        XCTAssertTrue(state.showNext())
+        XCTAssertEqual(state.selectedDay, chosen)
+        XCTAssertTrue(state.setMode(.month))
+        XCTAssertEqual(state.selectedDay, chosen)
+    }
+
     func testMonthLoadsWithOneRangeReadAndGroupsItsBlocksByDay() throws {
         try seed("Review", "2026-11-18", 600, 660)
         try seed("Standup", "2026-11-18", 540, 555)

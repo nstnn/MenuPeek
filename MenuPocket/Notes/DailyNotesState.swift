@@ -525,6 +525,20 @@ final class DailyNotesState {
         if taskIssue == .add { taskIssue = nil }
     }
 
+    /// Clears one list's refresh notice and unsaved-edit recovery. Recovery is
+    /// session-only, so this discards the only copy of that text; drafts, edits,
+    /// and saved tasks are unchanged.
+    func dismissRecovery(in destination: TaskListDestination) {
+        switch destination {
+        case .today:
+            recoveredEdit = nil
+            refreshNotice = nil
+        case .later:
+            laterRecoveredEdit = nil
+            laterRefreshNotice = nil
+        }
+    }
+
     func startNewLaterDraft() {
         let lastUsed = categoryPreferences.laterLastUsedCategoryID
         laterDraftCategoryID = isAvailable(lastUsed) ? lastUsed : nil
