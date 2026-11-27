@@ -51,7 +51,8 @@ final class ScheduleState {
     private(set) var content: ScheduleContent = .notLoaded
     /// The Today marker. Changes only through `refreshToday()`; never reloads blocks.
     private(set) var today: GregorianDay
-    /// The day the user last chose; kept across mode switches when visible.
+    /// The day the user last chose, or the day Day view shows; kept across mode
+    /// switches when visible.
     private(set) var selectedDay: GregorianDay?
 
     @ObservationIgnored private let noteDay: NoteDay
@@ -162,6 +163,9 @@ final class ScheduleState {
 
     private func show(_ makePeriod: () throws -> SchedulePeriod) -> Bool {
         guard let next = try? makePeriod() else { return false }
+        // Day view shows exactly one day, so that day is the selection. Stepping
+        // with Previous/Next/Today then carries it into Week and Month.
+        if next.mode == .day { selectedDay = next.anchor }
         guard next != period else { return true }
         period = next
         content = .notLoaded
